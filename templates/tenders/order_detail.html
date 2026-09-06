@@ -1,0 +1,110 @@
+{% extends 'base.html' %}
+{% block title %}{{ order.order_name }} &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container" style="max-width:900px;">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">{{ order.order_name }}</h1>
+      <p class="page-subtitle">Order #{{ order.order_id }} &middot; updated {{ order.updated_at|date:'Y-m-d H:i' }}</p>
+    </div>
+    <a class="btn btn-secondary" href="{% url 'tenders:order_list' %}">&larr; Back to orders</a>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; flex-wrap:wrap; gap:20px 40px;">
+      <div>
+        <div style="color:#64748b; font-size:13px;">State</div>
+        <div style="margin-top:4px;">
+          {% if order.state == 'sale' or order.state == 'confirmed' or order.state == 'done' %}
+            <span class="badge badge-success">{{ order.state }}</span>
+          {% elif order.state == 'cancel' or order.state == 'canceled' %}
+            <span class="badge badge-danger">{{ order.state }}</span>
+          {% elif order.state == 'sent' %}
+            <span class="badge badge-warning">{{ order.state }}</span>
+          {% else %}
+            <span class="badge badge-info">{{ order.state }}</span>
+          {% endif %}
+        </div>
+      </div>
+      <div>
+        <div style="color:#64748b; font-size:13px;">Customer</div>
+        <strong>{{ order.customer|default:'-' }}</strong>
+      </div>
+      <div>
+        <div style="color:#64748b; font-size:13px;">Company</div>
+        <strong>{{ order.company_name|default:'-' }}</strong><br>
+        <span style="color:#64748b; font-size:13px;">ID: {{ order.company_id|default:'-' }}</span>
+      </div>
+      <div>
+        <div style="color:#64748b; font-size:13px;">Order date</div>
+        <strong>{{ order.date_order|date:'Y-m-d H:i'|default:'-' }}</strong>
+      </div>
+      <div>
+        <div style="color:#64748b; font-size:13px;">Total</div>
+        <strong>{{ order.amount_total|floatformat:2 }} {{ order.currency|default:'' }}</strong>
+      </div>
+    </div>
+
+    <hr style="border:none; border-top:1px solid #e2e8f0; margin:20px 0;">
+
+    <div style="display:flex; flex-wrap:wrap; gap:20px 40px;">
+      <div>
+        <div style="color:#64748b; font-size:13px;">Cargo reference</div>
+        <strong>{{ order.cargo_reference|default:'-' }}</strong>
+      </div>
+      <div>
+        <div style="color:#64748b; font-size:13px;">Cargo ID</div>
+        <strong>{{ order.cargo_id|default:'-' }}</strong>
+      </div>
+      <div>
+        <div style="color:#64748b; font-size:13px;">Linked tender</div>
+        {% if order.tender %}
+          <strong>{{ order.tender.cargo_reference }}</strong><br>
+          <span style="color:#64748b; font-size:13px;">
+            {{ order.tender.route_loading }} &rarr; {{ order.tender.route_delivery }} &middot; {{ order.tender.cargo_date }}
+          </span>
+        {% else %}
+          <span style="color:#94a3b8;">Not linked</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Order lines</div>
+    <div class="table-wrap" style="box-shadow:none;">
+      <table>
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th style="text-align:right;">Qty</th>
+            <th style="text-align:right;">Unit price</th>
+            <th style="text-align:right;">Commission</th>
+            <th style="text-align:right;">Subtotal</th>
+            <th style="text-align:right;">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for line in order.lines.all %}
+          <tr>
+            <td>{{ line.product_name }}<br><span style="color:#64748b; font-size:13px;">Line #{{ line.line_id }} &middot; Product #{{ line.product_id|default:'-' }}</span></td>
+            <td style="text-align:right;">{{ line.quantity|floatformat:2 }}</td>
+            <td style="text-align:right;">{{ line.price_unit|floatformat:2 }}</td>
+            <td style="text-align:right;">{{ line.commission|floatformat:2 }}</td>
+            <td style="text-align:right;">{{ line.price_subtotal|floatformat:2 }}</td>
+            <td style="text-align:right;"><strong>{{ line.price_total|floatformat:2 }}</strong></td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6" style="color:#64748b; text-align:center;">No order lines.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Raw webhook payload</div>
+    <pre style="background:#0f172a; color:#e2e8f0; padding:14px; border-radius:8px; font-size:13px; overflow-x:auto;">{{ order.raw_payload|pprint|escape }}</pre>
+  </div>
+</div>
+{% endblock %}

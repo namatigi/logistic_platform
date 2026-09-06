@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% block title %}Companies &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Companies</h1>
+      <p class="page-subtitle">Register and manage your companies</p>
+    </div>
+    <a class="btn btn-primary" href="{% url 'companies:create' %}">+ Register company</a>
+  </div>
+
+  {% if companies %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Company</th>
+          <th>Reg. Number</th>
+          <th>Contact</th>
+          <th>Phone</th>
+          <th>City / Country</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for company in companies %}
+        <tr>
+          <td><strong>{{ company.name }}</strong><br><span style="color:#64748b; font-size:13px;">{{ company.email }}</span></td>
+          <td>{{ company.registration_number|default:'-' }}</td>
+          <td>{{ company.contact_person|default:'-' }}</td>
+          <td>{{ company.phone|default:'-' }}</td>
+          <td>{{ company.city|default:'-' }} / {{ company.country|default:'-' }}</td>
+          <td style="text-align:right; white-space:nowrap;">
+            <a class="btn btn-secondary btn-sm" href="{% url 'companies:update' company.pk %}">Edit</a>
+            <a class="btn btn-danger btn-sm" href="{% url 'companies:delete' company.pk %}">Delete</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card">
+    <div class="empty">
+      <div class="empty-icon">&#8982;</div>
+      <p>No companies registered yet. Add your first company to get started.</p>
+      <a class="btn btn-primary" href="{% url 'companies:create' %}">+ Register company</a>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

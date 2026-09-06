@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block title %}Delete Company &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container" style="max-width:560px;">
+  <div class="card" style="text-align:center;">
+    <h1 class="card-title">Delete company</h1>
+    <p>Are you sure you want to delete <strong>{{ object.name }}</strong>? This action cannot be undone.</p>
+    <form method="post" style="margin-top:20px; display:flex; gap:12px; justify-content:center;">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-danger">Delete</button>
+      <a class="btn btn-secondary" href="{% url 'companies:list' %}">Cancel</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

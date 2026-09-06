@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+{% block title %}Sign Up &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="auth-wrap">
+  <div class="auth-card">
+    <a href="{% url 'users:signup' %}" class="auth-brand" style="text-decoration:none; color:inherit;">
+      <span class="brand-mark" aria-hidden="true">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 18H3c-.6 0-1-.4-1-1V7c0-.6.4-1 1-1h10c.6 0 1 .4 1 1v11"/>
+          <path d="M14 9h4l3 3v5c0 .6-.4 1-1 1h-1"/>
+          <circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>
+        </svg>
+      </span>
+      <span>HYPAX<small>Cargo Logistic &amp; Transportation</small></span>
+    </a>
+    <h1 class="auth-heading">Create your account</h1>
+    <p class="auth-sub">Register with your email address</p>
+
+    {% for error in form.email.errors %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endfor %}
+    {% for error in form.non_field_errors %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endfor %}
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+      <div class="form-row">
+        <label for="{{ form.email.id_for_label }}">Email address</label>
+        {{ form.email }}
+      </div>
+      <div class="form-row">
+        <label for="{{ form.password1.id_for_label }}">Password</label>
+        {{ form.password1 }}
+      </div>
+      <div class="form-row">
+        <label for="{{ form.password2.id_for_label }}">Confirm password</label>
+        {{ form.password2 }}
+        {% if form.password2.errors %}
+        <div class="field-error"><ul>{% for e in form.password2.errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
+        {% endif %}
+      </div>
+      <button type="submit" class="btn btn-primary btn-block">Sign up</button>
+    </form>
+
+    <p class="auth-footer">
+      Already have an account? <a href="{% url 'users:login' %}">Sign in</a>
+    </p>
+  </div>
+</div>
+{% endblock %}

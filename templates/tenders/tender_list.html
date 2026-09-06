@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+{% block title %}Tenders &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Tenders</h1>
+      <p class="page-subtitle">Tenders submitted through the HYPAX API</p>
+    </div>
+    <a class="btn btn-primary" href="{% url 'tenders:create' %}">+ New tender</a>
+  </div>
+
+  {% if tenders %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Customer</th>
+          <th>Route</th>
+          <th>Cargo</th>
+          <th>Cargo ref</th>
+          <th>Weight</th>
+          <th>Trucks</th>
+          <th>Distance</th>
+          <th>Cargo date</th>
+          <th>Status</th>
+          <th>HTTP</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for tender in tenders %}
+        <tr>
+          <td><strong>{{ tender.customer }}</strong></td>
+          <td>{{ tender.route_loading }} &rarr; {{ tender.route_delivery }}</td>
+          <td>{{ tender.get_cargo_type_display }}<br><span style="color:#64748b; font-size:13px;">{{ tender.get_truck_type_display }}</span></td>
+          <td>{{ tender.cargo_reference|default:'-' }}</td>
+          <td>{{ tender.weight }} t</td>
+          <td>{{ tender.number_of_trucks }}</td>
+          <td>{{ tender.distance_km }} km</td>
+          <td>{{ tender.cargo_date }}</td>
+          <td><span class="badge badge-{{ tender.status }}">{{ tender.get_status_display }}</span></td>
+          <td>{{ tender.response_code|default:'-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if is_paginated %}
+  <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px; align-items:center;">
+    <span style="color:#64748b; font-size:13px;">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_previous %}
+    <a class="btn btn-secondary btn-sm" href="?page={{ page_obj.previous_page_number }}">&larr; Previous</a>
+    {% endif %}
+    {% if page_obj.has_next %}
+    <a class="btn btn-secondary btn-sm" href="?page={{ page_obj.next_page_number }}">Next &rarr;</a>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% else %}
+  <div class="card">
+    <div class="empty">
+      <div class="empty-icon">&#128666;</div>
+      <p>No tenders submitted yet.</p>
+      <a class="btn btn-primary" href="{% url 'tenders:create' %}">New tender</a>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,100 @@
+{% extends 'base.html' %}
+{% block title %}API Settings &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container" style="max-width:640px;">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">API Settings</h1>
+      <p class="page-subtitle">Configure the endpoint where <code>POST /api/v1/tenders</code> is sent</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Tender endpoint (outgoing)</div>
+
+    <div class="form-row" style="margin-bottom:18px;">
+      {{ form.base_url.label_tag }}
+      {{ form.base_url }}
+      <span class="form-help">Root URL, e.g. <code>https://api.example.com</code>. Tenders are posted to <code>/api/v1/tenders</code>.</span>
+      <div class="field-error">{{ form.base_url.errors }}</div>
+    </div>
+
+    <div class="form-row" style="margin-bottom:18px;">
+      {{ form.auth_type.label_tag }}
+      {{ form.auth_type }}
+      <span class="form-help">How the endpoint authenticates requests.</span>
+      <div class="field-error">{{ form.auth_type.errors }}</div>
+    </div>
+
+    <div class="form-row" style="margin-bottom:18px;">
+      {{ form.api_token.label_tag }}
+      {{ form.api_token }}
+      <span class="form-help">Token used for <strong>Bearer token</strong> auth. Ignored for other types.</span>
+      <div class="field-error">{{ form.api_token.errors }}</div>
+    </div>
+
+    <div class="form-row" style="margin-bottom:18px;">
+      {{ form.username.label_tag }}
+      {{ form.username }}
+      <span class="form-help">Required only for <strong>Basic auth</strong>.</span>
+      <div class="field-error">{{ form.username.errors }}</div>
+    </div>
+
+    <div class="form-row" style="margin-bottom:18px;">
+      {{ form.password.label_tag }}
+      {{ form.password }}
+      <span class="form-help">Required only for <strong>Basic auth</strong>.</span>
+      <div class="field-error">{{ form.password.errors }}</div>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">Save settings</button>
+    </div>
+  </div>
+
+  <div class="card" style="border-color:#bfdbfe; background:#fbfdff;">
+    <div class="card-title">Webhook (incoming orders)</div>
+    <p style="color:#475569; font-size:14px; margin-bottom:14px;">
+      Share this URL with the external system. It will <code>POST</code> closing order data here, and they appear on the
+      <a href="{% url 'tenders:order_list' %}">Orders</a> page. Right-click &rarr; Copy the URL.
+    </p>
+
+    <div class="form-row" style="margin-bottom:10px;">
+      <label>Webhook URL</label>
+      <div style="display:flex; gap:8px; align-items:stretch;">
+        <input id="webhook-url" type="text" readonly value="{{ webhook_url }}" style="flex:1; background:#f8fafc; color:#334155;">
+        <button type="button" class="btn btn-secondary" onclick="copyWebhookUrl()">Copy</button>
+      </div>
+    </div>
+
+    <p class="form-help" style="margin-top:8px;">
+      Method: <code>POST</code> &middot; Content-Type: <code>application/json</code> &middot; no auth required.
+      Supported fields: <code>order_id</code>, <code>order_name</code>, <code>state</code>,
+      <code>company_id</code>, <code>company_name</code>, <code>date_order</code>, <code>amount_total</code>,
+      <code>customer</code>, <code>currency</code>, <code>cargo_reference</code>, <code>cargo_id</code>,
+      <code>order_lines[]</code>.
+    </p>
+    <p class="form-help">
+      If <code>cargo_reference</code> matches a tender reference returned by the API (e.g. <strong>CAR00014</strong>),
+      the order is automatically linked to that tender.
+    </p>
+  </div>
+</div>
+
+<script>
+  function copyWebhookUrl() {
+    var input = document.getElementById('webhook-url');
+    input.select();
+    input.setSelectionRange(0, 99999);
+    try {
+      navigator.clipboard.writeText(input.value);
+    } catch (e) {
+      document.execCommand('copy');
+    }
+    var btn = event.target;
+    var old = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(function () { btn.textContent = old; }, 1500);
+  }
+</script>
+{% endblock %}

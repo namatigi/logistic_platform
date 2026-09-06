@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block title %}Sign In &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="auth-wrap">
+  <div class="auth-card">
+    <a href="{% url 'users:login' %}" class="auth-brand" style="text-decoration:none; color:inherit;">
+      <span class="brand-mark" aria-hidden="true">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 18H3c-.6 0-1-.4-1-1V7c0-.6.4-1 1-1h10c.6 0 1 .4 1 1v11"/>
+          <path d="M14 9h4l3 3v5c0 .6-.4 1-1 1h-1"/>
+          <circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>
+        </svg>
+      </span>
+      <span>HYPAX<small>Cargo Logistic &amp; Transportation</small></span>
+    </a>
+    <h1 class="auth-heading">Welcome back</h1>
+    <p class="auth-sub">Sign in with your email address</p>
+
+    {% if form.errors %}
+    <div class="alert alert-error">Invalid email or password. Please try again.</div>
+    {% endif %}
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+      <div class="form-row">
+        <label for="{{ form.username.id_for_label }}">Email address</label>
+        {{ form.username }}
+        {{ form.username.errors }}
+      </div>
+      <div class="form-row">
+        <label for="{{ form.password.id_for_label }}">Password</label>
+        {{ form.password }}
+        {{ form.password.errors }}
+      </div>
+      <button type="submit" class="btn btn-primary btn-block">Sign in</button>
+    </form>
+
+    <p class="auth-footer">
+      Don't have an account? <a href="{% url 'users:signup' %}">Sign up</a>
+    </p>
+  </div>
+</div>
+{% endblock %}

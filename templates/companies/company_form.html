@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+{% block title %}{% if form.instance.pk %}Edit Company{% else %}Register Company{% endif %} &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">{% if form.instance.pk %}Edit company{% else %}Register company{% endif %}</h1>
+      <p class="page-subtitle">Provide the company details</p>
+    </div>
+    <a class="btn btn-secondary" href="{% url 'companies:list' %}">&larr; Back</a>
+  </div>
+
+  <div class="card">
+    <form method="post" novalidate>
+      {% csrf_token %}
+      <div class="form-grid">
+        {% for field in form %}
+        <div class="form-row">
+          {{ field.label_tag }}
+          {{ field }}
+          <div class="field-error">{{ field.errors }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save</button>
+        <a class="btn btn-secondary" href="{% url 'companies:list' %}">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

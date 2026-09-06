@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+{% block title %}Orders &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Orders</h1>
+      <p class="page-subtitle">Orders received from the external system via webhook</p>
+    </div>
+  </div>
+
+  {% if orders %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Order</th>
+          <th>Customer</th>
+          <th>Company</th>
+          <th>Cargo ref</th>
+          <th>Tender</th>
+          <th>Date</th>
+          <th>Amount</th>
+          <th>State</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for order in orders %}
+        <tr>
+          <td>
+            <a href="{% url 'tenders:order_detail' order.pk %}"><strong>{{ order.order_name }}</strong></a><br>
+            <span style="color:#64748b; font-size:13px;">#{{ order.order_id }}</span>
+          </td>
+          <td>{{ order.customer|default:'-' }}</td>
+          <td>{{ order.company_name|default:'-' }}</td>
+          <td>{{ order.cargo_reference|default:'-' }}</td>
+          <td>
+            {% if order.tender %}
+              <a href="{% url 'tenders:list' %}">{{ order.tender.cargo_reference }}</a>
+            {% else %}<span style="color:#94a3b8;">not linked</span>{% endif %}
+          </td>
+          <td>{{ order.date_order|date:'Y-m-d H:i'|default:'-' }}</td>
+          <td><strong>{{ order.amount_total|floatformat:2 }} {{ order.currency }}</strong></td>
+          <td>
+            {% if order.state == 'sale' or order.state == 'confirmed' or order.state == 'done' %}
+              <span class="badge badge-success">{{ order.state }}</span>
+            {% elif order.state == 'cancel' or order.state == 'canceled' %}
+              <span class="badge badge-danger">{{ order.state }}</span>
+            {% elif order.state == 'sent' %}
+              <span class="badge badge-warning">{{ order.state }}</span>
+            {% else %}
+              <span class="badge badge-info">{{ order.state }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if is_paginated %}
+  <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px; align-items:center;">
+    <span style="color:#64748b; font-size:13px;">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_previous %}
+    <a class="btn btn-secondary btn-sm" href="?page={{ page_obj.previous_page_number }}">&larr; Previous</a>
+    {% endif %}
+    {% if page_obj.has_next %}
+    <a class="btn btn-secondary btn-sm" href="?page={{ page_obj.next_page_number }}">Next &rarr;</a>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% else %}
+  <div class="card">
+    <div class="empty">
+      <div class="empty-icon">&#128203;</div>
+      <p>No orders have been received yet.<br>
+        Configure the webhook URL in <a href="{% url 'tenders:api_settings' %}">API Settings</a> and share it with the external system.</p>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

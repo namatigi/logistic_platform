@@ -1,0 +1,71 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}HYPAX Cargo Logistic and Transportation{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'css/hypax.css' %}">
+</head>
+<body>
+  {% if user.is_authenticated %}
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <a href="{% url 'tenders:dashboard' %}" class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 18H3c-.6 0-1-.4-1-1V7c0-.6.4-1 1-1h10c.6 0 1 .4 1 1v11"/>
+            <path d="M14 9h4l3 3v5c0 .6-.4 1-1 1h-1"/>
+            <circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>
+          </svg>
+        </span>
+        <span>HYPAX<small>Cargo Logistic &amp; Transportation</small></span>
+      </a>
+
+      <ul class="nav-links">
+        <li class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
+          <a href="{% url 'tenders:dashboard' %}">Dashboard</a>
+        </li>
+        <li class="{% if request.resolver_match.url_name in 'list create' %}active{% endif %}">
+          <a href="{% url 'tenders:list' %}">Tenders</a>
+        </li>
+        <li class="{% if request.resolver_match.url_name in 'order_list order_detail' %}active{% endif %}">
+          <a href="{% url 'tenders:order_list' %}">Orders</a>
+        </li>
+        <li class="{% if request.resolver_match.namespace == 'companies' %}active{% endif %}">
+          <a href="{% url 'companies:list' %}">Companies</a>
+        </li>
+        <li class="{% if request.resolver_match.url_name == 'api_settings' %}active{% endif %}">
+          <a href="{% url 'tenders:api_settings' %}">API Settings</a>
+        </li>
+      </ul>
+
+      <div class="nav-user">
+        <span class="user-chip">{{ user.email }}</span>
+        <form method="post" action="{% url 'users:logout' %}">
+          {% csrf_token %}
+          <button type="submit" class="btn-logout">Logout</button>
+        </form>
+      </div>
+    </div>
+  </nav>
+  {% endif %}
+
+  {% if request.resolver_match.url_name in 'login signup' %}
+  {% else %}
+    {% if messages %}
+    <div class="messages">
+      {% for msg in messages %}
+      <div class="alert alert-{% if msg.tags == 'error' %}error{% else %}{{ msg.tags }}{% endif %}">{{ msg }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endif %}
+
+  {% block content %}{% endblock %}
+
+  <footer class="footer">
+    &copy; {% now 'Y' %} HYPAX Cargo Logistic and Transportation system
+  </footer>
+</body>
+</html>
