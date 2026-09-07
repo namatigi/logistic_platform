@@ -28,7 +28,27 @@ SECRET_KEY = 'django-insecure-9=%+j1gwd4%l7l-mbxi+dtalkp!1z90!kn=c3k+f^5un9(@nn3
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+# ALLOWED_HOSTS can be overridden via the environment (comma-separated).
+# In development, localhost plus ngrok tunnel domains are allowed by default.
+_ALLOWED_HOSTS_ENV = os.environ.get('ALLOWED_HOSTS')
+if _ALLOWED_HOSTS_ENV:
+    ALLOWED_HOSTS = [h.strip() for h in _ALLOWED_HOSTS_ENV.split(',') if h.strip()]
+else:
+    ALLOWED_HOSTS = ['localhost', '127.0.0.1', '[::1]', '.localhost', '.ngrok-free.dev', '.ngrok.app']
+
+# Origins allowed to submit CSRF-protected requests (e.g. POST/PUT from a
+# browser). Override via the environment (comma-separated) for production.
+_CSRF_TRUSTED_ORIGINS_ENV = os.environ.get('CSRF_TRUSTED_ORIGINS')
+if _CSRF_TRUSTED_ORIGINS_ENV:
+    CSRF_TRUSTED_ORIGINS = [o.strip() for o in _CSRF_TRUSTED_ORIGINS_ENV.split(',') if o.strip()]
+else:
+    CSRF_TRUSTED_ORIGINS = [
+        'http://localhost',
+        'http://127.0.0.1',
+        'http://[::1]',
+        'https://*.ngrok-free.dev',
+        'https://*.ngrok.app',
+    ]
 
 
 # Application definition
