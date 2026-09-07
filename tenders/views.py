@@ -17,7 +17,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
 from .forms import ApiSettingForm, TenderForm
-from .models import ApiSetting, Order, OrderLine, Tender
+from .models import ApiSetting, Order, OrderLine, Tender, generate_transporter_alias
 from .towns import TOWN_CHOICES
 
 logger = logging.getLogger(__name__)
@@ -224,6 +224,7 @@ def webhook_orders(request):
             'state': payload.get('state', '') or '',
             'company_id': payload.get('company_id'),
             'company_name': payload.get('company_name', '') or '',
+            'transporter_alias': generate_transporter_alias(),
             'date_order': parse_datetime(payload.get('date_order')),
             'amount_total': to_decimal(payload.get('amount_total')),
             'customer': payload.get('customer', '') or '',
@@ -439,6 +440,7 @@ def _order_dict(order, include_lines=False):
         'state': order.state or '',
         'customer': order.customer,
         'company_name': order.company_name,
+        'transporter_alias': order.transporter_alias,
         'company_id': order.company_id,
         'currency': order.currency,
         'amount_total': str(order.amount_total),

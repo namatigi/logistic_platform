@@ -50,7 +50,7 @@
                     <span style="color:#64748b; font-size:13px;">#{{ o.order_id }}</span>
                   </td>
                   <td>{{ o.customer || '-' }}</td>
-                  <td>{{ o.company_name || '-' }}</td>
+                  <td>{{ o.transporter_alias || '-' }}</td>
                   <td>{{ o.cargo_reference || '-' }}</td>
                   <td>
                     <a v-if="o.tender_ref" v-bind:href="tenderListUrl">{{ o.tender_ref }}</a>

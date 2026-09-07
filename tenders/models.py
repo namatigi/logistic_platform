@@ -1,7 +1,21 @@
+import random
+import string
+
 from django.conf import settings
 from django.db import models
 
 from .towns import TOWN_CHOICES
+
+
+def generate_transporter_alias():
+    """Random alphanumeric alias (uppercase letters + digits) unique per order."""
+    alphabet = string.ascii_uppercase + string.digits
+    while True:
+        alias = ''.join(random.choice(alphabet) for _ in range(8))
+        if not (any(c.isalpha() for c in alias) and any(c.isdigit() for c in alias)):
+            continue
+        if not Order.objects.filter(transporter_alias=alias).exists():
+            return alias
 
 
 class Tender(models.Model):
@@ -87,6 +101,7 @@ class Order(models.Model):
     state = models.CharField(max_length=50, blank=True, default='')
     company_id = models.PositiveBigIntegerField(null=True, blank=True)
     company_name = models.CharField(max_length=255, blank=True, default='')
+    transporter_alias = models.CharField(max_length=40, blank=True, default='', help_text='Random anonymous alias shown instead of the transporter name')
     date_order = models.DateTimeField(null=True, blank=True)
     amount_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     customer = models.CharField(max_length=255, blank=True, default='')
