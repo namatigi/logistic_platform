@@ -10,6 +10,7 @@ urlpatterns = [
     path('tenders/new/', views.TenderCreate.as_view(), name='create'),
     path('orders/', views.OrderList.as_view(), name='order_list'),
     path('orders/<int:pk>/', views.OrderDetail.as_view(), name='order_detail'),
+    path('orders/<int:pk>/award/', views.award_order, name='order_award'),
     path('settings/', views.ApiSettingUpdate.as_view(), name='api_settings'),
     path('webhook/orders/', views.webhook_orders, name='webhook_orders'),
 ]

@@ -5,9 +5,10 @@ from decimal import Decimal
 
 import requests as http
 from django.contrib import messages
+from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Q
-from django.http import JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import redirect
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
@@ -56,6 +57,108 @@ def submit_tender(setting, tender):
     except http.RequestException as exc:
         logger.exception('Tender submission to %s failed', setting.endpoint_url())
         return None, str(exc), False
+
+
+def submit_confirmation(setting, url, payload):
+    headers = {'Content-Type': 'application/json'}
+    auth = None
+
+    if setting.auth_type == ApiSetting.AuthType.BEARER and setting.api_token:
+        headers['Authorization'] = f'Bearer {setting.api_token}'
+    elif setting.auth_type == ApiSetting.AuthType.BASIC:
+        auth = (setting.username, setting.password)
+
+    try:
+        response = http.post(url, json=payload, headers=headers, auth=auth, timeout=20)
+        return response.status_code, response.text, response.ok
+    except http.RequestException as exc:
+        logger.exception('Order confirmation to %s failed', url)
+        return None, str(exc), False
+
+
+@login_required
+def award_order(request, pk):
+    order = Order.objects.filter(
+        Q(user=request.user) | Q(user__isnull=True)
+    ).filter(pk=pk).first()
+    if order is None:
+        raise Http404()
+
+    setting = ApiSetting.objects.filter(user=request.user).first()
+    if setting is None or not setting.base_url:
+        messages.warning(request, 'Configure your API base URL in API Settings before awarding.')
+        return redirect('tenders:api_settings')
+
+    line_ids_raw = request.POST.getlist('line_ids')
+    line_ids = [int(v) for v in line_ids_raw if str(v).strip().isdigit()]
+    is_partial = request.POST.get('partial') == '1'
+
+    if is_partial and not line_ids:
+        messages.error(request, 'Select at least one order line to award.')
+        return redirect('tenders:order_detail', pk=order.pk)
+
+    if line_ids:
+        valid_ids = set(order.lines.values_list('line_id', flat=True))
+        if not set(line_ids).issubset(valid_ids):
+            messages.error(request, 'Some selected order lines do not belong to this order.')
+            return redirect('tenders:order_detail', pk=order.pk)
+
+    cargo_name = (
+        order.cargo_reference
+        or (order.tender.cargo_reference if order.tender else '')
+        or ''
+    ).strip()
+    if not cargo_name:
+        messages.error(request, 'This order has no cargo reference to confirm.')
+        if is_partial:
+            return redirect('tenders:order_detail', pk=order.pk)
+        return redirect('tenders:order_list')
+
+    payload = {
+        'order_id': order.order_id,
+        'message': 'Confirmed',
+        'cargo_name': cargo_name,
+    }
+    if line_ids:
+        payload['order_lines'] = [{'line_id': lid} for lid in line_ids]
+
+    url = (
+        setting.partial_order_confirmation_url()
+        if line_ids
+        else setting.order_confirmation_url()
+    )
+    status_code, body, _ok = submit_confirmation(setting, url, payload)
+
+    parsed = {}
+    try:
+        parsed = json.loads(body) if body else {}
+    except (ValueError, TypeError):
+        pass
+
+    is_ok = status_code is not None and 200 <= status_code < 300
+    if isinstance(parsed, dict) and parsed.get('status') == 'success':
+        is_ok = True
+
+    if is_ok:
+        order.award_response = parsed.get('data') if isinstance(parsed, dict) else parsed
+        order.awarded_at = timezone.now()
+        order.save()
+        confirm_message = parsed.get('message') if isinstance(parsed, dict) else None
+        if confirm_message:
+            messages.success(request, confirm_message)
+        elif line_ids:
+            messages.success(request, 'Order partially confirmed.')
+        else:
+            messages.success(request, 'Order confirmed successfully.')
+    else:
+        messages.error(
+            request,
+            f'Order confirmation failed (HTTP {status_code}). Response: {body[:300]}',
+        )
+
+    if line_ids:
+        return redirect('tenders:order_detail', pk=order.pk)
+    return redirect('tenders:order_list')
 
 
 def parse_datetime(value):

@@ -69,6 +69,14 @@ class ApiSetting(models.Model):
         base = self.base_url.rstrip('/')
         return f'{base}/api/v1/tenders'
 
+    def order_confirmation_url(self):
+        base = self.base_url.rstrip('/')
+        return f'{base}/api/v1/order-confirmation'
+
+    def partial_order_confirmation_url(self):
+        base = self.base_url.rstrip('/')
+        return f'{base}/api/v1/partial-order-confirmation'
+
     def __str__(self):
         return f'API settings for {self.user.email}'
 
@@ -91,6 +99,8 @@ class Order(models.Model):
     )
     tender = models.ForeignKey(Tender, null=True, blank=True, on_delete=models.SET_NULL, related_name='orders')
     raw_payload = models.JSONField(default=dict)
+    award_response = models.JSONField(null=True, blank=True, default=dict)
+    awarded_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -22,6 +22,7 @@
           <th>Date</th>
           <th>Amount</th>
           <th>State</th>
+          <th>Award</th>
         </tr>
       </thead>
       <tbody>
@@ -52,6 +53,12 @@
               <span class="badge badge-info">{{ order.state }}</span>
             {% endif %}
           </td>
+          <td>
+            <form method="post" action="{% url 'tenders:order_award' order.pk %}" onsubmit="setAwardLoading(this)">
+              {% csrf_token %}
+              <button type="submit" class="btn btn-primary btn-sm btn-award">Award</button>
+            </form>
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -80,4 +87,14 @@
   </div>
   {% endif %}
 </div>
+<script>
+  function setAwardLoading(form) {
+    var btn = form.querySelector('button[type="submit"]');
+    if (btn && !btn.disabled) {
+      btn.disabled = true;
+      btn.classList.add('is-loading');
+      btn.textContent = 'Awarding...';
+    }
+  }
+</script>
 {% endblock %}
