@@ -539,6 +539,72 @@ tr:hover td {
   margin-top: 18px;
 }
 
+/* ---------- Auth themed background ---------- */
+.auth-theme {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: linear-gradient(135deg, #0b1c33 0%, #12314f 45%, #0d2440 100%);
+  overflow: hidden;
+}
+
+.auth-themed-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: #9fc4e8;
+}
+
+.auth-themed-bg .bg-truck,
+.auth-themed-bg .bg-container {
+  position: absolute;
+  opacity: 0.09;
+  filter: drop-shadow(0 0 6px rgba(160, 200, 240, 0.25));
+}
+
+.auth-themed-bg .bg-truck-1 {
+  width: 480px;
+  left: -40px;
+  bottom: 40px;
+  opacity: 0.14;
+}
+.auth-themed-bg .bg-truck-2 {
+  width: 420px;
+  right: -30px;
+  top: 18%;
+  opacity: 0.1;
+  transform: scaleX(-1);
+}
+.auth-themed-bg .bg-truck-3 {
+  width: 380px;
+  right: 6%;
+  bottom: 70px;
+  opacity: 0.08;
+}
+
+.auth-themed-bg .bg-container {
+  width: 190px;
+  opacity: 0.12;
+}
+.bg-container-1 { top: 12%; left: 14%; }
+.bg-container-2 { bottom: 16%; right: 22%; }
+.bg-container-3 { top: 55%; left: 6%; }
+
+.bg-depot-label {
+  position: absolute;
+  top: 8%;
+  left: 6%;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: rgba(200, 226, 250, 0.18);
+  white-space: nowrap;
+}
+
 /* ---------- Empty states ---------- */
 .empty {
   text-align: center;
