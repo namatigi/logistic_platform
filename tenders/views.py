@@ -472,7 +472,7 @@ def _setting_dict(setting, request):
         'username': setting.username,
         'password': setting.password,
         'updated_at': setting.updated_at.isoformat() if setting.updated_at else None,
-        'endpoint': reverse('tenders:create'),
+        'endpoint': (setting.base_url.rstrip('/') if setting.base_url else '(base URL)') + '/api/v1/tenders',
         'webhook_path': webhook_path,
         'webhook_url': request.build_absolute_uri(webhook_path),
         'tenders_path': '/api/v1/tenders',
