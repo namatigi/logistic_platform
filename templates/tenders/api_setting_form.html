@@ -18,12 +18,15 @@
     </div>
     {% endif %}
 
-    <div class="form-row" style="margin-bottom:18px;">
-      {{ form.base_url.label_tag }}
-      {{ form.base_url }}
-      <span class="form-help">Root URL, e.g. <code>https://api.example.com</code>. Tenders are posted to <code>/api/v1/tenders</code>.</span>
-      <div class="field-error">{{ form.base_url.errors }}</div>
-    </div>
+    <form method="post" novalidate>
+      {% csrf_token %}
+
+      <div class="form-row" style="margin-bottom:18px;">
+        {{ form.base_url.label_tag }}
+        {{ form.base_url }}
+        <span class="form-help">Root URL, e.g. <code>https://api.example.com</code>. Tenders are posted to <code>/api/v1/tenders</code>.</span>
+        <div class="field-error">{{ form.base_url.errors }}</div>
+      </div>
 
     <div class="form-row" style="margin-bottom:18px;">
       {{ form.auth_type.label_tag }}
@@ -56,6 +59,7 @@
     <div class="form-actions">
       <button type="submit" class="btn btn-primary">Save settings</button>
     </div>
+    </form>
   </div>
 
   <div class="card" style="border-color:#bfdbfe; background:#fbfdff;">
