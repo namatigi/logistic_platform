@@ -12,6 +12,12 @@
   <div class="card">
     <div class="card-title">Tender endpoint (outgoing)</div>
 
+    {% if object.base_url %}
+    <div class="alert alert-success saved-notice">
+      API settings saved{% if object.updated_at %} on {{ object.updated_at|date:"M j, Y \a\t g:i A" }}{% endif %}.
+    </div>
+    {% endif %}
+
     <div class="form-row" style="margin-bottom:18px;">
       {{ form.base_url.label_tag }}
       {{ form.base_url }}
