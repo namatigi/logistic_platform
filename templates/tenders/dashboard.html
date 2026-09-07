@@ -5,9 +5,7 @@
   <div class="page-header">
     <div>
       <h1 class="page-title">Dashboard</h1>
-      {% verbatim %}
-      <p class="page-subtitle">Welcome back, {{ email }}</p>
-      {% endverbatim %}
+      <p class="page-subtitle">Welcome back, {{ user.email }}</p>
     </div>
     <a class="btn btn-primary" href="{% url 'tenders:create' %}">+ Send tender</a>
   </div>
@@ -96,7 +94,6 @@
     Vue.createApp({
       data: function () {
         return {
-          email: '',
           company_count: 0,
           tender_count: 0,
           order_count: 0,
@@ -111,7 +108,6 @@
       created: async function () {
         try {
           var res = await api.get(root.dataset.url);
-          this.email = res.email || '';
           this.company_count = res.company_count || 0;
           this.tender_count = res.tender_count || 0;
           this.order_count = res.order_count || 0;
