@@ -44,9 +44,11 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="o in group.orders" v-bind:key="o.id">
+                <tr v-for="o in group.orders" v-bind:key="o.id"
+                    class="order-row" v-bind:class="{ 'row-expanded': expandedId === o.id }"
+                    @click="toggle(o)">
                   <td>
-                    <a v-bind:href="detailUrl(o.id)"><strong>{{ o.order_name }}</strong></a><br>
+                    <strong>{{ o.order_name }}</strong><br>
                     <span style="color:#64748b; font-size:13px;">#{{ o.order_id }}</span>
                   </td>
                   <td>{{ o.customer || '-' }}</td>
@@ -66,15 +68,88 @@
                   <td>
                     <button v-if="o.fully_confirmed || o.partially_confirmed"
                             type="button" class="btn btn-primary btn-sm btn-award"
-                            @click="pay(o)" :disabled="payId === o.id">
+                            @click.stop="pay(o)" :disabled="payId === o.id">
                       <span v-if="payId === o.id">Paying...</span>
                       <span v-else>Make payment</span>
                     </button>
                     <button v-else type="button" class="btn btn-primary btn-sm btn-award"
-                            @click="award(o)" :disabled="awardId === o.id">
+                            @click.stop="award(o)" :disabled="awardId === o.id">
                       <span v-if="awardId === o.id">Awarding...</span>
                       <span v-else>Award</span>
                     </button>
+                  </td>
+                </tr>
+                <tr v-if="expandedId === o.id" class="order-detail-row" v-bind:key="'d' + o.id">
+                  <td colspan="9" style="padding:0;">
+                    <div v-if="detail(o)">
+                      <div class="order-detail-summary">
+                        <div>
+                          <span class="detail-label">State</span>
+                          <div><span class="badge" v-bind:class="stateBadge(detail(o).state)">{{ detail(o).state || '-' }}</span></div>
+                        </div>
+                        <div>
+                          <span class="detail-label">Cargo reference</span>
+                          <div><strong>{{ detail(o).cargo_reference || '-' }}</strong></div>
+                        </div>
+                        <div>
+                          <span class="detail-label">Cargo ID</span>
+                          <div><strong>{{ detail(o).cargo_id || '-' }}</strong></div>
+                        </div>
+                        <div>
+                          <span class="detail-label">Linked tender</span>
+                          <template v-if="detail(o).tender_ref">
+                            <div><strong>{{ detail(o).tender_ref }}</strong></div>
+                            <div style="color:#64748b; font-size:12px;">{{ detail(o).tender_route }}</div>
+                          </template>
+                          <div v-else style="color:#94a3b8;">not linked</div>
+                        </div>
+                        <div>
+                          <span class="detail-label">Total</span>
+                          <div><strong>{{ money(detail(o).amount_total, detail(o).currency) }}</strong></div>
+                        </div>
+                        <div v-if="detail(o).partially_confirmed && detail(o).awarded_lines_count < detail(o).total_lines_count">
+                          <span class="detail-label">Awarded lines</span>
+                          <div><strong>{{ detail(o).awarded_lines_count }} of {{ detail(o).total_lines_count }}</strong></div>
+                        </div>
+                      </div>
+
+                      <div class="order-detail-lines">
+                        <div class="order-detail-heading">Order lines</div>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Product</th>
+                              <th style="text-align:right;">Qty</th>
+                              <th style="text-align:right;">Unit price</th>
+                              <th style="text-align:right;">Total</th>
+                              <th>Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr v-for="line in detail(o).lines" v-bind:key="line.line_id">
+                              <td>
+                                {{ line.product_name }}<br>
+                                <span style="color:#64748b; font-size:12px;">Line #{{ line.line_id }} &middot; Product #{{ line.product_id || '-' }}</span>
+                              </td>
+                              <td style="text-align:right;">{{ fmtQty(line.quantity) }}</td>
+                              <td style="text-align:right;">{{ fmtQty(line.price_subtotal) }}</td>
+                              <td style="text-align:right;"><strong>{{ fmtQty(line.price_total) }}</strong></td>
+                              <td>
+                                <span class="award-flag" v-if="line.awarded">Awarded</span>
+                                <span v-else-if="detail(o).remaining_line_ids.indexOf(line.line_id) >= 0" style="color:#64748b;">Remaining</span>
+                                <span v-else-if="detail(o).removed_line_ids.indexOf(line.line_id) >= 0" style="color:#b91c1c;">Removed</span>
+                                <span v-else style="color:#94a3b8;">Pending</span>
+                              </td>
+                            </tr>
+                            <tr v-if="!detail(o).lines.length">
+                              <td colspan="5" style="color:#64748b; text-align:center;">No order lines.</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                    <div v-else-if="detailLoading(o)" style="padding:18px; color:#64748b; text-align:center;">Loading order details...</div>
+                    <div v-else style="padding:18px; color:#b91c1c; text-align:center;">Failed to load order details.</div>
                   </td>
                 </tr>
               </tbody>
@@ -120,6 +195,9 @@
           error: '',
           awardId: null,
           payId: null,
+          expandedId: null,
+          details: {},
+          loadingIds: {},
           detailBase: stripBase(root.dataset.detailBase),
           awardBase: stripBase(root.dataset.awardBase, 'award'),
           payBase: stripBase(root.dataset.payBase, 'pay'),
@@ -135,13 +213,43 @@
           try {
             var res = await api.get(root.dataset.url);
             this.groups = (res && res.groups) || [];
+            this.details = {};
+            this.expandedId = null;
           } catch (e) {
             this.error = e.message;
           } finally {
             this.loaded = true;
           }
         },
-        detailUrl: function (id) { return this.detailBase + id + '/'; },
+        toggle: async function (o) {
+          var self = this;
+          if (self.expandedId === o.id) {
+            self.expandedId = null;
+            return;
+          }
+          self.expandedId = o.id;
+          if (!self.details[o.id]) {
+            self.loadingIds[o.id] = true;
+            try {
+              var res = await api.get(this.detailBase + o.id + '/');
+              if (res && res.ok === false) {
+                self.details[o.id] = null;
+              } else {
+                self.details[o.id] = (res && res.order) || null;
+              }
+            } catch (e) {
+              self.details[o.id] = null;
+            } finally {
+              self.loadingIds[o.id] = false;
+            }
+          }
+        },
+        detail: function (o) { return this.details[o.id] || null; },
+        detailLoading: function (o) { return !!this.loadingIds[o.id]; },
+        fmtQty: function (v) {
+          var n = Number(v);
+          return isNaN(n) ? (v || '0.00') : n.toFixed(2);
+        },
         fmtDate: function (v) { return HY.fmtDate(v); },
         money: function (v, c) { return HY.money(v, c); },
         stateBadge: function (s) { return HY.stateBadgeClass(s); },
