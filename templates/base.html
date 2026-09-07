@@ -31,6 +31,9 @@
         <li class="{% if request.resolver_match.url_name in 'list create' %}active{% endif %}">
           <a href="{% url 'tenders:list' %}">Tenders</a>
         </li>
+        <li class="{% if request.resolver_match.url_name == 'route_map' %}active{% endif %}">
+          <a href="{% url 'tenders:route_map' %}">Route Map</a>
+        </li>
         <li class="{% if request.resolver_match.url_name in 'order_list order_detail' %}active{% endif %}">
           <a href="{% url 'tenders:order_list' %}">Orders</a>
         </li>
@@ -39,6 +42,9 @@
         </li>
         <li class="{% if request.resolver_match.url_name == 'api_settings' %}active{% endif %}">
           <a href="{% url 'tenders:api_settings' %}">API Settings</a>
+        </li>
+        <li class="{% if request.resolver_match.url_name == 'profile' %}active{% endif %}">
+          <a href="{% url 'users:profile' %}">Profile</a>
         </li>
       </ul>
 

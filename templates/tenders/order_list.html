@@ -11,11 +11,12 @@
 
   <div id="orders-app"
        data-url="{% url 'tenders:api_order_list' %}"
-       data-detail-base="{% url 'tenders:order_detail' 0 %}"
+       data-detail-base="{% url 'tenders:api_order_detail' 0 %}"
        data-award-base="{% url 'tenders:api_order_award' 0 %}"
        data-pay-base="{% url 'tenders:api_order_pay' 0 %}"
        data-tender-list-url="{% url 'tenders:list' %}"
-       data-settings-url="{% url 'tenders:api_settings' %}">
+       data-settings-url="{% url 'tenders:api_settings' %}"
+       data-ws-url="{{ ws_scheme }}://{{ ws_host }}/ws/orders/">
     {% verbatim %}
     <div v-cloak>
       <div class="alert alert-success" v-if="notice">{{ notice }}</div>
@@ -44,7 +45,8 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="o in group.orders" v-bind:key="o.id"
+                <template v-for="o in group.orders" v-bind:key="o.id">
+                <tr
                     class="order-row" v-bind:class="{ 'row-expanded': expandedId === o.id }"
                     @click="toggle(o)">
                   <td>
@@ -79,7 +81,7 @@
                     </button>
                   </td>
                 </tr>
-                <tr v-if="expandedId === o.id" class="order-detail-row" v-bind:key="'d' + o.id">
+                <tr v-if="expandedId === o.id" class="order-detail-row">
                   <td colspan="9" style="padding:0;">
                     <div v-if="detail(o)">
                       <div class="order-detail-summary">
@@ -152,6 +154,7 @@
                     <div v-else style="padding:18px; color:#b91c1c; text-align:center;">Failed to load order details.</div>
                   </td>
                 </tr>
+                </template>
               </tbody>
             </table>
           </div>
@@ -207,8 +210,28 @@
       },
       created: async function () {
         await this.load();
+        this.connectWs();
       },
       methods: {
+        connectWs: function () {
+          var self = this;
+          var wsUrl = root.dataset.wsUrl;
+          if (!wsUrl) return;
+          var ws = new WebSocket(wsUrl);
+          ws.onmessage = function (e) {
+            try {
+              var data = JSON.parse(e.data);
+              if (data && data.action === 'refresh') {
+                self.load();
+              }
+            } catch (err) { /* ignore */ }
+          };
+          ws.onclose = function () {
+            setTimeout(function () { self.connectWs(); }, 3000);
+          };
+          ws.onerror = function () { ws.close(); };
+          self._ws = ws;
+        },
         load: async function () {
           try {
             var res = await api.get(root.dataset.url);

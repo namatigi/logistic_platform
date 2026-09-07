@@ -15,6 +15,7 @@
        data-settings-url="{% url 'tenders:api_settings_json' %}"
        data-submit-url="{% url 'tenders:api_tender_create' %}"
        data-list-url="{% url 'tenders:list' %}"
+       data-companies-url="{% url 'companies:api_list' %}"
        data-settings-page-url="{% url 'tenders:api_settings' %}">
     {% verbatim %}
 
@@ -33,23 +34,54 @@
         <div class="form-grid">
           <div class="form-row">
             <label>Route loading</label>
-            <select v-model="form.route_loading" required>
-              <option value="" disabled>Select town</option>
-              <option v-for="t in towns" v-bind:key="t.value" v-bind:value="t.value">{{ t.label }}</option>
-            </select>
+            <div class="searchable-select" ref="loadingWrap">
+              <input type="text"
+                     v-model="loadingQuery"
+                     @focus="open('loading')"
+                     @input="open('loading')"
+                     @blur="close('loading')"
+                     @keydown.down.prevent="move('loading', 1)"
+                     @keydown.up.prevent="move('loading', -1)"
+                     @keydown.enter.prevent="selectHighlighted('loading')"
+                     placeholder="Type to search town"
+                     required>
+              <div class="searchable-options" v-if="openField === 'loading' && filteredLoading.length">
+                <button type="button" v-for="(t, i) in filteredLoading" v-bind:key="t.value"
+                        class="searchable-option"
+                        v-bind:class="{ highlighted: highlightLoading === i, selected: form.route_loading === t.value }"
+                        @mousedown.prevent="choose('loading', t)" v-html="highlight(t.label, loadingQuery)"></button>
+              </div>
+            </div>
             <div class="field-error" v-if="errors.route_loading"><ul><li v-for="e in errors.route_loading">{{ e }}</li></ul></div>
           </div>
           <div class="form-row">
             <label>Route delivery</label>
-            <select v-model="form.route_delivery" required>
-              <option value="" disabled>Select town</option>
-              <option v-for="t in towns" v-bind:key="t.value" v-bind:value="t.value">{{ t.label }}</option>
-            </select>
+            <div class="searchable-select" ref="deliveryWrap">
+              <input type="text"
+                     v-model="deliveryQuery"
+                     @focus="open('delivery')"
+                     @input="open('delivery')"
+                     @blur="close('delivery')"
+                     @keydown.down.prevent="move('delivery', 1)"
+                     @keydown.up.prevent="move('delivery', -1)"
+                     @keydown.enter.prevent="selectHighlighted('delivery')"
+                     placeholder="Type to search town"
+                     required>
+              <div class="searchable-options" v-if="openField === 'delivery' && filteredDelivery.length">
+                <button type="button" v-for="(t, i) in filteredDelivery" v-bind:key="t.value"
+                        class="searchable-option"
+                        v-bind:class="{ highlighted: highlightDelivery === i, selected: form.route_delivery === t.value }"
+                        @mousedown.prevent="choose('delivery', t)" v-html="highlight(t.label, deliveryQuery)"></button>
+              </div>
+            </div>
             <div class="field-error" v-if="errors.route_delivery"><ul><li v-for="e in errors.route_delivery">{{ e }}</li></ul></div>
           </div>
           <div class="form-row">
             <label>Customer</label>
-            <input type="text" v-model.trim="form.customer" required>
+            <select v-model="form.customer" required>
+              <option value="" disabled>Select company</option>
+              <option v-for="c in companies" v-bind:key="c.id" v-bind:value="c.name">{{ c.name }}</option>
+            </select>
             <div class="field-error" v-if="errors.customer"><ul><li v-for="e in errors.customer">{{ e }}</li></ul></div>
           </div>
           <div class="form-row">
@@ -122,6 +154,12 @@
           towns: [],
           cargoTypes: [],
           truckTypes: [],
+          companies: [],
+          loadingQuery: '',
+          deliveryQuery: '',
+          openField: null,
+          highlightLoading: -1,
+          highlightDelivery: -1,
           errors: {},
           error: '',
           success: false,
@@ -143,6 +181,9 @@
           var s = await api.get(root.dataset.settingsUrl);
           var setting = (s && s.setting) || {};
           this.hasBaseUrl = !!(setting.base_url || '').trim();
+
+          var cs = await api.get(root.dataset.companiesUrl);
+          this.companies = (cs && cs.companies) || [];
         } catch (e) {
           this.error = e.message;
         } finally {
@@ -170,7 +211,80 @@
           } finally {
             self.loading = false;
           }
+        },
+        matchTowns: function (q) {
+          var query = (q || '').trim().toLowerCase();
+          if (!query) return [];
+          return this.towns.filter(function (t) {
+            return t.label.toLowerCase().indexOf(query) >= 0;
+          });
+        },
+        open: function (field) {
+          this.openField = field;
+          if (field === 'loading') this.highlightLoading = 0;
+          else this.highlightDelivery = 0;
+        },
+        close: function (field) {
+          var self = this;
+          setTimeout(function () {
+            if (self.openField === field) self.openField = null;
+          }, 120);
+        },
+        choose: function (field, t) {
+          if (field === 'loading') {
+            this.form.route_loading = t.value;
+            this.loadingQuery = t.label;
+          } else {
+            this.form.route_delivery = t.value;
+            this.deliveryQuery = t.label;
+          }
+          this.openField = null;
+        },
+        move: function (field, dir) {
+          if (field === 'loading') {
+            var list = this.filteredLoading;
+            var next = this.highlightLoading + dir;
+            if (next < 0) next = list.length - 1;
+            if (next >= list.length) next = 0;
+            this.highlightLoading = next;
+          } else {
+            var list2 = this.filteredDelivery;
+            var next2 = this.highlightDelivery + dir;
+            if (next2 < 0) next2 = list2.length - 1;
+            if (next2 >= list2.length) next2 = 0;
+            this.highlightDelivery = next2;
+          }
+        },
+        selectHighlighted: function (field) {
+          if (field === 'loading') {
+            if (this.highlightLoading >= 0 && this.filteredLoading[this.highlightLoading]) {
+              this.choose('loading', this.filteredLoading[this.highlightLoading]);
+            }
+          } else {
+            if (this.highlightDelivery >= 0 && this.filteredDelivery[this.highlightDelivery]) {
+              this.choose('delivery', this.filteredDelivery[this.highlightDelivery]);
+            }
+          }
+        },
+        highlight: function (label, q) {
+          var query = (q || '').trim();
+          if (!query) return this.escapeHtml(label);
+          var idx = label.toLowerCase().indexOf(query.toLowerCase());
+          if (idx < 0) return this.escapeHtml(label);
+          var start = label.slice(0, idx);
+          var hit = label.slice(idx, idx + query.length);
+          var end = label.slice(idx + query.length);
+          return this.escapeHtml(start) + '<mark>' + this.escapeHtml(hit) + '</mark>' + this.escapeHtml(end);
+        },
+        escapeHtml: function (s) {
+          return String(s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+          });
         }
+      },
+      computed: {
+        filteredLoading: function () { return this.matchTowns(this.loadingQuery); },
+        filteredDelivery: function () { return this.matchTowns(this.deliveryQuery); }
       }
     }).mount('#tender-form-app');
   })();

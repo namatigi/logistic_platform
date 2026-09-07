@@ -1,0 +1,294 @@
+{% extends 'base.html' %}
+{% block title %}Profile &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">My profile</h1>
+      <p class="page-subtitle">Manage your bio, picture, email and physical addresses</p>
+    </div>
+    <a class="btn btn-secondary" href="{% url 'tenders:dashboard' %}">&larr; Dashboard</a>
+  </div>
+
+  <div id="profile-app"
+       data-profile-url="{% url 'users:api_profile' %}"
+       data-profile-save-url="{% url 'users:api_profile_save' %}"
+       data-address-create-url="{% url 'users:api_address_create' %}"
+       data-address-update-base="{% url 'users:api_address_update' 0 %}"
+       data-address-delete-base="{% url 'users:api_address_delete' 0 %}">
+    {% verbatim %}
+    <div class="card" v-cloak>
+      <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
+      <div class="alert alert-success" v-if="message" style="margin-bottom:16px;">{{ message }}</div>
+
+      <div class="profile-layout">
+        <div class="profile-side">
+          <div class="profile-avatar">
+            <img v-if="form.picture" v-bind:src="form.picture" alt="Profile picture">
+            <span v-else class="avatar-placeholder">{{ initials }}</span>
+          </div>
+          <label class="btn btn-secondary btn-block" style="text-align:center; margin-top:12px;">
+            Upload picture
+            <input type="file" accept="image/*" hidden @change="onPictureChange">
+          </label>
+          <p class="profile-hint">JPG or PNG, max 2&nbsp;MB.</p>
+        </div>
+
+        <div class="profile-main">
+          <h2 class="card-title">Basic information</h2>
+          <div class="form-grid">
+            <div class="form-row">
+              <label>Email address</label>
+              <input type="email" v-model.trim="form.email" required>
+              <div class="field-error" v-if="errors.email"><ul><li v-for="e in errors.email">{{ e }}</li></ul></div>
+            </div>
+            <div class="form-row">
+              <label>Phone</label>
+              <input type="text" v-model.trim="form.phone">
+              <div class="field-error" v-if="errors.phone"><ul><li v-for="e in errors.phone">{{ e }}</li></ul></div>
+            </div>
+            <div class="form-row" style="grid-column: 1 / -1;">
+              <label>Bio</label>
+              <textarea rows="4" v-model.trim="form.bio" placeholder="Tell us about yourself or your company..."></textarea>
+              <div class="field-error" v-if="errors.bio"><ul><li v-for="e in errors.bio">{{ e }}</li></ul></div>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-primary" @click="saveProfile" :disabled="saving">
+              <span v-if="saving">Saving...</span>
+              <span v-else>Save profile</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" v-cloak>
+      <h2 class="card-title">Physical addresses</h2>
+
+      <div v-if="!addresses.length" class="empty">
+        <div class="empty-icon">&#127758;</div>
+        <p>No addresses yet. Add home, office or warehouse locations below.</p>
+      </div>
+
+      <div class="address-list">
+        <div class="address-item" v-for="a in addresses" v-bind:key="a.id">
+          <div class="address-body">
+            <strong>{{ a.label || 'Address' }}</strong>
+            <span v-if="a.is_primary" class="badge badge-info" style="margin-left:8px;">Primary</span>
+            <div style="color:#64748b; font-size:14px;">
+              {{ a.street || '-' }}<br v-if="a.street">
+              {{ [a.city, a.postal_code, a.country].filter(Boolean).join(', ') || '&nbsp;' }}
+            </div>
+          </div>
+          <div class="address-actions">
+            <button type="button" class="btn btn-secondary btn-sm" @click="editAddress(a)">Edit</button>
+            <button type="button" class="btn btn-danger btn-sm" @click="removeAddress(a)" :disabled="deletingId === a.id">Delete</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="address-form" style="margin-top:16px; padding-top:16px; border-top:1px solid #e2e8f0;">
+        <h3 style="font-size:14px; font-weight:700; margin-bottom:12px;">
+          {{ editing ? 'Edit address' : 'Add an address' }}
+        </h3>
+        <div class="form-grid">
+          <div class="form-row">
+            <label>Label</label>
+            <input type="text" v-model.trim="addr.label" placeholder="Home / Office / Warehouse">
+          </div>
+          <div class="form-row">
+            <label>City</label>
+            <input type="text" v-model.trim="addr.city">
+          </div>
+          <div class="form-row" style="grid-column: 1 / -1;">
+            <label>Street address</label>
+            <input type="text" v-model.trim="addr.street">
+          </div>
+          <div class="form-row">
+            <label>Postal code</label>
+            <input type="text" v-model.trim="addr.postal_code">
+          </div>
+          <div class="form-row">
+            <label>Country</label>
+            <input type="text" v-model.trim="addr.country">
+          </div>
+          <div class="form-row">
+            <label style="flex-direction:row; align-items:center; gap:8px; display:flex;">
+              <input type="checkbox" v-model="addr.is_primary" style="width:auto;"> Set as primary address
+            </label>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-primary" @click="saveAddress" :disabled="addrSaving">
+            <span v-if="addrSaving">Saving...</span>
+            <span v-else>{{ editing ? 'Save changes' : 'Add address' }}</span>
+          </button>
+          <button v-if="editing" type="button" class="btn btn-secondary" @click="cancelAddress">Cancel</button>
+        </div>
+      </div>
+    </div>
+    {% endverbatim %}
+  </div>
+</div>
+
+<script>
+  (function () {
+    var root = document.getElementById('profile-app');
+    var api = window.HYPAX.api;
+
+    function blankAddress() {
+      return { id: null, label: '', street: '', city: '', postal_code: '', country: '', is_primary: false };
+    }
+
+    Vue.createApp({
+      data: function () {
+        return {
+          form: { email: '', phone: '', bio: '', picture: '', newPicture: null },
+          errors: {},
+          error: '',
+          message: '',
+          saving: false,
+          addresses: [],
+          addr: blankAddress(),
+          editing: false,
+          addrSaving: false,
+          deletingId: null
+        };
+      },
+      computed: {
+        initials: function () {
+          return (this.form.email || '?').charAt(0).toUpperCase();
+        }
+      },
+      created: function () { this.load(); },
+      methods: {
+        load: async function () {
+          try {
+            var res = await api.get(root.dataset.profileUrl);
+            if (res && res.ok === false) { this.error = res.error || 'Failed to load profile.'; return; }
+            var p = (res && res.profile) || {};
+            this.form.email = p.email || '';
+            this.form.phone = p.phone || '';
+            this.form.bio = p.bio || '';
+            this.form.picture = p.picture || '';
+            this.addresses = (res && res.addresses) || [];
+          } catch (e) {
+            this.error = e.message;
+          }
+        },
+        onPictureChange: function (e) {
+          var file = e.target.files && e.target.files[0];
+          if (!file) return;
+          if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
+            this.error = 'Please choose a JPG, PNG or WebP image.';
+            return;
+          }
+          this.form.newPicture = file;
+          this.form.picture = URL.createObjectURL(file);
+          this.error = '';
+        },
+        saveProfile: async function () {
+          var self = this;
+          self.error = '';
+          self.message = '';
+          self.errors = {};
+          self.saving = true;
+          try {
+            var fd = new FormData();
+            fd.append('email', self.form.email || '');
+            fd.append('phone', self.form.phone || '');
+            fd.append('bio', self.form.bio || '');
+            if (self.form.newPicture) fd.append('profile_picture', self.form.newPicture, self.form.newPicture.name);
+
+            var resp = await fetch(root.dataset.profileSaveUrl, {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRFToken': window.HYPAX.csrftoken() },
+              body: fd
+            });
+            var res = {};
+            try { res = await resp.json(); } catch (err) { /* non-JSON */ }
+            if (!resp.ok || res.ok === false) {
+              if (res.errors) { self.errors = res.errors; }
+              self.error = (res.error) || 'Profile could not be saved.';
+              return;
+            }
+            self.message = 'Profile saved successfully.';
+            if (res.profile) {
+              self.form.email = res.profile.email || self.form.email;
+              self.form.picture = res.profile.picture || self.form.picture;
+            }
+            self.form.newPicture = null;
+          } catch (e) {
+            self.error = e.message || 'Profile could not be saved.';
+          } finally {
+            self.saving = false;
+          }
+        },
+        editAddress: function (a) {
+          this.addr = {
+            id: a.id,
+            label: a.label || '',
+            street: a.street || '',
+            city: a.city || '',
+            postal_code: a.postal_code || '',
+            country: a.country || '',
+            is_primary: !!a.is_primary
+          };
+          this.editing = true;
+        },
+        cancelAddress: function () {
+          this.addr = blankAddress();
+          this.editing = false;
+        },
+        saveAddress: async function () {
+          var self = this;
+          self.error = '';
+          self.message = '';
+          self.addrSaving = true;
+          var url = self.addr.id
+            ? root.dataset.addressUpdateBase.replace('0', String(self.addr.id))
+            : root.dataset.addressCreateUrl;
+          try {
+            var res = await api.post(url, self.addr);
+            if (res && res.ok === false) {
+              self.error = res.error || 'Address could not be saved.';
+              return;
+            }
+            self.message = 'Address saved successfully.';
+            await self.load();
+            self.cancelAddress();
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.addrSaving = false;
+          }
+        },
+        removeAddress: async function (a) {
+          var self = this;
+          if (!window.confirm('Delete this address?')) return;
+          self.error = '';
+          self.message = '';
+          self.deletingId = a.id;
+          try {
+            var url = root.dataset.addressDeleteBase.replace('0', String(a.id));
+            var res = await api.post(url, {});
+            if (res && res.ok === false) {
+              self.error = res.error || 'Address could not be deleted.';
+              return;
+            }
+            self.message = 'Address deleted successfully.';
+            if (self.addr.id === a.id) self.cancelAddress();
+            await self.load();
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.deletingId = null;
+          }
+        }
+      }
+    }).mount('#profile-app');
+  })();
+</script>
+{% endblock %}

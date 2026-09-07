@@ -65,6 +65,33 @@ class Tender(models.Model):
         ordering = ['-created_at']
 
 
+class Town(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+    country = models.CharField(max_length=100)
+    latitude = models.DecimalField(
+        max_digits=9, decimal_places=6, default=0,
+        help_text='Latitude in decimal degrees',
+    )
+    longitude = models.DecimalField(
+        max_digits=9, decimal_places=6, default=0,
+        help_text='Longitude in decimal degrees',
+    )
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return f'{self.name}, {self.country}'
+
+    @property
+    def lat(self):
+        return self.latitude
+
+    @property
+    def lng(self):
+        return self.longitude
+
+
 class ApiSetting(models.Model):
     class AuthType(models.TextChoices):
         NONE = 'none', 'No Auth'

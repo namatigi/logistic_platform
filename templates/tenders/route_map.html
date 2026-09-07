@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Route Map - HYPAX{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
+<script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
+
+<div class="container">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Route Map</h1>
+      {% if loading and delivery %}
+      <p class="page-subtitle">{{ loading }} &rarr; {{ delivery }}</p>
+      {% else %}
+      <p class="page-subtitle">Select loading and delivery points to view the route</p>
+      {% endif %}
+    </div>
+    <div style="display:flex; gap:10px;">
+      {% if tender_id %}
+      <a href="{% url 'tenders:list' %}" class="btn btn-secondary btn-sm">Back to Tenders</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card" style="padding:0; overflow:hidden;">
+    <div id="map" style="height: 520px; width: 100%;"></div>
+  </div>
+
+  <div class="card" style="margin-top: 16px;">
+    <div class="card-title">Route Details</div>
+    <div class="form-grid" style="align-items:end;">
+      <div class="form-row">
+        <label for="loading-select">Loading Point</label>
+        <select id="loading-select">
+          <option value="">-- Select town --</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label for="delivery-select">Delivery Point</label>
+        <select id="delivery-select">
+          <option value="">-- Select town --</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <button id="show-route" class="btn btn-primary" style="margin-top:22px;">Show Route</button>
+      </div>
+    </div>
+    <div id="route-info" style="margin-top:16px; display:none;">
+      <div class="route-summary" style="display:flex; gap:30px; flex-wrap:wrap;">
+        <div>
+          <span class="detail-label">Distance</span>
+          <strong id="route-distance">-</strong>
+        </div>
+        <div>
+          <span class="detail-label">Duration</span>
+          <strong id="route-duration">-</strong>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const loadingTown = "{{ loading|default:''|escapejs }}";
+  const deliveryTown = "{{ delivery|default:''|escapejs }}";
+
+  const map = L.map('map').setView([-2, 32], 5);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 18,
+  }).addTo(map);
+
+  let routeControl = null;
+  let markers = [];
+  let townsData = [];
+
+  function clearMap() {
+    if (routeControl) {
+      map.removeControl(routeControl);
+      routeControl = null;
+    }
+    markers.forEach(m => map.removeLayer(m));
+    markers = [];
+  }
+
+  function addMarker(lat, lng, label, color) {
+    const icon = L.divIcon({
+      className: 'custom-marker',
+      html: '<div style="background:' + color + ';width:14px;height:14px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35);"></div>',
+      iconSize: [20, 20],
+      iconAnchor: [10, 10],
+    });
+    const m = L.marker([lat, lng], {icon}).addTo(map).bindPopup('<b>' + label + '</b>');
+    markers.push(m);
+    return m;
+  }
+
+  function fitRoute(origin, dest) {
+    const group = L.featureGroup(markers);
+    map.fitBounds(group.getBounds().pad(0.15));
+  }
+
+  function showRoute(origin, dest) {
+    clearMap();
+    addMarker(origin.lat, origin.lng, origin.name, '#16a34a');
+    addMarker(dest.lat, dest.lng, dest.name, '#dc2626');
+
+    routeControl = L.Routing.control({
+      waypoints: [
+        L.latLng(origin.lat, origin.lng),
+        L.latLng(dest.lat, dest.lng),
+      ],
+      routeWhileDragging: false,
+      addWaypoints: false,
+      show: true,
+      lineOptions: {
+        styles: [{color: '#1d4ed8', weight: 5, opacity: 0.8}],
+      },
+      createMarker: function() { return null; },
+    }).addTo(map);
+
+    routeControl.on('routesfound', function(e) {
+      const route = e.routes[0];
+      const dist = (route.summary.totalDistance / 1000).toFixed(1);
+      const hrs = Math.floor(route.summary.totalTime / 3600);
+      const mins = Math.round((route.summary.totalTime % 3600) / 60);
+      const durText = hrs > 0 ? hrs + 'h ' + mins + 'm' : mins + ' min';
+
+      document.getElementById('route-distance').textContent = dist + ' km';
+      document.getElementById('route-duration').textContent = durText;
+      document.getElementById('route-info').style.display = 'block';
+    });
+
+    fitRoute(origin, dest);
+  }
+
+  function getTownCoords(name) {
+    return townsData.find(t => t.name === name);
+  }
+
+  function populateSelects(towns) {
+    const loadingSel = document.getElementById('loading-select');
+    const deliverySel = document.getElementById('delivery-select');
+    const grouped = {};
+    towns.forEach(t => {
+      if (!grouped[t.country]) grouped[t.country] = [];
+      grouped[t.country].push(t);
+    });
+    const countries = Object.keys(grouped).sort();
+    countries.forEach(country => {
+      const group = grouped[country];
+      const optgroup1 = document.createElement('optgroup');
+      optgroup1.label = country;
+      const optgroup2 = document.createElement('optgroup');
+      optgroup2.label = country;
+      group.sort((a,b) => a.name.localeCompare(b.name)).forEach(t => {
+        const o1 = document.createElement('option');
+        o1.value = t.name;
+        o1.textContent = t.name;
+        optgroup1.appendChild(o1);
+        const o2 = document.createElement('option');
+        o2.value = t.name;
+        o2.textContent = t.name;
+        optgroup2.appendChild(o2);
+      });
+      loadingSel.appendChild(optgroup1);
+      deliverySel.appendChild(optgroup2);
+    });
+    if (loadingTown) loadingSel.value = loadingTown;
+    if (deliveryTown) deliverySel.value = deliveryTown;
+  }
+
+  fetch("{% url 'tenders:api_towns' %}")
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok) {
+        townsData = data.towns;
+        populateSelects(townsData);
+        if (loadingTown && deliveryTown) {
+          const o = getTownCoords(loadingTown);
+          const d = getTownCoords(deliveryTown);
+          if (o && d) showRoute(o, d);
+        }
+      }
+    });
+
+  document.getElementById('show-route').addEventListener('click', function() {
+    const loading = document.getElementById('loading-select').value;
+    const delivery = document.getElementById('delivery-select').value;
+    if (!loading || !delivery) {
+      alert('Please select both loading and delivery points.');
+      return;
+    }
+    if (loading === delivery) {
+      alert('Loading and delivery points must be different.');
+      return;
+    }
+    const o = getTownCoords(loading);
+    const d = getTownCoords(delivery);
+    if (!o || !d) {
+      alert('Town coordinates not found.');
+      return;
+    }
+    showRoute(o, d);
+  });
+})();
+</script>
+{% endblock %}

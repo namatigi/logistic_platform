@@ -2,32 +2,50 @@ import json
 import logging
 from datetime import datetime
 from decimal import Decimal
-from itertools import groupby
 
 import requests as http
+from channels.layers import get_channel_layer
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Q
 from django.http import Http404, JsonResponse
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
 from .forms import ApiSettingForm, TenderForm
-from .models import ApiSetting, Order, OrderLine, Tender, generate_transporter_alias
+from .models import ApiSetting, Order, OrderLine, Tender, Town, generate_transporter_alias
 from .towns import TOWN_CHOICES
 
 logger = logging.getLogger(__name__)
+
+
+def notify_order_update(order):
+    channel_layer = get_channel_layer()
+    if channel_layer is None:
+        return
+    order_data = _order_dict(order, include_lines=True)
+    from asgiref.sync import async_to_sync
+    send = async_to_sync(channel_layer.group_send)
+    if order.user_id:
+        send(
+            f'orders_user_{order.user_id}',
+            {'type': 'order.update', 'data': {'action': 'refresh'}},
+        )
+    send(
+        f'order_{order.pk}',
+        {'type': 'order.update', 'data': order_data},
+    )
 
 
 def build_payload(tender):
     return {
         'route_loading': tender.route_loading,
         'route_delivery': tender.route_delivery,
-        'customer': tender.customer,
+        'customer': 'HYPAX',
         'cargo_type': tender.cargo_type,
         'truck_type': tender.truck_type,
         'weight': tender.weight,
@@ -141,6 +159,8 @@ def perform_award(order, setting, line_ids, is_partial):
         order.state = 'confirmed'
     order.save()
 
+    notify_order_update(order)
+
     message = parsed.get('message') if isinstance(parsed, dict) else None
     if not message:
         message = 'Order partially confirmed.' if line_ids else 'Order confirmed successfully.'
@@ -227,7 +247,7 @@ def webhook_orders(request):
             'transporter_alias': generate_transporter_alias(),
             'date_order': parse_datetime(payload.get('date_order')),
             'amount_total': to_decimal(payload.get('amount_total')),
-            'customer': payload.get('customer', '') or '',
+            'customer': (tender.customer if tender else '') or payload.get('customer', '') or '',
             'currency': payload.get('currency', '') or '',
             'cargo_reference': cargo_reference,
             'cargo_id': payload.get('cargo_id'),
@@ -250,6 +270,8 @@ def webhook_orders(request):
             price_subtotal=to_decimal(line.get('price_subtotal')),
             price_total=to_decimal(line.get('price_total')),
         )
+
+    notify_order_update(order)
 
     return JsonResponse({
         'status': 'ok',
@@ -368,6 +390,12 @@ class OrderList(LoginRequiredMixin, ListView):
             .order_by('tender__cargo_reference', '-date_order', '-created_at')
         )
 
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['ws_scheme'] = 'wss' if self.request.is_secure() else 'ws'
+        context['ws_host'] = self.request.get_host()
+        return context
+
 
 class OrderDetail(LoginRequiredMixin, DetailView):
     model = Order
@@ -378,6 +406,12 @@ class OrderDetail(LoginRequiredMixin, DetailView):
         return Order.objects.filter(
             Q(user=self.request.user) | Q(user__isnull=True)
         ).select_related('tender')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['ws_scheme'] = 'wss' if self.request.is_secure() else 'ws'
+        context['ws_host'] = self.request.get_host()
+        return context
 
 
 class ApiSettingUpdate(LoginRequiredMixin, UpdateView):
@@ -589,16 +623,17 @@ def api_order_list(request):
     orders = (
         Order.objects.filter(Q(user=request.user) | Q(user__isnull=True))
         .select_related('tender')
-        .order_by('tender__cargo_reference', '-date_order', '-created_at')
+        .order_by('-date_order', '-created_at')
     )
-    groups = []
-    for key, items in groupby(orders, key=lambda o: o.tender.cargo_reference if o.tender else None):
-        items = list(items)
-        groups.append({
-            'grouper': key or '',
-            'label': key or 'Unlinked orders',
-            'orders': [_order_dict(o) for o in items],
-        })
+    grouped = {}
+    for o in orders:
+        key = o.tender.cargo_reference if o.tender else None
+        grouped.setdefault(key, []).append(o)
+    groups = [{
+        'grouper': key or '',
+        'label': key or 'Unlinked orders',
+        'orders': [_order_dict(o) for o in items],
+    } for key, items in grouped.items()]
     return JsonResponse({'ok': True, 'groups': groups, 'total': len(orders)})
 
 
@@ -683,3 +718,56 @@ def api_settings(request):
             'setting': _setting_dict(setting, request),
         })
     return JsonResponse({'ok': True, 'setting': _setting_dict(setting, request)})
+
+
+# ---------------------------------------------------------------------------
+# Route map
+# ---------------------------------------------------------------------------
+
+@login_required
+def route_map(request):
+    loading = request.GET.get('from', '')
+    delivery = request.GET.get('to', '')
+    tender_id = request.GET.get('tender_id')
+
+    context = {
+        'loading': loading,
+        'delivery': delivery,
+        'tender_id': tender_id,
+    }
+    return render(request, 'tenders/route_map.html', context)
+
+
+@login_required
+def api_towns(request):
+    towns = Town.objects.all().values('name', 'country', 'latitude', 'longitude')
+    data = [
+        {
+            'name': town['name'],
+            'country': town['country'],
+            'lat': float(town['latitude']),
+            'lng': float(town['longitude']),
+        }
+        for town in towns
+    ]
+    return JsonResponse({'ok': True, 'towns': data})
+
+
+@login_required
+def api_town_route(request):
+    loading = request.GET.get('from', '')
+    delivery = request.GET.get('to', '')
+    if not loading or not delivery:
+        return JsonResponse({'ok': False, 'error': 'Both "from" and "to" parameters are required.'}, status=400)
+
+    try:
+        origin = Town.objects.get(name=loading)
+        dest = Town.objects.get(name=delivery)
+    except Town.DoesNotExist:
+        return JsonResponse({'ok': False, 'error': 'Town not found.'}, status=404)
+
+    return JsonResponse({
+        'ok': True,
+        'origin': {'name': origin.name, 'lat': float(origin.lat), 'lng': float(origin.lng)},
+        'destination': {'name': dest.name, 'lat': float(dest.lat), 'lng': float(dest.lng)},
+    })

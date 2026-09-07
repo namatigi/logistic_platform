@@ -8,6 +8,7 @@ urlpatterns = [
     path('', views.Dashboard.as_view(), name='dashboard'),
     path('tenders/', views.TenderList.as_view(), name='list'),
     path('tenders/new/', views.TenderCreate.as_view(), name='create'),
+    path('tenders/route/', views.route_map, name='route_map'),
     path('orders/', views.OrderList.as_view(), name='order_list'),
     path('orders/<int:pk>/', views.OrderDetail.as_view(), name='order_detail'),
     path('orders/<int:pk>/award/', views.award_order, name='order_award'),
@@ -23,4 +24,6 @@ urlpatterns = [
     path('api/orders/<int:pk>/award/', views.api_order_award, name='api_order_award'),
     path('api/orders/<int:pk>/pay/', views.api_order_pay, name='api_order_pay'),
     path('api/settings/', views.api_settings, name='api_settings_json'),
+    path('api/towns/', views.api_towns, name='api_towns'),
+    path('api/town-route/', views.api_town_route, name='api_town_route'),
 ]

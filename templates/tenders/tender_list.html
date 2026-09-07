@@ -12,7 +12,8 @@
 
   <div id="tenders-app"
        data-url="{% url 'tenders:api_tender_list' %}"
-       data-create-url="{% url 'tenders:create' %}">
+       data-create-url="{% url 'tenders:create' %}"
+       data-route-url="{% url 'tenders:route_map' %}">
     {% verbatim %}
     <div v-cloak>
       <div class="table-wrap" v-if="tenders.length">
@@ -43,6 +44,9 @@
               <td>{{ t.cargo_date }}</td>
               <td><span class="badge" v-bind:class="'badge-' + t.status">{{ t.status_label }}</span></td>
               <td>{{ t.response_code || '-' }}</td>
+              <td>
+                <a class="btn btn-sm btn-secondary" v-bind:href="routeHref(t)" title="View route on map">Route</a>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -69,7 +73,24 @@
     var api = window.HYPAX.api;
     Vue.createApp({
       data: function () {
-        return { tenders: [], loaded: false, createUrl: root.dataset.createUrl };
+        return {
+          tenders: [],
+          loaded: false,
+          createUrl: root.dataset.createUrl,
+          routeUrl: root.dataset.routeUrl,
+        };
+      },
+      methods: {
+        routeHref: function (t) {
+          var route = t.route || '';
+          var from = '', to = '';
+          var arrow = route.indexOf(' -> ');
+          if (arrow !== -1) {
+            from = encodeURIComponent(route.slice(0, arrow).trim());
+            to = encodeURIComponent(route.slice(arrow + 4).trim());
+          }
+          return this.routeUrl + '?from=' + from + '&to=' + to + '&tender_id=' + t.id;
+        },
       },
       created: async function () {
         try {

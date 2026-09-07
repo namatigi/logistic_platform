@@ -1,6 +1,13 @@
 from django.contrib import admin
 
-from .models import ApiSetting, Order, OrderLine, Tender
+from .models import ApiSetting, Order, OrderLine, Tender, Town
+
+
+@admin.register(Town)
+class TownAdmin(admin.ModelAdmin):
+    list_display = ('name', 'country', 'lat', 'lng')
+    list_filter = ('country',)
+    search_fields = ('name', 'country')
 
 
 @admin.register(Tender)

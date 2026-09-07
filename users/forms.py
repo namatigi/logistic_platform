@@ -1,7 +1,7 @@
 from django import forms
 from django.core.exceptions import ValidationError
 
-from .models import CustomUser
+from .models import Address, CustomUser, Profile
 
 
 class SignUpForm(forms.ModelForm):
@@ -25,3 +25,17 @@ class SignUpForm(forms.ModelForm):
         if commit:
             user.save()
         return user
+
+
+class ProfileForm(forms.ModelForm):
+    email = forms.EmailField(required=True, label='Email address')
+
+    class Meta:
+        model = Profile
+        fields = ('bio', 'profile_picture', 'phone')
+
+
+class AddressForm(forms.ModelForm):
+    class Meta:
+        model = Address
+        fields = ('label', 'street', 'city', 'postal_code', 'country', 'is_primary')
