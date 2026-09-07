@@ -10,44 +10,75 @@
     <a class="btn btn-primary" href="{% url 'companies:create' %}">+ Register company</a>
   </div>
 
-  {% if companies %}
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Company</th>
-          <th>Reg. Number</th>
-          <th>Contact</th>
-          <th>Phone</th>
-          <th>City / Country</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for company in companies %}
-        <tr>
-          <td><strong>{{ company.name }}</strong><br><span style="color:#64748b; font-size:13px;">{{ company.email }}</span></td>
-          <td>{{ company.registration_number|default:'-' }}</td>
-          <td>{{ company.contact_person|default:'-' }}</td>
-          <td>{{ company.phone|default:'-' }}</td>
-          <td>{{ company.city|default:'-' }} / {{ company.country|default:'-' }}</td>
-          <td style="text-align:right; white-space:nowrap;">
-            <a class="btn btn-secondary btn-sm" href="{% url 'companies:update' company.pk %}">Edit</a>
-            <a class="btn btn-danger btn-sm" href="{% url 'companies:delete' company.pk %}">Delete</a>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% else %}
-  <div class="card">
-    <div class="empty">
-      <div class="empty-icon">&#8982;</div>
-      <p>No companies registered yet. Add your first company to get started.</p>
-      <a class="btn btn-primary" href="{% url 'companies:create' %}">+ Register company</a>
+  <div id="companies-app"
+       data-url="{% url 'companies:api_list' %}"
+       data-create-url="{% url 'companies:create' %}">
+    {% verbatim %}
+    <div v-cloak>
+      <div class="alert alert-success" v-if="notice">{{ notice }}</div>
+
+      <div class="table-wrap" v-if="companies.length">
+        <table>
+          <thead>
+            <tr>
+              <th>Company</th>
+              <th>Reg. Number</th>
+              <th>Contact</th>
+              <th>Phone</th>
+              <th>City / Country</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="c in companies" v-bind:key="c.id">
+              <td><strong>{{ c.name }}</strong><br><span style="color:#64748b; font-size:13px;">{{ c.email }}</span></td>
+              <td>{{ c.registration_number || '-' }}</td>
+              <td>{{ c.contact_person || '-' }}</td>
+              <td>{{ c.phone || '-' }}</td>
+              <td>{{ c.city || '-' }} / {{ c.country || '-' }}</td>
+              <td style="text-align:right; white-space:nowrap;">
+                <a class="btn btn-secondary btn-sm" v-bind:href="c.edit_url">Edit</a>
+                <a class="btn btn-danger btn-sm" v-bind:href="c.delete_url">Delete</a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card" v-else-if="loaded">
+        <div class="empty">
+          <div class="empty-icon">&#8982;</div>
+          <p>No companies registered yet. Add your first company to get started.</p>
+          <a class="btn btn-primary" v-bind:href="createUrl">+ Register company</a>
+        </div>
+      </div>
+
+      <div class="card" v-else>
+        <div class="empty"><p>Loading companies...</p></div>
+      </div>
     </div>
+    {% endverbatim %}
   </div>
-  {% endif %}
 </div>
+<script>
+  (function () {
+    var root = document.getElementById('companies-app');
+    var api = window.HYPAX.api;
+    Vue.createApp({
+      data: function () {
+        return { companies: [], loaded: false, notice: '', createUrl: root.dataset.createUrl };
+      },
+      created: async function () {
+        try {
+          var res = await api.get(root.dataset.url);
+          this.companies = (res && res.companies) || [];
+        } catch (e) {
+          this.notice = e.message;
+        } finally {
+          this.loaded = true;
+        }
+      }
+    }).mount('#companies-app');
+  })();
+</script>
 {% endblock %}

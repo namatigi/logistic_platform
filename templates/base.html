@@ -6,6 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}HYPAX Cargo Logistic and Transportation{% endblock %}</title>
   <link rel="stylesheet" href="{% static 'css/hypax.css' %}">
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="{% static 'js/hypax.js' %}"></script>
 </head>
 <body>
   {% if user.is_authenticated %}

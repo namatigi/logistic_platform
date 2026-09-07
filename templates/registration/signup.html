@@ -16,36 +16,75 @@
     <h1 class="auth-heading">Create your account</h1>
     <p class="auth-sub">Register with your email address</p>
 
-    {% for error in form.email.errors %}
-    <div class="alert alert-error">{{ error }}</div>
-    {% endfor %}
-    {% for error in form.non_field_errors %}
-    <div class="alert alert-error">{{ error }}</div>
-    {% endfor %}
+    <div id="auth-app" data-url="{% url 'users:api_signup' %}">
+      {% verbatim %}
+      <div v-cloak>
+        <div class="alert alert-error" v-if="error">{{ error }}</div>
 
-    <form method="post" novalidate>
-      {% csrf_token %}
-      <div class="form-row">
-        <label for="{{ form.email.id_for_label }}">Email address</label>
-        {{ form.email }}
+        <form novalidate @submit.prevent="submit">
+          <div class="form-row">
+            <label for="signup-email">Email address</label>
+            <input id="signup-email" type="email" v-model.trim="email" autocomplete="email" required>
+          </div>
+          <div class="form-row">
+            <label for="signup-password1">Password</label>
+            <input id="signup-password1" type="password" v-model="password1" autocomplete="new-password" required>
+          </div>
+          <div class="form-row">
+            <label for="signup-password2">Confirm password</label>
+            <input id="signup-password2" type="password" v-model="password2" autocomplete="new-password" required>
+            <div class="field-error" v-if="password2 && password1 !== password2"><ul><li>Passwords do not match.</li></ul></div>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block" :disabled="loading">
+            <span v-if="loading">Signing up...</span>
+            <span v-else>Sign up</span>
+          </button>
+        </form>
       </div>
-      <div class="form-row">
-        <label for="{{ form.password1.id_for_label }}">Password</label>
-        {{ form.password1 }}
-      </div>
-      <div class="form-row">
-        <label for="{{ form.password2.id_for_label }}">Confirm password</label>
-        {{ form.password2 }}
-        {% if form.password2.errors %}
-        <div class="field-error"><ul>{% for e in form.password2.errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
-        {% endif %}
-      </div>
-      <button type="submit" class="btn btn-primary btn-block">Sign up</button>
-    </form>
+      {% endverbatim %}
+    </div>
 
     <p class="auth-footer">
       Already have an account? <a href="{% url 'users:login' %}">Sign in</a>
     </p>
   </div>
 </div>
+<script>
+  (function () {
+    var root = document.getElementById('auth-app');
+    var api = window.HYPAX.api;
+    Vue.createApp({
+      data: function () {
+        return { email: '', password1: '', password2: '', error: '', loading: false };
+      },
+      methods: {
+        submit: async function () {
+          var self = this;
+          self.error = '';
+          if (self.password1 !== self.password2) {
+            self.error = 'Passwords do not match.';
+            return;
+          }
+          self.loading = true;
+          try {
+            var res = await api.post(root.dataset.url, {
+              email: self.email,
+              password1: self.password1,
+              password2: self.password2
+            });
+            if (res && res.ok === false) {
+              self.error = res.error || 'Signup failed.';
+              return;
+            }
+            window.location.href = (res && res.redirect) || '/tenders/';
+          } catch (e) {
+            self.error = e.message || 'Signup failed.';
+          } finally {
+            self.loading = false;
+          }
+        }
+      }
+    }).mount('#auth-app');
+  })();
+</script>
 {% endblock %}

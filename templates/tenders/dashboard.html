@@ -5,74 +5,122 @@
   <div class="page-header">
     <div>
       <h1 class="page-title">Dashboard</h1>
-      <p class="page-subtitle">Welcome back, {{ user.email }}</p>
+      {% verbatim %}
+      <p class="page-subtitle">Welcome back, {{ email }}</p>
+      {% endverbatim %}
     </div>
     <a class="btn btn-primary" href="{% url 'tenders:create' %}">+ Send tender</a>
   </div>
 
-  <div class="stats">
-    <div class="stat">
-      <div class="stat-value">{{ company_count }}</div>
-      <div class="stat-label">Registered companies</div>
-    </div>
-    <div class="stat">
-      <div class="stat-value">{{ tender_count }}</div>
-      <div class="stat-label">Tenders submitted</div>
-    </div>
-    <div class="stat">
-      <div class="stat-value">{{ order_count }}</div>
-      <div class="stat-label">Orders received</div>
-    </div>
-    <div class="stat">
-      <a href="{% url 'companies:create' %}" class="btn btn-secondary btn-sm">+ Add company</a>
-      <div class="stat-label" style="margin-top:8px;">Manage your companies</div>
-    </div>
-    <div class="stat">
-      <a href="{% url 'tenders:api_settings' %}" class="btn btn-secondary btn-sm">Configure API</a>
-      <div class="stat-label" style="margin-top:8px;">Set base URL &amp; auth</div>
-    </div>
-  </div>
+  <div id="dashboard-app"
+       data-url="{% url 'tenders:api_dashboard' %}"
+       data-company-url="{% url 'companies:create' %}"
+       data-api-url="{% url 'tenders:api_settings' %}"
+       data-list-url="{% url 'tenders:list' %}"
+       data-create-url="{% url 'tenders:create' %}">
+    {% verbatim %}
+    <div v-cloak>
 
-  <div class="page-header" style="margin-bottom:12px;">
-    <h2 class="page-title" style="font-size:17px;">Recent tenders</h2>
-    <a href="{% url 'tenders:list' %}">View all &rarr;</a>
-  </div>
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-value">{{ company_count }}</div>
+          <div class="stat-label">Registered companies</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value">{{ tender_count }}</div>
+          <div class="stat-label">Tenders submitted</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value">{{ order_count }}</div>
+          <div class="stat-label">Orders received</div>
+        </div>
+        <div class="stat">
+          <a v-bind:href="companyUrl" class="btn btn-secondary btn-sm">+ Add company</a>
+          <div class="stat-label" style="margin-top:8px;">Manage your companies</div>
+        </div>
+        <div class="stat">
+          <a v-bind:href="apiUrl" class="btn btn-secondary btn-sm">Configure API</a>
+          <div class="stat-label" style="margin-top:8px;">Set base URL &amp; auth</div>
+        </div>
+      </div>
 
-  {% if recent_tenders %}
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Customer</th>
-          <th>Route</th>
-          <th>Cargo</th>
-          <th>Trucks</th>
-          <th>Cargo date</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for tender in recent_tenders %}
-        <tr>
-          <td><strong>{{ tender.customer }}</strong></td>
-          <td>{{ tender.route_loading }} &rarr; {{ tender.route_delivery }}</td>
-          <td>{{ tender.get_cargo_type_display }} / {{ tender.get_truck_type_display }}</td>
-          <td>{{ tender.number_of_trucks }} &middot; {{ tender.weight }} t &middot; {{ tender.distance_km }} km</td>
-          <td>{{ tender.cargo_date }}</td>
-          <td><span class="badge badge-{{ tender.status }}">{{ tender.get_status_display }}</span></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% else %}
-  <div class="card">
-    <div class="empty">
-      <div class="empty-icon">&#128666;</div>
-      <p>No tenders sent yet.</p>
-      <a class="btn btn-primary" href="{% url 'tenders:create' %}">Send your first tender</a>
+      <div class="page-header" style="margin-bottom:12px;">
+        <h2 class="page-title" style="font-size:17px;">Recent tenders</h2>
+        <a v-bind:href="listUrl">View all &rarr;</a>
+      </div>
+
+      <div class="table-wrap" v-if="recent_tenders.length">
+        <table>
+          <thead>
+            <tr>
+              <th>Customer</th>
+              <th>Route</th>
+              <th>Cargo</th>
+              <th>Trucks</th>
+              <th>Cargo date</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="t in recent_tenders" v-bind:key="t.id">
+              <td><strong>{{ t.customer }}</strong></td>
+              <td>{{ t.route }}</td>
+              <td>{{ t.cargo_type }} / {{ t.truck_type }}</td>
+              <td>{{ t.number_of_trucks }} &middot; {{ t.weight }} t &middot; {{ t.distance_km }} km</td>
+              <td>{{ t.cargo_date }}</td>
+              <td><span class="badge" v-bind:class="'badge-' + t.status">{{ t.status_label }}</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card" v-else-if="loaded">
+        <div class="empty">
+          <div class="empty-icon">&#128666;</div>
+          <p>No tenders sent yet.</p>
+          <a class="btn btn-primary" v-bind:href="createUrl">Send your first tender</a>
+        </div>
+      </div>
+
+      <div class="card" v-else>
+        <div class="empty"><p>Loading dashboard...</p></div>
+      </div>
     </div>
+    {% endverbatim %}
   </div>
-  {% endif %}
 </div>
+<script>
+  (function () {
+    var root = document.getElementById('dashboard-app');
+    var api = window.HYPAX.api;
+    Vue.createApp({
+      data: function () {
+        return {
+          email: '',
+          company_count: 0,
+          tender_count: 0,
+          order_count: 0,
+          recent_tenders: [],
+          loaded: false,
+          companyUrl: root.dataset.companyUrl,
+          apiUrl: root.dataset.apiUrl,
+          listUrl: root.dataset.listUrl,
+          createUrl: root.dataset.createUrl
+        };
+      },
+      created: async function () {
+        try {
+          var res = await api.get(root.dataset.url);
+          this.email = res.email || '';
+          this.company_count = res.company_count || 0;
+          this.tender_count = res.tender_count || 0;
+          this.order_count = res.order_count || 0;
+          this.recent_tenders = res.recent_tenders || [];
+        } finally {
+          this.loaded = true;
+        }
+      }
+    }).mount('#dashboard-app');
+  })();
+</script>
 {% endblock %}

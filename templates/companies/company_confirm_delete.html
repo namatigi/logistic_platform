@@ -4,12 +4,56 @@
 <div class="container" style="max-width:560px;">
   <div class="card" style="text-align:center;">
     <h1 class="card-title">Delete company</h1>
-    <p>Are you sure you want to delete <strong>{{ object.name }}</strong>? This action cannot be undone.</p>
-    <form method="post" style="margin-top:20px; display:flex; gap:12px; justify-content:center;">
-      {% csrf_token %}
-      <button type="submit" class="btn btn-danger">Delete</button>
-      <a class="btn btn-secondary" href="{% url 'companies:list' %}">Cancel</a>
-    </form>
+
+    <div id="delete-app"
+         data-name="{{ object.name }}"
+         data-delete-url="{% url 'companies:api_delete' object.pk %}"
+         data-list-url="{% url 'companies:list' %}">
+      {% verbatim %}
+      <div v-cloak>
+        <p>Are you sure you want to delete <strong>{{ name }}</strong>? This action cannot be undone.</p>
+        <div class="alert alert-error" v-if="error" style="margin:16px 0;">{{ error }}</div>
+        <div style="margin-top:20px; display:flex; gap:12px; justify-content:center;">
+          <button type="button" class="btn btn-danger" @click="remove" :disabled="loading">
+            <span v-if="loading">Deleting...</span>
+            <span v-else>Delete</span>
+          </button>
+          <a class="btn btn-secondary" v-bind:href="listUrl">Cancel</a>
+        </div>
+      </div>
+      {% endverbatim %}
+    </div>
   </div>
 </div>
+
+<script>
+  (function () {
+    var root = document.getElementById('delete-app');
+    var api = window.HYPAX.api;
+    Vue.createApp({
+      data: function () {
+        return { name: root.dataset.name, loading: false, error: '', listUrl: root.dataset.listUrl };
+      },
+      methods: {
+        remove: async function () {
+          var self = this;
+          self.error = '';
+          self.loading = true;
+          try {
+            var res = await api.post(root.dataset.deleteUrl, {});
+            if (res && res.ok === false) {
+              self.error = res.error || 'Delete failed.';
+              return;
+            }
+            window.location.href = root.dataset.listUrl;
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.loading = false;
+          }
+        }
+      }
+    }).mount('#delete-app');
+  })();
+</script>
 {% endblock %}

@@ -5,103 +5,178 @@
   <div class="page-header">
     <div>
       <h1 class="page-title">Orders</h1>
-      <p class="page-subtitle">Orders received from the external system via webhook</p>
+      <p class="page-subtitle">Orders received from Transporters</p>
     </div>
   </div>
 
-  {% if orders %}
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Order</th>
-          <th>Customer</th>
-          <th>Company</th>
-          <th>Cargo ref</th>
-          <th>Tender</th>
-          <th>Date</th>
-          <th>Amount</th>
-          <th>State</th>
-          <th>Award</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for order in orders %}
-        <tr>
-          <td>
-            <a href="{% url 'tenders:order_detail' order.pk %}"><strong>{{ order.order_name }}</strong></a><br>
-            <span style="color:#64748b; font-size:13px;">#{{ order.order_id }}</span>
-          </td>
-          <td>{{ order.customer|default:'-' }}</td>
-          <td>{{ order.company_name|default:'-' }}</td>
-          <td>{{ order.cargo_reference|default:'-' }}</td>
-          <td>
-            {% if order.tender %}
-              <a href="{% url 'tenders:list' %}">{{ order.tender.cargo_reference }}</a>
-            {% else %}<span style="color:#94a3b8;">not linked</span>{% endif %}
-          </td>
-          <td>{{ order.date_order|date:'Y-m-d H:i'|default:'-' }}</td>
-          <td><strong>{{ order.amount_total|floatformat:2 }} {{ order.currency }}</strong></td>
-          <td>
-            {% if order.state == 'sale' or order.state == 'confirmed' or order.state == 'done' %}
-              <span class="badge badge-success">{{ order.state }}</span>
-            {% elif order.state == 'cancel' or order.state == 'canceled' %}
-              <span class="badge badge-danger">{{ order.state }}</span>
-            {% elif order.state == 'sent' %}
-              <span class="badge badge-warning">{{ order.state }}</span>
-            {% else %}
-              <span class="badge badge-info">{{ order.state }}</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if order.fully_confirmed or order.partially_confirmed %}
-            <form method="post" action="{% url 'tenders:order_pay' order.pk %}">
-              {% csrf_token %}
-              <button type="submit" class="btn btn-primary btn-sm btn-award">Make payment</button>
-            </form>
-            {% else %}
-            <form method="post" action="{% url 'tenders:order_award' order.pk %}" onsubmit="setAwardLoading(this)">
-              {% csrf_token %}
-              <button type="submit" class="btn btn-primary btn-sm btn-award">Award</button>
-            </form>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  <div id="orders-app"
+       data-url="{% url 'tenders:api_order_list' %}"
+       data-detail-base="{% url 'tenders:order_detail' 0 %}"
+       data-award-base="{% url 'tenders:api_order_award' 0 %}"
+       data-pay-base="{% url 'tenders:api_order_pay' 0 %}"
+       data-tender-list-url="{% url 'tenders:list' %}"
+       data-settings-url="{% url 'tenders:api_settings' %}">
+    {% verbatim %}
+    <div v-cloak>
+      <div class="alert alert-success" v-if="notice">{{ notice }}</div>
+      <div class="alert alert-error" v-if="error">{{ error }}</div>
 
-  {% if is_paginated %}
-  <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px; align-items:center;">
-    <span style="color:#64748b; font-size:13px;">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
-    {% if page_obj.has_previous %}
-    <a class="btn btn-secondary btn-sm" href="?page={{ page_obj.previous_page_number }}">&larr; Previous</a>
-    {% endif %}
-    {% if page_obj.has_next %}
-    <a class="btn btn-secondary btn-sm" href="?page={{ page_obj.next_page_number }}">Next &rarr;</a>
-    {% endif %}
-  </div>
-  {% endif %}
+      <div v-if="groups.length">
+        <div v-for="group in groups" v-bind:key="group.grouper">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin:6px 0 10px;">
+            <strong style="font-size:14px;">{{ group.label }}</strong>
+            <span style="color:#64748b; font-size:13px;">{{ group.orders.length }} order{{ group.orders.length === 1 ? '' : 's' }}</span>
+          </div>
 
-  {% else %}
-  <div class="card">
-    <div class="empty">
-      <div class="empty-icon">&#128203;</div>
-      <p>No orders have been received yet.<br>
-        Configure the webhook URL in <a href="{% url 'tenders:api_settings' %}">API Settings</a> and share it with the external system.</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Order</th>
+                  <th>Customer</th>
+                  <th>TRANSPORTER</th>
+                  <th>Cargo ref</th>
+                  <th>Tender</th>
+                  <th>Date</th>
+                  <th>Amount</th>
+                  <th>State</th>
+                  <th>Award</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="o in group.orders" v-bind:key="o.id">
+                  <td>
+                    <a v-bind:href="detailUrl(o.id)"><strong>{{ o.order_name }}</strong></a><br>
+                    <span style="color:#64748b; font-size:13px;">#{{ o.order_id }}</span>
+                  </td>
+                  <td>{{ o.customer || '-' }}</td>
+                  <td>{{ o.company_name || '-' }}</td>
+                  <td>{{ o.cargo_reference || '-' }}</td>
+                  <td>
+                    <a v-if="o.tender_ref" v-bind:href="tenderListUrl">{{ o.tender_ref }}</a>
+                    <span v-else style="color:#94a3b8;">not linked</span>
+                  </td>
+                  <td>{{ fmtDate(o.date_order) }}</td>
+                  <td><strong>{{ money(o.amount_total, o.currency) }}</strong></td>
+                  <td><span class="badge" v-bind:class="stateBadge(o.state)">{{ o.state }}</span></td>
+                  <td>
+                    <button v-if="o.fully_confirmed || o.partially_confirmed"
+                            type="button" class="btn btn-primary btn-sm btn-award"
+                            @click="pay(o)" :disabled="payId === o.id">
+                      <span v-if="payId === o.id">Paying...</span>
+                      <span v-else>Make payment</span>
+                    </button>
+                    <button v-else type="button" class="btn btn-primary btn-sm btn-award"
+                            @click="award(o)" :disabled="awardId === o.id">
+                      <span v-if="awardId === o.id">Awarding...</span>
+                      <span v-else>Award</span>
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" v-else-if="loaded">
+        <div class="empty">
+          <div class="empty-icon">&#128203;</div>
+          <p>No orders have been received yet.<br>
+            Configure the webhook URL in <a v-bind:href="settingsUrl">API Settings</a> and share it with the external system.</p>
+        </div>
+      </div>
+
+      <div class="card" v-else>
+        <div class="empty"><p>Loading orders...</p></div>
+      </div>
     </div>
+    {% endverbatim %}
   </div>
-  {% endif %}
 </div>
 <script>
-  function setAwardLoading(form) {
-    var btn = form.querySelector('button[type="submit"]');
-    if (btn && !btn.disabled) {
-      btn.disabled = true;
-      btn.classList.add('is-loading');
-      btn.textContent = 'Awarding...';
+  (function () {
+    var root = document.getElementById('orders-app');
+    var api = window.HYPAX.api;
+    var HY = window.HYPAX;
+
+    function stripBase(patternUrl) {
+      return String(patternUrl).replace(/\/0\/?$/, '/');
     }
-  }
+
+    Vue.createApp({
+      data: function () {
+        return {
+          groups: [],
+          loaded: false,
+          notice: '',
+          error: '',
+          awardId: null,
+          payId: null,
+          detailBase: stripBase(root.dataset.detailBase),
+          awardBase: stripBase(root.dataset.awardBase),
+          payBase: stripBase(root.dataset.payBase),
+          tenderListUrl: root.dataset.tenderListUrl,
+          settingsUrl: root.dataset.settingsUrl
+        };
+      },
+      created: async function () {
+        await this.load();
+      },
+      methods: {
+        load: async function () {
+          try {
+            var res = await api.get(root.dataset.url);
+            this.groups = (res && res.groups) || [];
+          } catch (e) {
+            this.error = e.message;
+          } finally {
+            this.loaded = true;
+          }
+        },
+        detailUrl: function (id) { return this.detailBase + id + '/'; },
+        fmtDate: function (v) { return HY.fmtDate(v); },
+        money: function (v, c) { return HY.money(v, c); },
+        stateBadge: function (s) { return HY.stateBadgeClass(s); },
+        award: async function (o) {
+          var self = this;
+          self.error = '';
+          self.notice = '';
+          self.awardId = o.id;
+          try {
+            var res = await api.post(this.awardBase + o.id + '/award/', {});
+            if (res && res.ok === false) {
+              self.error = res.error || 'Award failed.';
+              return;
+            }
+            self.notice = (res && res.message) || 'Order confirmed successfully.';
+            await self.load();
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.awardId = null;
+          }
+        },
+        pay: async function (o) {
+          var self = this;
+          self.error = '';
+          self.notice = '';
+          self.payId = o.id;
+          try {
+            var res = await api.post(this.payBase + o.id + '/pay/', {});
+            if (res && res.ok === false) {
+              self.error = res.error || 'Payment failed.';
+              return;
+            }
+            self.notice = (res && res.message) || 'Payment request sent.';
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.payId = null;
+          }
+        }
+      }
+    }).mount('#orders-app');
+  })();
 </script>
 {% endblock %}

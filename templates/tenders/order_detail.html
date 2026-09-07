@@ -1,160 +1,237 @@
 {% extends 'base.html' %}
-{% block title %}{{ order.order_name }} &middot; HYPAX{% endblock %}
+{% block title %}Order &middot; HYPAX{% endblock %}
 {% block content %}
 <div class="container" style="max-width:900px;">
-  <div class="page-header">
-    <div>
-      <h1 class="page-title">{{ order.order_name }}</h1>
-      <p class="page-subtitle">Order #{{ order.order_id }} &middot; updated {{ order.updated_at|date:'Y-m-d H:i' }}</p>
-    </div>
-    <a class="btn btn-secondary" href="{% url 'tenders:order_list' %}">&larr; Back to orders</a>
-  </div>
+  <div id="order-detail-app"
+       data-url="{% url 'tenders:api_order_detail' object.pk %}"
+       data-list-url="{% url 'tenders:order_list' %}"
+       data-detail-base="{% url 'tenders:order_detail' 0 %}"
+       data-award-base="{% url 'tenders:api_order_award' 0 %}"
+       data-pay-base="{% url 'tenders:api_order_pay' 0 %}">
+    {% verbatim %}
+    <div v-cloak v-if="order">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">{{ order.order_name }}</h1>
+          <p class="page-subtitle">Order #{{ order.order_id }} &middot; updated {{ fmtDate(order.updated_at) }}</p>
+        </div>
+        <a class="btn btn-secondary" v-bind:href="listUrl">&larr; Back to orders</a>
+      </div>
 
-  <div class="card">
-    <div style="display:flex; flex-wrap:wrap; gap:20px 40px;">
-      <div>
-        <div style="color:#64748b; font-size:13px;">State</div>
-        <div style="margin-top:4px;">
-          {% if order.state == 'sale' or order.state == 'confirmed' or order.state == 'done' %}
-            <span class="badge badge-success">{{ order.state }}</span>
-          {% elif order.state == 'cancel' or order.state == 'canceled' %}
-            <span class="badge badge-danger">{{ order.state }}</span>
-          {% elif order.state == 'sent' %}
-            <span class="badge badge-warning">{{ order.state }}</span>
-          {% else %}
-            <span class="badge badge-info">{{ order.state }}</span>
-          {% endif %}
+      <div class="alert alert-success" v-if="notice">{{ notice }}</div>
+      <div class="alert alert-error" v-if="error">{{ error }}</div>
+
+      <div class="card">
+        <div style="display:flex; flex-wrap:wrap; gap:20px 40px;">
+          <div>
+            <div style="color:#64748b; font-size:13px;">State</div>
+            <div style="margin-top:4px;">
+              <span class="badge" v-bind:class="stateBadge(order.state)">{{ order.state }}</span>
+            </div>
+          </div>
+          <div>
+            <div style="color:#64748b; font-size:13px;">Customer</div>
+            <strong>{{ order.customer || '-' }}</strong>
+          </div>
+          <div>
+            <div style="color:#64748b; font-size:13px;">Company</div>
+            <strong>{{ order.company_name || '-' }}</strong><br>
+            <span style="color:#64748b; font-size:13px;">ID: {{ order.company_id || '-' }}</span>
+          </div>
+          <div>
+            <div style="color:#64748b; font-size:13px;">Order date</div>
+            <strong>{{ fmtDate(order.date_order) }}</strong>
+          </div>
+          <div>
+            <div style="color:#64748b; font-size:13px;">Total</div>
+            <strong>{{ money(order.amount_total, order.currency) }}</strong>
+          </div>
+        </div>
+
+        <hr style="border:none; border-top:1px solid #e2e8f0; margin:20px 0;">
+
+        <div style="display:flex; flex-wrap:wrap; gap:20px 40px;">
+          <div>
+            <div style="color:#64748b; font-size:13px;">Cargo reference</div>
+            <strong>{{ order.cargo_reference || '-' }}</strong>
+          </div>
+          <div>
+            <div style="color:#64748b; font-size:13px;">Cargo ID</div>
+            <strong>{{ order.cargo_id || '-' }}</strong>
+          </div>
+          <div>
+            <div style="color:#64748b; font-size:13px;">Linked tender</div>
+            <template v-if="order.tender_ref">
+              <strong>{{ order.tender_ref }}</strong><br>
+              <span style="color:#64748b; font-size:13px;">{{ order.tender_route }}</span>
+            </template>
+            <span v-else style="color:#94a3b8;">Not linked</span>
+            <div style="margin-top:10px;">
+              <button v-if="order.fully_confirmed || order.partially_confirmed"
+                      type="button" class="btn btn-primary btn-award" @click="pay" :disabled="paying">
+                <span v-if="paying">Paying...</span>
+                <span v-else>Make payment</span>
+              </button>
+              <template v-else>
+                <button type="button" class="btn btn-primary btn-award" @click="award" :disabled="awarding">
+                  <span v-if="awarding">Awarding...</span>
+                  <span v-else>Award</span>
+                </button>
+                <span class="form-help">Awards the checked order line(s) below (partial confirmation).</span>
+              </template>
+            </div>
+          </div>
         </div>
       </div>
-      <div>
-        <div style="color:#64748b; font-size:13px;">Customer</div>
-        <strong>{{ order.customer|default:'-' }}</strong>
-      </div>
-      <div>
-        <div style="color:#64748b; font-size:13px;">Company</div>
-        <strong>{{ order.company_name|default:'-' }}</strong><br>
-        <span style="color:#64748b; font-size:13px;">ID: {{ order.company_id|default:'-' }}</span>
-      </div>
-      <div>
-        <div style="color:#64748b; font-size:13px;">Order date</div>
-        <strong>{{ order.date_order|date:'Y-m-d H:i'|default:'-' }}</strong>
-      </div>
-      <div>
-        <div style="color:#64748b; font-size:13px;">Total</div>
-        <strong>{{ order.amount_total|floatformat:2 }} {{ order.currency|default:'' }}</strong>
-      </div>
-    </div>
 
-    <hr style="border:none; border-top:1px solid #e2e8f0; margin:20px 0;">
+      <div class="card">
+        <div class="card-title">Order lines</div>
 
-    <div style="display:flex; flex-wrap:wrap; gap:20px 40px;">
-      <div>
-        <div style="color:#64748b; font-size:13px;">Cargo reference</div>
-        <strong>{{ order.cargo_reference|default:'-' }}</strong>
-      </div>
-      <div>
-        <div style="color:#64748b; font-size:13px;">Cargo ID</div>
-        <strong>{{ order.cargo_id|default:'-' }}</strong>
-      </div>
-      <div>
-        <div style="color:#64748b; font-size:13px;">Linked tender</div>
-        {% if order.tender %}
-          <strong>{{ order.tender.cargo_reference }}</strong><br>
-          <span style="color:#64748b; font-size:13px;">
-            {{ order.tender.route_loading }} &rarr; {{ order.tender.route_delivery }} &middot; {{ order.tender.cargo_date }}
-          </span>
-        {% else %}
-          <span style="color:#94a3b8;">Not linked</span>
-        {% endif %}
-        <div style="margin-top:10px;">
-          {% if order.fully_confirmed or order.partially_confirmed %}
-            <form method="post" action="{% url 'tenders:order_pay' order.pk %}">
-              {% csrf_token %}
-              <button type="submit" class="btn btn-primary btn-award">Make payment</button>
-            </form>
-          {% else %}
-            <button type="submit" form="award-form" class="btn btn-primary btn-award">Award</button>
-            <span class="form-help">Awards the checked order line(s) below (partial confirmation).</span>
-          {% endif %}
+        <div class="alert alert-success" style="margin-bottom:14px;" v-if="order.awarded_at">
+          <strong>Awarded on {{ fmtDate(order.awarded_at) }}</strong>
+          <span v-if="order.award_message"> &mdash; {{ order.award_message }}</span>
+          <span v-if="order.removed_line_ids.length"> Removed lines: {{ order.removed_line_ids.join(', ') }}.</span>
+          <span v-if="order.remaining_line_ids.length"> Remaining lines: {{ order.remaining_line_ids.join(', ') }}.</span>
+        </div>
+
+        <div class="table-wrap" style="box-shadow:none;">
+          <table>
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th style="text-align:right;">Qty</th>
+                <th style="text-align:right;">Unit price</th>
+                <th style="text-align:right;">Total</th>
+                <th>Award</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="line in order.lines" v-bind:key="line.line_id">
+                <td>{{ line.product_name }}<br><span style="color:#64748b; font-size:13px;">Line #{{ line.line_id }} &middot; Product #{{ line.product_id || '-' }}</span></td>
+                <td style="text-align:right;">{{ fmtQty(line.quantity) }}</td>
+                <td style="text-align:right;">{{ fmtQty(line.price_subtotal) }}</td>
+                <td style="text-align:right;"><strong>{{ fmtQty(line.price_total) }}</strong></td>
+                <td>
+                  <input v-if="isRemaining(line.line_id)" type="checkbox" checked disabled title="Confirmed line">
+                  <input v-else-if="isRemoved(line.line_id)" type="checkbox" disabled title="Removed line">
+                  <input v-else type="checkbox" class="award-line-checkbox" v-model="selectedIds" v-bind:value="line.line_id">
+                </td>
+              </tr>
+              <tr v-if="!order.lines.length">
+                <td colspan="6" style="color:#64748b; text-align:center;">No order lines.</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
-  </div>
 
-  <div class="card">
-    <div class="card-title">Order lines</div>
-
-    {% if order.award_response %}
-    <div class="alert alert-success" style="margin-bottom:14px;">
-      <strong>Awarded on {{ order.awarded_at|date:'Y-m-d H:i' }}</strong>{% if order.award_response.message %} &mdash; {{ order.award_response.message }}{% endif %}
-      {% if order.removed_line_ids %} Removed lines: {{ order.removed_line_ids|join:', ' }}.{% endif %}
-      {% if order.remaining_line_ids %} Remaining lines: {{ order.remaining_line_ids|join:', ' }}.{% endif %}
+    <div class="card" v-else-if="error">
+      <div class="empty"><p>{{ error }}</p></div>
     </div>
-    {% endif %}
 
-    <div class="table-wrap" style="box-shadow:none;">
-      <form id="award-form" method="post" action="{% url 'tenders:order_award' order.pk %}" onsubmit="return handleAwardSubmit(this);">
-        {% csrf_token %}
-        <input type="hidden" name="partial" value="1">
-        <table>
-          <thead>
-            <tr>
-              <th>Product</th>
-              <th style="text-align:right;">Qty</th>
-              <th style="text-align:right;">Unit price</th>
-              <th style="text-align:right;">Total</th>
-              <th>Award</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for line in order.lines.all %}
-            <tr>
-              <td>{{ line.product_name }}<br><span style="color:#64748b; font-size:13px;">Line #{{ line.line_id }} &middot; Product #{{ line.product_id|default:'-' }}</span></td>
-              <td style="text-align:right;">{{ line.quantity|floatformat:2 }}</td>
-              <td style="text-align:right;">{{ line.price_subtotal|floatformat:2 }}</td>
-              <td style="text-align:right;"><strong>{{ line.price_total|floatformat:2 }}</strong></td>
-              <td>
-                {% if line.line_id in order.remaining_line_ids %}
-                  <input type="checkbox" name="line_ids" value="{{ line.line_id }}" checked disabled title="Confirmed line">
-                {% elif line.line_id in order.removed_line_ids %}
-                  <input type="checkbox" name="line_ids" value="{{ line.line_id }}" disabled title="Removed line">
-                {% else %}
-                  <input type="checkbox" name="line_ids" value="{{ line.line_id }}" class="award-line-checkbox">
-                {% endif %}
-              </td>
-            </tr>
-            {% empty %}
-            <tr><td colspan="6" style="color:#64748b; text-align:center;">No order lines.</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </form>
+    <div class="card" v-else>
+      <div class="empty"><p>Loading order...</p></div>
     </div>
+    {% endverbatim %}
   </div>
 </div>
 <script>
-  function setAwardLoading(form) {
-    var btn = document.querySelector('button[form="' + form.id + '"], #' + form.id + ' button[type="submit"]');
-    if (!btn) { btn = form.querySelector('button[type="submit"]'); }
-    if (btn && !btn.disabled) {
-      btn.disabled = true;
-      btn.classList.add('is-loading');
-      btn.textContent = 'Awarding...';
-    }
-  }
+  (function () {
+    var root = document.getElementById('order-detail-app');
+    var api = window.HYPAX.api;
+    var HY = window.HYPAX;
 
-  function handleAwardSubmit(form) {
-    var boxes = form.querySelectorAll('input[name="line_ids"]');
-    var checked = false;
-    for (var i = 0; i < boxes.length; i++) {
-      if (boxes[i].checked) { checked = true; break; }
-    }
-    if (!checked) {
-      alert('Please check the order line(s) you want to award.');
-      return false;
-    }
-    setAwardLoading(form);
-    return true;
-  }
+    Vue.createApp({
+      data: function () {
+        return {
+          order: null,
+          selectedIds: [],
+          notice: '',
+          error: '',
+          awarding: false,
+          paying: false,
+          listUrl: root.dataset.listUrl,
+          awardBase: String(root.dataset.awardBase).replace(/\/0\/?$/, '/'),
+          payBase: String(root.dataset.payBase).replace(/\/0\/?$/, '/')
+        };
+      },
+      created: async function () {
+        await this.load();
+      },
+      methods: {
+        load: async function () {
+          try {
+            var res = await api.get(root.dataset.url);
+            if (res && res.ok === false) {
+              this.error = res.error || 'Failed to load order.';
+              return;
+            }
+            this.order = res.order || null;
+            this.selectedIds = [];
+          } catch (e) {
+            this.error = e.message;
+          }
+        },
+        fmtDate: function (v) { return HY.fmtDate(v); },
+        fmtQty: function (v) {
+          var n = Number(v);
+          return isNaN(n) ? (v || '0.00') : n.toFixed(2);
+        },
+        money: function (v, c) { return HY.money(v, c); },
+        stateBadge: function (s) { return HY.stateBadgeClass(s); },
+        isRemaining: function (lineId) {
+          return this.order.remaining_line_ids.indexOf(lineId) >= 0;
+        },
+        isRemoved: function (lineId) {
+          return this.order.removed_line_ids.indexOf(lineId) >= 0;
+        },
+        award: async function () {
+          var self = this;
+          self.error = '';
+          self.notice = '';
+          if (!self.selectedIds.length) {
+            self.error = 'Please check the order line(s) you want to award.';
+            return;
+          }
+          self.awarding = true;
+          try {
+            var res = await api.post(this.awardBase + self.order.id + '/award/', {
+              line_ids: self.selectedIds,
+              partial: true
+            });
+            if (res && res.ok === false) {
+              self.error = res.error || 'Award failed.';
+              return;
+            }
+            self.notice = (res && res.message) || 'Order confirmed successfully.';
+            await self.load();
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.awarding = false;
+          }
+        },
+        pay: async function () {
+          var self = this;
+          self.error = '';
+          self.notice = '';
+          self.paying = true;
+          try {
+            var res = await api.post(this.payBase + self.order.id + '/pay/', {});
+            if (res && res.ok === false) {
+              self.error = res.error || 'Payment failed.';
+              return;
+            }
+            self.notice = (res && res.message) || 'Payment request sent.';
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.paying = false;
+          }
+        }
+      }
+    }).mount('#order-detail-app');
+  })();
 </script>
 {% endblock %}

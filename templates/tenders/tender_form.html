@@ -5,45 +5,109 @@
   <div class="page-header">
     <div>
       <h1 class="page-title">Send tender</h1>
-      <p class="page-subtitle">Submit a tender to HYPAX at <code>POST {{ base_url|default:'(base URL)/api/v1/tenders' }}</code></p>
+      <p class="page-subtitle">Submit a tender to HYPAX at <code>(base URL)/api/v1/tenders</code></p>
     </div>
     <a class="btn btn-secondary" href="{% url 'tenders:list' %}">&larr; Back</a>
   </div>
 
-  {% if not api_setting or not api_setting.base_url %}
-  <div class="alert alert-warning">
-    You need to configure your <strong>base URL and auth</strong> before sending tenders.
-    <a href="{% url 'tenders:api_settings' %}">Configure API settings now &rarr;</a>
-  </div>
-  {% else %}
-  <div class="endpoint-hint">
-    Tenders will be posted to <strong>{{ api_setting.endpoint_url }}</strong>
-    {% if api_setting.auth_type == 'bearer' %}using a Bearer token{% elif api_setting.auth_type == 'basic' %}using Basic auth{% else %}without authentication{% endif %}.
-  </div>
-  {% endif %}
+  <div id="tender-form-app"
+       data-meta-url="{% url 'tenders:api_form_meta' %}"
+       data-settings-url="{% url 'tenders:api_settings' %}"
+       data-submit-url="{% url 'tenders:api_tender_create' %}"
+       data-list-url="{% url 'tenders:list' %}"
+       data-settings-page-url="{% url 'tenders:api_settings' %}">
+    {% verbatim %}
 
-  <div class="card">
-    <form method="post" novalidate>
-      {% csrf_token %}
-      <div class="form-grid">
-        {% for field in form %}
-        <div class="form-row">
-          {{ field.label_tag }}
-          {{ field }}
-          <div class="field-error">{{ field.errors }}</div>
+    <div class="alert" v-if="!loaded"><p>Loading form...</p></div>
+
+    <div class="alert alert-warning" v-if="loaded && !hasBaseUrl">
+      You need to configure your <strong>base URL and auth</strong> before sending tenders.
+      <a v-bind:href="settingsPageUrl">Configure API settings now &rarr;</a>
+    </div>
+    <div class="endpoint-hint" v-else-if="loaded">
+      Tenders will be posted to <strong>{{ endpoint }}</strong>
+      <span v-if="authType === 'bearer'">using a Bearer token</span>
+      <span v-else-if="authType === 'basic'">using Basic auth</span>
+      <span v-else>without authentication</span>.
+    </div>
+
+    <div class="alert alert-success" v-if="success" style="margin:14px 0;">{{ message }} Redirecting...</div>
+    <div class="alert alert-error" v-if="error" style="margin:14px 0;">{{ error }}</div>
+
+    <div class="card">
+      <form novalidate @submit.prevent="submit">
+        <div class="form-grid">
+          <div class="form-row">
+            <label>Route loading</label>
+            <select v-model="form.route_loading" required>
+              <option value="" disabled>Select town</option>
+              <option v-for="t in towns" v-bind:key="t.value" v-bind:value="t.value">{{ t.label }}</option>
+            </select>
+            <div class="field-error" v-if="errors.route_loading"><ul><li v-for="e in errors.route_loading">{{ e }}</li></ul></div>
+          </div>
+          <div class="form-row">
+            <label>Route delivery</label>
+            <select v-model="form.route_delivery" required>
+              <option value="" disabled>Select town</option>
+              <option v-for="t in towns" v-bind:key="t.value" v-bind:value="t.value">{{ t.label }}</option>
+            </select>
+            <div class="field-error" v-if="errors.route_delivery"><ul><li v-for="e in errors.route_delivery">{{ e }}</li></ul></div>
+          </div>
+          <div class="form-row">
+            <label>Customer</label>
+            <input type="text" v-model.trim="form.customer" required>
+            <div class="field-error" v-if="errors.customer"><ul><li v-for="e in errors.customer">{{ e }}</li></ul></div>
+          </div>
+          <div class="form-row">
+            <label>Cargo type</label>
+            <select v-model="form.cargo_type" required>
+              <option value="" disabled>Select cargo type</option>
+              <option v-for="c in cargoTypes" v-bind:key="c.value" v-bind:value="c.value">{{ c.label }}</option>
+            </select>
+            <div class="field-error" v-if="errors.cargo_type"><ul><li v-for="e in errors.cargo_type">{{ e }}</li></ul></div>
+          </div>
+          <div class="form-row">
+            <label>Truck type</label>
+            <select v-model="form.truck_type" required>
+              <option value="" disabled>Select truck type</option>
+              <option v-for="c in truckTypes" v-bind:key="c.value" v-bind:value="c.value">{{ c.label }}</option>
+            </select>
+            <div class="field-error" v-if="errors.truck_type"><ul><li v-for="e in errors.truck_type">{{ e }}</li></ul></div>
+          </div>
+          <div class="form-row">
+            <label>Weight</label>
+            <input type="number" step="0.1" v-model.number="form.weight" required>
+            <div class="field-error" v-if="errors.weight"><ul><li v-for="e in errors.weight">{{ e }}</li></ul></div>
+          </div>
+          <div class="form-row">
+            <label>Number of trucks</label>
+            <input type="number" step="1" v-model.number="form.number_of_trucks" required>
+            <div class="field-error" v-if="errors.number_of_trucks"><ul><li v-for="e in errors.number_of_trucks">{{ e }}</li></ul></div>
+          </div>
+          <div class="form-row">
+            <label>Distance km</label>
+            <input type="number" step="0.1" v-model.number="form.distance_km" required>
+            <div class="field-error" v-if="errors.distance_km"><ul><li v-for="e in errors.distance_km">{{ e }}</li></ul></div>
+          </div>
+          <div class="form-row">
+            <label>Cargo date</label>
+            <input type="date" v-model="form.cargo_date" required>
+            <div class="field-error" v-if="errors.cargo_date"><ul><li v-for="e in errors.cargo_date">{{ e }}</li></ul></div>
+          </div>
         </div>
-        {% endfor %}
-      </div>
-      <div class="form-actions">
-        <button type="submit" class="btn btn-primary">Send tender</button>
-        <a class="btn btn-secondary" href="{% url 'tenders:list' %}">Cancel</a>
-      </div>
-    </form>
-  </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary" :disabled="loading || success">
+            <span v-if="loading">Sending...</span>
+            <span v-else>Send tender</span>
+          </button>
+          <a class="btn btn-secondary" v-bind:href="listUrl">Cancel</a>
+        </div>
+      </form>
+    </div>
 
-  <div class="card" style="padding:16px;">
-    <div class="card-title" style="font-size:14px;">Payload sent to the API</div>
-    <pre style="background:#0f172a; color:#e2e8f0; padding:14px; border-radius:8px; font-size:13px; overflow-x:auto;">{
+    <div class="card" style="padding:16px;">
+      <div class="card-title" style="font-size:14px;">Payload sent to the API</div>
+      <pre style="background:#0f172a; color:#e2e8f0; padding:14px; border-radius:8px; font-size:13px; overflow-x:auto;">{
   "route_loading": "&lt;loading town&gt;",
   "route_delivery": "&lt;delivery town&gt;",
   "customer": "&lt;customer name&gt;",
@@ -54,6 +118,86 @@
   "distance_km": 850.0,
   "cargo_date": "2026-09-10"
 }</pre>
+    </div>
+
+    {% endverbatim %}
   </div>
 </div>
+
+<script>
+  (function () {
+    var root = document.getElementById('tender-form-app');
+    var api = window.HYPAX.api;
+
+    function blank() {
+      return {
+        route_loading: '', route_delivery: '', customer: '', cargo_type: '', truck_type: '',
+        weight: null, number_of_trucks: null, distance_km: null, cargo_date: ''
+      };
+    }
+
+    Vue.createApp({
+      data: function () {
+        return {
+          form: blank(),
+          towns: [],
+          cargoTypes: [],
+          truckTypes: [],
+          errors: {},
+          error: '',
+          success: false,
+          message: '',
+          loading: false,
+          loaded: false,
+          hasBaseUrl: false,
+          endpoint: '',
+          authType: '',
+          listUrl: root.dataset.listUrl,
+          settingsPageUrl: root.dataset.settingsPageUrl
+        };
+      },
+      created: async function () {
+        try {
+          var meta = await api.get(root.dataset.metaUrl);
+          this.towns = (meta.meta && meta.meta.towns) || [];
+          this.cargoTypes = (meta.meta && meta.meta.cargo_types) || [];
+          this.truckTypes = (meta.meta && meta.meta.truck_types) || [];
+
+          var s = await api.get(root.dataset.settingsUrl);
+          var setting = (s && s.setting) || {};
+          this.hasBaseUrl = !!(setting.base_url || '').trim();
+          this.endpoint = (setting.base_url || '(base URL)') + '/api/v1/tenders';
+          this.authType = setting.auth_type || 'none';
+        } catch (e) {
+          this.error = e.message;
+        } finally {
+          this.loaded = true;
+        }
+      },
+      methods: {
+        submit: async function () {
+          var self = this;
+          self.error = '';
+          self.errors = {};
+          self.loading = true;
+          try {
+            var res = await api.post(root.dataset.submitUrl, self.form);
+            if (res && res.ok === false) {
+              if (res.errors) { self.errors = res.errors; }
+              self.error = res.error || 'Please fix the highlighted fields.';
+              return;
+            }
+            self.message = (res && res.message) || 'Tender sent successfully.';
+            self.success = true;
+            setTimeout(function () { window.location.href = root.dataset.listUrl; }, 1500);
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.loading = false;
+          }
+        }
+      }
+    }).mount('#tender-form-app');
+  })();
+</script>
 {% endblock %}

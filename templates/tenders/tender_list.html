@@ -10,62 +10,76 @@
     <a class="btn btn-primary" href="{% url 'tenders:create' %}">+ New tender</a>
   </div>
 
-  {% if tenders %}
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Customer</th>
-          <th>Route</th>
-          <th>Cargo</th>
-          <th>Cargo ref</th>
-          <th>Weight</th>
-          <th>Trucks</th>
-          <th>Distance</th>
-          <th>Cargo date</th>
-          <th>Status</th>
-          <th>HTTP</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for tender in tenders %}
-        <tr>
-          <td><strong>{{ tender.customer }}</strong></td>
-          <td>{{ tender.route_loading }} &rarr; {{ tender.route_delivery }}</td>
-          <td>{{ tender.get_cargo_type_display }}<br><span style="color:#64748b; font-size:13px;">{{ tender.get_truck_type_display }}</span></td>
-          <td>{{ tender.cargo_reference|default:'-' }}</td>
-          <td>{{ tender.weight }} t</td>
-          <td>{{ tender.number_of_trucks }}</td>
-          <td>{{ tender.distance_km }} km</td>
-          <td>{{ tender.cargo_date }}</td>
-          <td><span class="badge badge-{{ tender.status }}">{{ tender.get_status_display }}</span></td>
-          <td>{{ tender.response_code|default:'-' }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  <div id="tenders-app"
+       data-url="{% url 'tenders:api_tender_list' %}"
+       data-create-url="{% url 'tenders:create' %}">
+    {% verbatim %}
+    <div v-cloak>
+      <div class="table-wrap" v-if="tenders.length">
+        <table>
+          <thead>
+            <tr>
+              <th>Customer</th>
+              <th>Route</th>
+              <th>Cargo</th>
+              <th>Cargo ref</th>
+              <th>Weight</th>
+              <th>Trucks</th>
+              <th>Distance</th>
+              <th>Cargo date</th>
+              <th>Status</th>
+              <th>HTTP</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="t in tenders" v-bind:key="t.id">
+              <td><strong>{{ t.customer }}</strong></td>
+              <td>{{ t.route }}</td>
+              <td>{{ t.cargo_type }}<br><span style="color:#64748b; font-size:13px;">{{ t.truck_type }}</span></td>
+              <td>{{ t.cargo_reference || '-' }}</td>
+              <td>{{ t.weight }} t</td>
+              <td>{{ t.number_of_trucks }}</td>
+              <td>{{ t.distance_km }} km</td>
+              <td>{{ t.cargo_date }}</td>
+              <td><span class="badge" v-bind:class="'badge-' + t.status">{{ t.status_label }}</span></td>
+              <td>{{ t.response_code || '-' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
-  {% if is_paginated %}
-  <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px; align-items:center;">
-    <span style="color:#64748b; font-size:13px;">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
-    {% if page_obj.has_previous %}
-    <a class="btn btn-secondary btn-sm" href="?page={{ page_obj.previous_page_number }}">&larr; Previous</a>
-    {% endif %}
-    {% if page_obj.has_next %}
-    <a class="btn btn-secondary btn-sm" href="?page={{ page_obj.next_page_number }}">Next &rarr;</a>
-    {% endif %}
-  </div>
-  {% endif %}
+      <div class="card" v-else-if="loaded">
+        <div class="empty">
+          <div class="empty-icon">&#128666;</div>
+          <p>No tenders submitted yet.</p>
+          <a class="btn btn-primary" v-bind:href="createUrl">New tender</a>
+        </div>
+      </div>
 
-  {% else %}
-  <div class="card">
-    <div class="empty">
-      <div class="empty-icon">&#128666;</div>
-      <p>No tenders submitted yet.</p>
-      <a class="btn btn-primary" href="{% url 'tenders:create' %}">New tender</a>
+      <div class="card" v-else>
+        <div class="empty"><p>Loading tenders...</p></div>
+      </div>
     </div>
+    {% endverbatim %}
   </div>
-  {% endif %}
 </div>
+<script>
+  (function () {
+    var root = document.getElementById('tenders-app');
+    var api = window.HYPAX.api;
+    Vue.createApp({
+      data: function () {
+        return { tenders: [], loaded: false, createUrl: root.dataset.createUrl };
+      },
+      created: async function () {
+        try {
+          var res = await api.get(root.dataset.url);
+          this.tenders = (res && res.tenders) || [];
+        } finally {
+          this.loaded = true;
+        }
+      }
+    }).mount('#tenders-app');
+  })();
+</script>
 {% endblock %}

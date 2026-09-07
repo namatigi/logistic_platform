@@ -1,32 +1,153 @@
 {% extends 'base.html' %}
-{% block title %}{% if form.instance.pk %}Edit Company{% else %}Register Company{% endif %} &middot; HYPAX{% endblock %}
+{% block title %}{% if object %}Edit Company{% else %}Register Company{% endif %} &middot; HYPAX{% endblock %}
 {% block content %}
 <div class="container">
   <div class="page-header">
     <div>
-      <h1 class="page-title">{% if form.instance.pk %}Edit company{% else %}Register company{% endif %}</h1>
+      <h1 class="page-title">{% if object %}Edit company{% else %}Register company{% endif %}</h1>
       <p class="page-subtitle">Provide the company details</p>
     </div>
     <a class="btn btn-secondary" href="{% url 'companies:list' %}">&larr; Back</a>
   </div>
 
   <div class="card">
-    <form method="post" novalidate>
-      {% csrf_token %}
-      <div class="form-grid">
-        {% for field in form %}
-        <div class="form-row">
-          {{ field.label_tag }}
-          {{ field }}
-          <div class="field-error">{{ field.errors }}</div>
-        </div>
-        {% endfor %}
+    <div id="company-form-app"
+         data-list-url="{% url 'companies:list' %}"
+         data-wait-redirect="{% url 'companies:list' %}"
+         data-create-url="{% url 'companies:api_create' %}"
+         {% if object %}data-update-url="{% url 'companies:api_update' object.pk %}"{% endif %}
+         {% if object %}data-pk="{{ object.pk }}"{% endif %}>
+      {% verbatim %}
+      <div v-cloak>
+        <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
+        <div class="alert alert-success" v-if="success" style="margin-bottom:16px;">{{ message }}</div>
+
+        <form novalidate @submit.prevent="submit">
+          <div class="form-grid">
+            <div class="form-row">
+              <label>Name</label>
+              <input type="text" v-model.trim="form.name" required>
+              <div class="field-error" v-if="errors.name"><ul><li v-for="e in errors.name">{{ e }}</li></ul></div>
+            </div>
+            <div class="form-row">
+              <label>Registration number</label>
+              <input type="text" v-model.trim="form.registration_number">
+              <div class="field-error" v-if="errors.registration_number"><ul><li v-for="e in errors.registration_number">{{ e }}</li></ul></div>
+            </div>
+            <div class="form-row">
+              <label>Contact person</label>
+              <input type="text" v-model.trim="form.contact_person">
+              <div class="field-error" v-if="errors.contact_person"><ul><li v-for="e in errors.contact_person">{{ e }}</li></ul></div>
+            </div>
+            <div class="form-row">
+              <label>Phone</label>
+              <input type="text" v-model.trim="form.phone">
+              <div class="field-error" v-if="errors.phone"><ul><li v-for="e in errors.phone">{{ e }}</li></ul></div>
+            </div>
+            <div class="form-row">
+              <label>Email</label>
+              <input type="email" v-model.trim="form.email">
+              <div class="field-error" v-if="errors.email"><ul><li v-for="e in errors.email">{{ e }}</li></ul></div>
+            </div>
+            <div class="form-row">
+              <label>Address</label>
+              <input type="text" v-model.trim="form.address">
+              <div class="field-error" v-if="errors.address"><ul><li v-for="e in errors.address">{{ e }}</li></ul></div>
+            </div>
+            <div class="form-row">
+              <label>City</label>
+              <input type="text" v-model.trim="form.city">
+              <div class="field-error" v-if="errors.city"><ul><li v-for="e in errors.city">{{ e }}</li></ul></div>
+            </div>
+            <div class="form-row">
+              <label>Country</label>
+              <input type="text" v-model.trim="form.country">
+              <div class="field-error" v-if="errors.country"><ul><li v-for="e in errors.country">{{ e }}</li></ul></div>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" :disabled="loading">
+              <span v-if="loading">Saving...</span>
+              <span v-else>Save</span>
+            </button>
+            <a class="btn btn-secondary" v-bind:href="listUrl">Cancel</a>
+          </div>
+        </form>
       </div>
-      <div class="form-actions">
-        <button type="submit" class="btn btn-primary">Save</button>
-        <a class="btn btn-secondary" href="{% url 'companies:list' %}">Cancel</a>
-      </div>
-    </form>
+      {% endverbatim %}
+    </div>
   </div>
 </div>
+
+<script>
+  (function () {
+    var root = document.getElementById('company-form-app');
+    var api = window.HYPAX.api;
+
+    function blank() {
+      return { name: '', registration_number: '', contact_person: '', phone: '', email: '', address: '', city: '', country: '' };
+    }
+
+    Vue.createApp({
+      data: function () {
+        return {
+          form: blank(),
+          errors: {},
+          error: '',
+          message: '',
+          success: false,
+          loading: false,
+          isEdit: !!root.dataset.pk,
+          listUrl: root.dataset.listUrl
+        };
+      },
+      created: async function () {
+        if (!this.isEdit) return;
+        try {
+          var res = await api.get('{% url "companies:api_list" %}');
+          var found = (res.companies || []).find(function (c) { return c.id === Number(root.dataset.pk); });
+          if (found) {
+            this.form = {
+              name: found.name || '',
+              registration_number: found.registration_number || '',
+              contact_person: found.contact_person || '',
+              phone: found.phone || '',
+              email: found.email || '',
+              address: found.address || '',
+              city: found.city || '',
+              country: found.country || ''
+            };
+          }
+        } catch (e) {
+          this.error = e.message;
+        }
+      },
+      methods: {
+        submit: async function () {
+          var self = this;
+          self.error = '';
+          self.errors = {};
+          self.success = false;
+          self.loading = true;
+          var url = self.isEdit ? root.dataset.updateUrl : root.dataset.createUrl;
+          try {
+            var res = await api.post(url, self.form);
+            if (res && res.ok === false) {
+              if (res.errors) { self.errors = res.errors; }
+              self.error = res.error || 'Please fix the highlighted fields.';
+              return;
+            }
+            self.message = (res && res.message) || 'Company saved successfully.';
+            self.success = true;
+            setTimeout(function () { window.location.href = root.dataset.waitRedirect; }, 900);
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.loading = false;
+          }
+        }
+      }
+    }).mount('#company-form-app');
+  })();
+</script>
 {% endblock %}

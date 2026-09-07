@@ -12,54 +12,62 @@
   <div class="card">
     <div class="card-title">Tender endpoint (outgoing)</div>
 
-    {% if object.base_url %}
-    <div class="alert alert-success saved-notice">
-      API settings saved{% if object.updated_at %} on {{ object.updated_at|date:"M j, Y \a\t g:i A" }}{% endif %}.
-    </div>
-    {% endif %}
+    <div id="settings-app" data-url="{% url 'tenders:api_settings' %}">
+      {% verbatim %}
+      <div v-cloak>
+        <div class="alert alert-success saved-notice" v-if="savedNotice">{{ savedNotice }}</div>
+        <div class="alert alert-error" v-if="error">{{ error }}</div>
 
-    <form method="post" novalidate onsubmit="handleSettingsSubmit(this)">
-      {% csrf_token %}
+        <form novalidate @submit.prevent="submit">
+          <div class="form-row" style="margin-bottom:18px;">
+            <label>Base URL</label>
+            <input type="url" v-model.trim="form.base_url">
+            <span class="form-help">Root URL, e.g. <code>https://api.example.com</code>. Tenders are posted to <code>/api/v1/tenders</code>.</span>
+            <div class="field-error" v-if="errors.base_url"><ul><li v-for="e in errors.base_url">{{ e }}</li></ul></div>
+          </div>
 
-      <div class="form-row" style="margin-bottom:18px;">
-        {{ form.base_url.label_tag }}
-        {{ form.base_url }}
-        <span class="form-help">Root URL, e.g. <code>https://api.example.com</code>. Tenders are posted to <code>/api/v1/tenders</code>.</span>
-        <div class="field-error">{{ form.base_url.errors }}</div>
+          <div class="form-row" style="margin-bottom:18px;">
+            <label>Auth type</label>
+            <select v-model="form.auth_type">
+              <option value="none">None</option>
+              <option value="bearer">Bearer token</option>
+              <option value="basic">Basic auth</option>
+            </select>
+            <span class="form-help">How the endpoint authenticates requests.</span>
+            <div class="field-error" v-if="errors.auth_type"><ul><li v-for="e in errors.auth_type">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-row" style="margin-bottom:18px;">
+            <label>API token</label>
+            <input type="text" v-model.trim="form.api_token">
+            <span class="form-help">Token used for <strong>Bearer token</strong> auth. Ignored for other types.</span>
+            <div class="field-error" v-if="errors.api_token"><ul><li v-for="e in errors.api_token">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-row" style="margin-bottom:18px;">
+            <label>Username</label>
+            <input type="text" v-model.trim="form.username">
+            <span class="form-help">Required only for <strong>Basic auth</strong>.</span>
+            <div class="field-error" v-if="errors.username"><ul><li v-for="e in errors.username">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-row" style="margin-bottom:18px;">
+            <label>Password</label>
+            <input type="password" v-model="form.password">
+            <span class="form-help">Required only for <strong>Basic auth</strong>.</span>
+            <div class="field-error" v-if="errors.password"><ul><li v-for="e in errors.password">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" :disabled="loading">
+              <span v-if="loading">Saving...</span>
+              <span v-else>Save settings</span>
+            </button>
+          </div>
+        </form>
       </div>
-
-    <div class="form-row" style="margin-bottom:18px;">
-      {{ form.auth_type.label_tag }}
-      {{ form.auth_type }}
-      <span class="form-help">How the endpoint authenticates requests.</span>
-      <div class="field-error">{{ form.auth_type.errors }}</div>
+      {% endverbatim %}
     </div>
-
-    <div class="form-row" style="margin-bottom:18px;">
-      {{ form.api_token.label_tag }}
-      {{ form.api_token }}
-      <span class="form-help">Token used for <strong>Bearer token</strong> auth. Ignored for other types.</span>
-      <div class="field-error">{{ form.api_token.errors }}</div>
-    </div>
-
-    <div class="form-row" style="margin-bottom:18px;">
-      {{ form.username.label_tag }}
-      {{ form.username }}
-      <span class="form-help">Required only for <strong>Basic auth</strong>.</span>
-      <div class="field-error">{{ form.username.errors }}</div>
-    </div>
-
-    <div class="form-row" style="margin-bottom:18px;">
-      {{ form.password.label_tag }}
-      {{ form.password }}
-      <span class="form-help">Required only for <strong>Basic auth</strong>.</span>
-      <div class="field-error">{{ form.password.errors }}</div>
-    </div>
-
-    <div class="form-actions">
-      <button type="submit" class="btn btn-primary">Save settings</button>
-    </div>
-    </form>
   </div>
 
   <div class="card" style="border-color:#bfdbfe; background:#fbfdff;">
@@ -92,28 +100,91 @@
 </div>
 
 <script>
-  function handleSettingsSubmit(form) {
-    var btn = form.querySelector('button[type="submit"]');
-    if (btn && !btn.disabled) {
-      btn.disabled = true;
-      btn.classList.add('is-loading');
-      btn.textContent = 'Saving...';
+  (function () {
+    function copyWebhookUrl() {
+      var input = document.getElementById('webhook-url');
+      input.select();
+      input.setSelectionRange(0, 99999);
+      var btn = event && event.target;
+      var old = btn ? btn.textContent : '';
+      try {
+        navigator.clipboard.writeText(input.value);
+      } catch (e) {
+        document.execCommand('copy');
+      }
+      if (btn) {
+        btn.textContent = 'Copied!';
+        setTimeout(function () { btn.textContent = old; }, 1500);
+      }
     }
-  }
+    window.copyWebhookUrl = copyWebhookUrl;
+  })();
+</script>
+<script>
+  (function () {
+    var root = document.getElementById('settings-app');
+    var api = window.HYPAX.api;
 
-  function copyWebhookUrl() {
-    var input = document.getElementById('webhook-url');
-    input.select();
-    input.setSelectionRange(0, 99999);
-    try {
-      navigator.clipboard.writeText(input.value);
-    } catch (e) {
-      document.execCommand('copy');
-    }
-    var btn = event.target;
-    var old = btn.textContent;
-    btn.textContent = 'Copied!';
-    setTimeout(function () { btn.textContent = old; }, 1500);
-  }
+    Vue.createApp({
+      data: function () {
+        return {
+          form: { base_url: '', auth_type: 'none', api_token: '', username: '', password: '' },
+          errors: {},
+          error: '',
+          savedNotice: '',
+          loading: false
+        };
+      },
+      created: async function () {
+        try {
+          var res = await api.get(root.dataset.url);
+          var s = (res && res.setting) || {};
+          this.form = {
+            base_url: s.base_url || '',
+            auth_type: s.auth_type || 'none',
+            api_token: s.api_token || '',
+            username: s.username || '',
+            password: s.password || ''
+          };
+          if (s.base_url && s.updated_at) {
+            this.savedNotice = 'API settings saved on ' + this.formatSavedDate(s.updated_at) + '.';
+          }
+        } catch (e) {
+          this.error = e.message;
+        }
+      },
+      methods: {
+        formatSavedDate: function (iso) {
+          var d = new Date(iso);
+          if (isNaN(d)) return iso;
+          var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          var ampm = d.getHours() >= 12 ? 'PM' : 'AM';
+          var h = d.getHours() % 12; if (h === 0) h = 12;
+          var m = String(d.getMinutes()).padStart(2, '0');
+          return months[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear() + ' at ' + h + ':' + m + ' ' + ampm;
+        },
+        submit: async function () {
+          var self = this;
+          self.error = '';
+          self.errors = {};
+          self.loading = true;
+          try {
+            var res = await api.post(root.dataset.url, self.form);
+            if (res && res.ok === false) {
+              if (res.errors) { self.errors = res.errors; }
+              self.error = res.error || 'Please fix the highlighted fields.';
+              return;
+            }
+            var s = (res && res.setting) || {};
+            self.savedNotice = 'API settings saved on ' + self.formatSavedDate(s.updated_at || new Date().toISOString()) + '.';
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.loading = false;
+          }
+        }
+      }
+    }).mount('#settings-app');
+  })();
 </script>
 {% endblock %}

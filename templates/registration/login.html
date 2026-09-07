@@ -16,28 +16,62 @@
     <h1 class="auth-heading">Welcome back</h1>
     <p class="auth-sub">Sign in with your email address</p>
 
-    {% if form.errors %}
-    <div class="alert alert-error">Invalid email or password. Please try again.</div>
-    {% endif %}
+    <div id="auth-app" data-url="{% url 'users:api_login' %}">
+      {% verbatim %}
+      <div v-cloak>
+        <div class="alert alert-error" v-if="error">{{ error }}</div>
 
-    <form method="post" novalidate>
-      {% csrf_token %}
-      <div class="form-row">
-        <label for="{{ form.username.id_for_label }}">Email address</label>
-        {{ form.username }}
-        {{ form.username.errors }}
+        <form novalidate @submit.prevent="submit">
+          <div class="form-row">
+            <label for="login-email">Email address</label>
+            <input id="login-email" type="email" v-model.trim="email" autocomplete="email" required>
+          </div>
+          <div class="form-row">
+            <label for="login-password">Password</label>
+            <input id="login-password" type="password" v-model="password" autocomplete="current-password" required>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block" :disabled="loading">
+            <span v-if="loading">Signing in...</span>
+            <span v-else>Sign in</span>
+          </button>
+        </form>
       </div>
-      <div class="form-row">
-        <label for="{{ form.password.id_for_label }}">Password</label>
-        {{ form.password }}
-        {{ form.password.errors }}
-      </div>
-      <button type="submit" class="btn btn-primary btn-block">Sign in</button>
-    </form>
+      {% endverbatim %}
+    </div>
 
     <p class="auth-footer">
       Don't have an account? <a href="{% url 'users:signup' %}">Sign up</a>
     </p>
   </div>
 </div>
+<script>
+  (function () {
+    var root = document.getElementById('auth-app');
+    var api = window.HYPAX.api;
+    Vue.createApp({
+      data: function () {
+        return { email: '', password: '', error: '', loading: false };
+      },
+      methods: {
+        submit: async function () {
+          var self = this;
+          self.error = '';
+          self.loading = true;
+          try {
+            var res = await api.post(root.dataset.url, { email: self.email, password: self.password });
+            if (res && res.ok === false) {
+              self.error = res.error || 'Login failed.';
+              return;
+            }
+            window.location.href = (res && res.redirect) || '/tenders/';
+          } catch (e) {
+            self.error = e.message || 'Login failed.';
+          } finally {
+            self.loading = false;
+          }
+        }
+      }
+    }).mount('#auth-app');
+  })();
+</script>
 {% endblock %}
