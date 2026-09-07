@@ -152,8 +152,8 @@
           awarding: false,
           paying: false,
           listUrl: root.dataset.listUrl,
-          awardBase: String(root.dataset.awardBase).replace(/\/0\/?$/, '/'),
-          payBase: String(root.dataset.payBase).replace(/\/0\/?$/, '/')
+          awardBase: String(root.dataset.awardBase).replace('/0/award/', '/'),
+          payBase: String(root.dataset.payBase).replace('/0/pay/', '/')
         };
       },
       created: async function () {

@@ -100,7 +100,10 @@
     var api = window.HYPAX.api;
     var HY = window.HYPAX;
 
-    function stripBase(patternUrl) {
+    function stripBase(patternUrl, action) {
+      if (action) {
+        return String(patternUrl).replace('/0/' + action + '/', '/');
+      }
       return String(patternUrl).replace(/\/0\/?$/, '/');
     }
 
@@ -114,8 +117,8 @@
           awardId: null,
           payId: null,
           detailBase: stripBase(root.dataset.detailBase),
-          awardBase: stripBase(root.dataset.awardBase),
-          payBase: stripBase(root.dataset.payBase),
+          awardBase: stripBase(root.dataset.awardBase, 'award'),
+          payBase: stripBase(root.dataset.payBase, 'pay'),
           tenderListUrl: root.dataset.tenderListUrl,
           settingsUrl: root.dataset.settingsUrl
         };
