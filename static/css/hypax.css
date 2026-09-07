@@ -548,7 +548,26 @@ tr:hover td {
   justify-content: center;
   padding: 24px;
   background: linear-gradient(135deg, #0b1c33 0%, #12314f 45%, #0d2440 100%);
+  background-image: url('../img/login-bg.jpg');
+  background-size: cover;
+  background-position: center center;
+  background-repeat: no-repeat;
   overflow: hidden;
+}
+
+.auth-theme::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(11, 28, 51, 0.55) 0%, rgba(18, 49, 79, 0.45) 50%, rgba(13, 36, 64, 0.6) 100%);
+  pointer-events: none;
+}
+
+/* keep the inscribed brand card readable above the image */
+.auth-theme .auth-card {
+  position: relative;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
 }
 
 .auth-themed-bg {
