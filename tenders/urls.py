@@ -22,5 +22,5 @@ urlpatterns = [
     path('api/orders/<int:pk>/', views.api_order_detail, name='api_order_detail'),
     path('api/orders/<int:pk>/award/', views.api_order_award, name='api_order_award'),
     path('api/orders/<int:pk>/pay/', views.api_order_pay, name='api_order_pay'),
-    path('api/settings/', views.api_settings, name='api_settings'),
+    path('api/settings/', views.api_settings, name='api_settings_json'),
 ]
