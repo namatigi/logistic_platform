@@ -142,15 +142,18 @@ Open http://127.0.0.1:8000/ and sign up.
 Database connection, in priority order:
 
 1. If `DATABASE_URL` is set (e.g. `postgresql://user:pass@host:5432/db`), it is used as-is — this is how hosted environments such as **Railway's managed PostgreSQL** should be configured.
-2. Otherwise individual variables are used (local development over the default socket with peer auth):
+2. Otherwise, if `DB_HOST` is set, a TCP connection is used with `DB_NAME` and `DB_USER` (both required, `DB_PASSWORD`/`DB_PORT` optional).
+3. Otherwise, a local PostgreSQL **unix socket** (`/var/run/postgresql/` or `/tmp/`) is used — intended only for local development.
+4. If none of the above apply (no `DATABASE_URL`, no `DB_HOST`, and no local socket — e.g. a container with no database env vars), the app **fails at startup** with a clear `ImproperlyConfigured` message instead of crash-looping against a missing socket.
 
-| Variable      | Default            | Description                 |
-|---------------|--------------------|-----------------------------|
-| `DB_NAME`     | `django_project`   | Database name               |
-| `DB_USER`     | `leon`             | Database user               |
-| `DB_PASSWORD` | ``                 | Database password           |
-| `DB_HOST`     | *(socket)*         | Host (empty = local socket) |
-| `DB_PORT`     | *(default)*        | Port (empty = default)      |
+| Variable      | Used when            | Description                 |
+|---------------|----------------------|-----------------------------|
+| `DATABASE_URL`| Always               | Single connection string    |
+| `DB_NAME`     | TCP (item 2)         | Database name               |
+| `DB_USER`     | TCP (item 2)         | Database user               |
+| `DB_PASSWORD` | TCP (item 2)         | Database password           |
+| `DB_HOST`     | TCP (item 2)         | Database host               |
+| `DB_PORT`     | TCP (item 2)         | Database port               |
 
 On Railway, set `DATABASE_URL` to the connection string provided by the PostgreSQL plugin (or map the plugin's `POSTGRESQL_*`/`PG*` variables into a `DATABASE_URL`).
 

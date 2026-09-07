@@ -84,30 +84,59 @@ LOGOUT_REDIRECT_URL = 'users:login'
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
-DATABASE_URL = os.environ.get('DATABASE_URL')
-if DATABASE_URL:
-    # Hosted environments (e.g. Railway managed PostgreSQL) provide DATABASE_URL.
-    DATABASES = {
-        'default': dj_database_url.parse(
-            DATABASE_URL,
+def _configure_database():
+    from django.core.exceptions import ImproperlyConfigured
+
+    url = os.environ.get('DATABASE_URL')
+    if url:
+        # Hosted environments (e.g. Railway managed PostgreSQL) provide DATABASE_URL.
+        return {'ENGINE': 'django.db.backends.postgresql', **dj_database_url.parse(
+            url,
             conn_max_age=600,
             conn_health_checks=True,
-        )
-    }
-else:
-    # Local development: PostgreSQL over the default socket with peer auth.
-    DATABASES = {
-        'default': {
+        )}
+
+    host = os.environ.get('DB_HOST')
+    if host:
+        name = os.environ.get('DB_NAME')
+        user = os.environ.get('DB_USER')
+        missing = [key for key, value in (('DB_NAME', name), ('DB_USER', user)) if not value]
+        if missing:
+            raise ImproperlyConfigured(
+                'TCP database configuration missing required environment variables: '
+                + ', '.join(missing)
+            )
+        return {
             'ENGINE': 'django.db.backends.postgresql',
-            'NAME': os.environ.get('DB_NAME', 'django_project'),
-            'USER': os.environ.get('DB_USER', 'leon'),
+            'NAME': name,
+            'USER': user,
             'PASSWORD': os.environ.get('DB_PASSWORD', ''),
-            'HOST': os.environ.get('DB_HOST') or None,
+            'HOST': host,
             'PORT': os.environ.get('DB_PORT') or None,
             'CONN_MAX_AGE': 600,
             'CONN_HEALTH_CHECKS': True,
         }
-    }
+
+    # Local development: PostgreSQL over the default socket with peer auth.
+    for socket_path in ('/var/run/postgresql/.s.PGSQL.5432', '/tmp/.s.PGSQL.5432'):
+        if os.path.exists(socket_path):
+            return {
+                'ENGINE': 'django.db.backends.postgresql',
+                'NAME': os.environ.get('DB_NAME', 'django_project'),
+                'USER': os.environ.get('DB_USER', 'leon'),
+                'PASSWORD': os.environ.get('DB_PASSWORD', ''),
+                'CONN_MAX_AGE': 600,
+                'CONN_HEALTH_CHECKS': True,
+            }
+
+    raise ImproperlyConfigured(
+        'Database is not configured. '
+        'Set DATABASE_URL (preferred, e.g. Railway managed PostgreSQL) or, for a TCP connection, '
+        'DB_HOST together with DB_NAME, DB_USER and DB_PASSWORD.'
+    )
+
+
+DATABASES = {'default': _configure_database()}
 
 
 # Password validation
