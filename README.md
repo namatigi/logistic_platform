@@ -139,15 +139,20 @@ Open http://127.0.0.1:8000/ and sign up.
 
 ## Configuration
 
-Database settings are read from environment variables:
+Database connection, in priority order:
+
+1. If `DATABASE_URL` is set (e.g. `postgresql://user:pass@host:5432/db`), it is used as-is — this is how hosted environments such as **Railway's managed PostgreSQL** should be configured.
+2. Otherwise individual variables are used (local development over the default socket with peer auth):
 
 | Variable      | Default            | Description                 |
 |---------------|--------------------|-----------------------------|
 | `DB_NAME`     | `django_project`   | Database name               |
 | `DB_USER`     | `leon`             | Database user               |
 | `DB_PASSWORD` | ``                 | Database password           |
-| `DB_HOST`     | ``                 | Host (empty = local socket) |
-| `DB_PORT`     | ``                 | Port (empty = default)      |
+| `DB_HOST`     | *(socket)*         | Host (empty = local socket) |
+| `DB_PORT`     | *(default)*        | Port (empty = default)      |
+
+On Railway, set `DATABASE_URL` to the connection string provided by the PostgreSQL plugin (or map the plugin's `POSTGRESQL_*`/`PG*` variables into a `DATABASE_URL`).
 
 Emails (sign-up) use the console backend by default.
 
