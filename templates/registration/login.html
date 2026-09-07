@@ -1,39 +1,8 @@
 {% extends 'base.html' %}
 {% block title %}Sign In &middot; HYPAX{% endblock %}
 {% block content %}
-<div class="auth-theme">
+<div class="auth-theme" id="auth-theme">
   <div class="auth-themed-bg" aria-hidden="true">
-    <svg class="bg-truck bg-truck-1" viewBox="0 0 512 256" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M20 150h250v70H20z"/>
-      <circle cx="90" cy="240" r="22"/><circle cx="205" cy="240" r="22"/>
-      <path d="M270 150h120l60 55v15h-60"/>
-      <path d="M390 168v30h45l-22-30h-23z"/>
-      <circle cx="355" cy="240" r="22"/><circle cx="435" cy="240" r="22"/>
-      <path d="M120 90h80l30 60H90z" fill="currentColor" fill-opacity="0.35"/>
-    </svg>
-
-    <svg class="bg-truck bg-truck-2" viewBox="0 0 512 256" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M20 158h180v62H20z"/>
-      <circle cx="85" cy="235" r="20"/>
-      <path d="M200 158h70l40 36v24h-45"/>
-      <path d="M270 176v24h30l-12-24h-18z"/>
-      <circle cx="300" cy="235" r="20"/>
-      <path d="M70 130l40-48 30 20 30-34 35 62" fill="currentColor" fill-opacity="0.3"/>
-    </svg>
-
-    <svg class="bg-truck bg-truck-3" viewBox="0 0 512 256" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M20 160h200v56H20z"/>
-      <circle cx="95" cy="232" r="20"/>
-      <path d="M220 160h80l45 40v16h-50"/>
-      <circle cx="325" cy="232" r="20"/>
-      <path d="M140 100h60l25 44H115z" fill="currentColor" fill-opacity="0.32"/>
-      <path d="M60 128l40-40 22 18 26-30 30 52" fill="currentColor" fill-opacity="0.32"/>
-    </svg>
-
-    <div class="bg-container bg-container-1"><svg viewBox="0 0 200 200" fill="none" stroke="currentColor" stroke-width="6"><rect x="30" y="50" width="140" height="120" rx="4"/><path d="M30 100h140"/><path d="M90 50v120"/><rect x="52" y="68" width="20" height="20" rx="2"/></svg></div>
-    <div class="bg-container bg-container-2"><svg viewBox="0 0 200 200" fill="none" stroke="currentColor" stroke-width="6"><rect x="30" y="50" width="140" height="120" rx="4"/><path d="M30 100h140"/><path d="M90 50v120"/><rect x="52" y="68" width="20" height="20" rx="2"/></svg></div>
-    <div class="bg-container bg-container-3"><svg viewBox="0 0 200 200" fill="none" stroke="currentColor" stroke-width="6"><rect x="30" y="50" width="140" height="120" rx="4"/><path d="M30 100h140"/><path d="M90 50v120"/><rect x="52" y="68" width="20" height="20" rx="2"/></svg></div>
-
     <div class="bg-depot-label">Inland Container Depot</div>
   </div>
 
@@ -79,6 +48,24 @@
     </p>
   </div>
 </div>
+<script>
+  (function () {
+    var theme = document.getElementById('auth-theme');
+    if (theme) {
+      if (!theme.dataset.themeSet) {
+        var h = new Date().getHours();
+        if (h >= 6 && h < 18) {
+          theme.classList.add('theme-day');
+        } else if (h >= 18 && h < 22) {
+          theme.classList.add('theme-earlynight');
+        } else {
+          theme.classList.add('theme-midnight');
+        }
+        theme.dataset.themeSet = '1';
+      }
+    }
+  })();
+</script>
 <script>
   (function () {
     var root = document.getElementById('auth-app');

@@ -548,12 +548,15 @@ tr:hover td {
   justify-content: center;
   padding: 24px;
   background: linear-gradient(135deg, #0b1c33 0%, #12314f 45%, #0d2440 100%);
-  background-image: url('../img/login-bg.jpg');
   background-size: cover;
   background-position: center center;
   background-repeat: no-repeat;
   overflow: hidden;
 }
+
+.auth-theme.theme-day { background-image: url('../img/daytheme.jpg'); }
+.auth-theme.theme-earlynight { background-image: url('../img/earlynight.jpg'); }
+.auth-theme.theme-midnight { background-image: url('../img/midnight.jpg'); }
 
 .auth-theme::after {
   content: '';
