@@ -554,9 +554,18 @@ tr:hover td {
   overflow: hidden;
 }
 
-.auth-theme.theme-day { background-image: url('../img/daytheme.jpg'); }
-.auth-theme.theme-earlynight { background-image: url('../img/earlynight.jpg'); }
-.auth-theme.theme-midnight { background-image: url('../img/midnight.jpg'); }
+.auth-theme.theme-day {
+  background-image: url('../img/daytheme.jpg');
+  background-image: image-set(url('../img/daytheme.webp') type('image/webp') 1x, url('../img/daytheme.jpg') type('image/jpeg') 1x);
+}
+.auth-theme.theme-earlynight {
+  background-image: url('../img/earlynight.jpg');
+  background-image: image-set(url('../img/earlynight.webp') type('image/webp') 1x, url('../img/earlynight.jpg') type('image/jpeg') 1x);
+}
+.auth-theme.theme-midnight {
+  background-image: url('../img/midnight.jpg');
+  background-image: image-set(url('../img/midnight.webp') type('image/webp') 1x, url('../img/midnight.jpg') type('image/jpeg') 1x);
+}
 
 .auth-theme::after {
   content: '';
