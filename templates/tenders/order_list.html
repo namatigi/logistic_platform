@@ -54,10 +54,17 @@
             {% endif %}
           </td>
           <td>
+            {% if order.fully_confirmed %}
+            <form method="post" action="{% url 'tenders:order_pay' order.pk %}">
+              {% csrf_token %}
+              <button type="submit" class="btn btn-primary btn-sm btn-award">Make payment</button>
+            </form>
+            {% else %}
             <form method="post" action="{% url 'tenders:order_award' order.pk %}" onsubmit="setAwardLoading(this)">
               {% csrf_token %}
               <button type="submit" class="btn btn-primary btn-sm btn-award">Award</button>
             </form>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}

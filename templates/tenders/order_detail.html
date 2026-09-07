@@ -10,10 +10,6 @@
     <a class="btn btn-secondary" href="{% url 'tenders:order_list' %}">&larr; Back to orders</a>
   </div>
 
-  <form method="post" action="{% url 'tenders:order_award' order.pk %}" onsubmit="return handleAwardSubmit(this);">
-    {% csrf_token %}
-    <input type="hidden" name="partial" value="1">
-
   <div class="card">
     <div style="display:flex; flex-wrap:wrap; gap:20px 40px;">
       <div>
@@ -71,8 +67,15 @@
           <span style="color:#94a3b8;">Not linked</span>
         {% endif %}
         <div style="margin-top:10px;">
-          <button type="submit" class="btn btn-primary btn-award">Award</button>
-          <span class="form-help">Awards the checked order line&lpar;s&rpar; below (partial confirmation).</span>
+          {% if order.fully_confirmed %}
+            <form method="post" action="{% url 'tenders:order_pay' order.pk %}">
+              {% csrf_token %}
+              <button type="submit" class="btn btn-primary btn-award">Make payment</button>
+            </form>
+          {% else %}
+            <button type="submit" form="award-form" class="btn btn-primary btn-award">Award</button>
+            <span class="form-help">Awards the checked order line(s) below (partial confirmation).</span>
+          {% endif %}
         </div>
       </div>
     </div>
@@ -84,40 +87,52 @@
     {% if order.award_response %}
     <div class="alert alert-success" style="margin-bottom:14px;">
       <strong>Awarded on {{ order.awarded_at|date:'Y-m-d H:i' }}</strong>{% if order.award_response.message %} &mdash; {{ order.award_response.message }}{% endif %}
-      {% if order.award_response.removed_line_ids %} Removed lines: {{ order.award_response.removed_line_ids|join:', ' }}.{% endif %}
-      {% if order.award_response.remaining_line_ids %} Remaining lines: {{ order.award_response.remaining_line_ids|join:', ' }}.{% endif %}
+      {% if order.removed_line_ids %} Removed lines: {{ order.removed_line_ids|join:', ' }}.{% endif %}
+      {% if order.remaining_line_ids %} Remaining lines: {{ order.remaining_line_ids|join:', ' }}.{% endif %}
     </div>
     {% endif %}
 
     <div class="table-wrap" style="box-shadow:none;">
-      <table>
-        <thead>
-          <tr>
-            <th>Product</th>
-            <th style="text-align:right;">Qty</th>
-            <th style="text-align:right;">Unit price</th>
-            <th style="text-align:right;">Commission</th>
-            <th style="text-align:right;">Subtotal</th>
-            <th style="text-align:right;">Total</th>
-            <th>Award</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for line in order.lines.all %}
-          <tr>
-            <td>{{ line.product_name }}<br><span style="color:#64748b; font-size:13px;">Line #{{ line.line_id }} &middot; Product #{{ line.product_id|default:'-' }}</span></td>
-            <td style="text-align:right;">{{ line.quantity|floatformat:2 }}</td>
-            <td style="text-align:right;">{{ line.price_unit|floatformat:2 }}</td>
-            <td style="text-align:right;">{{ line.commission|floatformat:2 }}</td>
-            <td style="text-align:right;">{{ line.price_subtotal|floatformat:2 }}</td>
-            <td style="text-align:right;"><strong>{{ line.price_total|floatformat:2 }}</strong></td>
-            <td><input type="checkbox" name="line_ids" value="{{ line.line_id }}" class="award-line-checkbox"></td>
-          </tr>
-          {% empty %}
-          <tr><td colspan="7" style="color:#64748b; text-align:center;">No order lines.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      <form id="award-form" method="post" action="{% url 'tenders:order_award' order.pk %}" onsubmit="return handleAwardSubmit(this);">
+        {% csrf_token %}
+        <input type="hidden" name="partial" value="1">
+        <table>
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th style="text-align:right;">Qty</th>
+              <th style="text-align:right;">Unit price</th>
+              <th style="text-align:right;">Commission</th>
+              <th style="text-align:right;">Subtotal</th>
+              <th style="text-align:right;">Total</th>
+              <th>Award</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for line in order.lines.all %}
+            <tr>
+              <td>{{ line.product_name }}<br><span style="color:#64748b; font-size:13px;">Line #{{ line.line_id }} &middot; Product #{{ line.product_id|default:'-' }}</span></td>
+              <td style="text-align:right;">{{ line.quantity|floatformat:2 }}</td>
+              <td style="text-align:right;">{{ line.price_unit|floatformat:2 }}</td>
+              <td style="text-align:right;">{{ line.commission|floatformat:2 }}</td>
+              <td style="text-align:right;">{{ line.price_subtotal|floatformat:2 }}</td>
+              <td style="text-align:right;"><strong>{{ line.price_total|floatformat:2 }}</strong></td>
+              <td>
+                {% if line.line_id in order.remaining_line_ids %}
+                  <input type="checkbox" name="line_ids" value="{{ line.line_id }}" checked disabled title="Confirmed line">
+                {% elif line.line_id in order.removed_line_ids %}
+                  <input type="checkbox" name="line_ids" value="{{ line.line_id }}" disabled title="Removed line">
+                {% else %}
+                  <input type="checkbox" name="line_ids" value="{{ line.line_id }}" class="award-line-checkbox">
+                {% endif %}
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="7" style="color:#64748b; text-align:center;">No order lines.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </form>
     </div>
   </div>
 
@@ -125,11 +140,11 @@
     <div class="card-title">Raw webhook payload</div>
     <pre style="background:#0f172a; color:#e2e8f0; padding:14px; border-radius:8px; font-size:13px; overflow-x:auto;">{{ order.raw_payload|pprint|escape }}</pre>
   </div>
-  </form>
 </div>
 <script>
   function setAwardLoading(form) {
-    var btn = form.querySelector('button[type="submit"]');
+    var btn = document.querySelector('button[form="' + form.id + '"], #' + form.id + ' button[type="submit"]');
+    if (!btn) { btn = form.querySelector('button[type="submit"]'); }
     if (btn && !btn.disabled) {
       btn.disabled = true;
       btn.classList.add('is-loading');

@@ -140,7 +140,7 @@ def award_order(request, pk):
         is_ok = True
 
     if is_ok:
-        order.award_response = parsed.get('data') if isinstance(parsed, dict) else parsed
+        order.award_response = parsed if isinstance(parsed, dict) else {}
         order.awarded_at = timezone.now()
         order.save()
         confirm_message = parsed.get('message') if isinstance(parsed, dict) else None
@@ -159,6 +159,17 @@ def award_order(request, pk):
     if line_ids:
         return redirect('tenders:order_detail', pk=order.pk)
     return redirect('tenders:order_list')
+
+
+@login_required
+def make_payment(request, pk):
+    order = Order.objects.filter(
+        Q(user=request.user) | Q(user__isnull=True)
+    ).filter(pk=pk).first()
+    if order is None:
+        raise Http404()
+    messages.info(request, f'Payment for order {order.order_name or order.order_id} is not available yet.')
+    return redirect('tenders:order_detail', pk=order.pk)
 
 
 def parse_datetime(value):

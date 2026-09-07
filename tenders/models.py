@@ -107,6 +107,36 @@ class Order(models.Model):
     def __str__(self):
         return f'{self.order_name} ({self.customer})'
 
+    @property
+    def award_response_data(self):
+        value = self.award_response
+        return value if isinstance(value, dict) else {}
+
+    @property
+    def award_data(self):
+        data = self.award_response_data.get('data')
+        return data if isinstance(data, dict) else self.award_response_data
+
+    @property
+    def remaining_line_ids(self):
+        ids = self.award_data.get('remaining_line_ids')
+        return list(ids) if isinstance(ids, (list, tuple)) else []
+
+    @property
+    def removed_line_ids(self):
+        ids = self.award_data.get('removed_line_ids')
+        return list(ids) if isinstance(ids, (list, tuple)) else []
+
+    @property
+    def fully_confirmed(self):
+        data = self.award_data
+        return bool(data) and not (data.get('removed_line_ids') or data.get('remaining_line_ids'))
+
+    @property
+    def partially_confirmed(self):
+        data = self.award_data
+        return bool(data.get('removed_line_ids')) or bool(data.get('remaining_line_ids'))
+
     class Meta:
         ordering = ['-date_order', '-created_at']
 

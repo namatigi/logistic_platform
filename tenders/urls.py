@@ -11,6 +11,7 @@ urlpatterns = [
     path('orders/', views.OrderList.as_view(), name='order_list'),
     path('orders/<int:pk>/', views.OrderDetail.as_view(), name='order_detail'),
     path('orders/<int:pk>/award/', views.award_order, name='order_award'),
+    path('orders/<int:pk>/pay/', views.make_payment, name='order_pay'),
     path('settings/', views.ApiSettingUpdate.as_view(), name='api_settings'),
     path('webhook/orders/', views.webhook_orders, name='webhook_orders'),
 ]
