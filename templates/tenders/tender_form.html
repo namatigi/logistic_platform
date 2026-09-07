@@ -24,12 +24,6 @@
       You need to configure your <strong>base URL and auth</strong> before sending tenders.
       <a v-bind:href="settingsPageUrl">Configure API settings now &rarr;</a>
     </div>
-    <div class="endpoint-hint" v-else-if="loaded">
-      Tenders will be posted to <strong>{{ endpoint }}</strong>
-      <span v-if="authType === 'bearer'">using a Bearer token</span>
-      <span v-else-if="authType === 'basic'">using Basic auth</span>
-      <span v-else>without authentication</span>.
-    </div>
 
     <div class="alert alert-success" v-if="success" style="margin:14px 0;">{{ message }} Redirecting...</div>
     <div class="alert alert-error" v-if="error" style="margin:14px 0;">{{ error }}</div>
@@ -135,8 +129,6 @@
           loading: false,
           loaded: false,
           hasBaseUrl: false,
-          endpoint: '',
-          authType: '',
           listUrl: root.dataset.listUrl,
           settingsPageUrl: root.dataset.settingsPageUrl
         };
@@ -151,8 +143,6 @@
           var s = await api.get(root.dataset.settingsUrl);
           var setting = (s && s.setting) || {};
           this.hasBaseUrl = !!(setting.base_url || '').trim();
-          this.endpoint = (setting.base_url || '(base URL)') + '/api/v1/tenders';
-          this.authType = setting.auth_type || 'none';
         } catch (e) {
           this.error = e.message;
         } finally {
