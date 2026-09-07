@@ -318,6 +318,18 @@ a:hover {
   cursor: pointer;
 }
 
+.award-flag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: #dcfce7;
+  color: #15803d;
+  font-size: 12px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
 /* ---------- Forms ---------- */
 .form-grid {
   display: grid;

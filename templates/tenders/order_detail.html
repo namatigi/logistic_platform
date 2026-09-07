@@ -45,6 +45,10 @@
           <div>
             <div style="color:#64748b; font-size:13px;">Total</div>
             <strong>{{ money(order.amount_total, order.currency) }}</strong>
+            <template v-if="order.partially_confirmed && order.awarded_lines_count < order.total_lines_count">
+              <br>
+              <span style="color:#64748b; font-size:13px;">{{ order.awarded_lines_count }} of {{ order.total_lines_count }} lines awarded &middot; total reflects awarded lines only</span>
+            </template>
           </div>
         </div>
 
@@ -107,7 +111,7 @@
             </thead>
             <tbody>
               <tr v-for="line in order.lines" v-bind:key="line.line_id">
-                <td>{{ line.product_name }}<br><span style="color:#64748b; font-size:13px;">Line #{{ line.line_id }} &middot; Product #{{ line.product_id || '-' }}</span></td>
+                <td>{{ line.product_name }}<br><span style="color:#64748b; font-size:13px;">Line #{{ line.line_id }} &middot; Product #{{ line.product_id || '-' }}</span><span class="award-flag" v-if="line.awarded">Awarded</span></td>
                 <td style="text-align:right;">{{ fmtQty(line.quantity) }}</td>
                 <td style="text-align:right;">{{ fmtQty(line.price_subtotal) }}</td>
                 <td style="text-align:right;"><strong>{{ fmtQty(line.price_total) }}</strong></td>

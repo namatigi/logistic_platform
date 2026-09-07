@@ -128,6 +128,15 @@ def perform_award(order, setting, line_ids, is_partial):
 
     order.award_response = parsed if isinstance(parsed, dict) else {}
     order.awarded_at = timezone.now()
+    if line_ids:
+        OrderLine.objects.filter(order=order, line_id__in=line_ids).update(awarded=True)
+    else:
+        order.lines.update(awarded=True)
+
+    new_total = order.awarded_amount
+    if new_total != order.amount_total:
+        order.amount_total = new_total
+
     if order.state == 'draft':
         order.state = 'confirmed'
     order.save()
@@ -433,6 +442,9 @@ def _order_dict(order, include_lines=False):
         'company_id': order.company_id,
         'currency': order.currency,
         'amount_total': str(order.amount_total),
+        'awarded_amount': str(order.awarded_amount),
+        'awarded_lines_count': order.awarded_lines_count,
+        'total_lines_count': order.lines.count(),
         'cargo_reference': order.cargo_reference,
         'cargo_id': order.cargo_id,
         'date_order': order.date_order.isoformat() if order.date_order else None,
@@ -456,6 +468,7 @@ def _order_dict(order, include_lines=False):
                 'quantity': str(line.quantity),
                 'price_subtotal': str(line.price_subtotal),
                 'price_total': str(line.price_total),
+                'awarded': line.awarded,
             }
             for line in order.lines.order_by('line_id')
         ]

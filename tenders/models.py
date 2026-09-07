@@ -137,6 +137,17 @@ class Order(models.Model):
         data = self.award_data
         return bool(data.get('removed_line_ids')) or bool(data.get('remaining_line_ids'))
 
+    @property
+    def awarded_amount(self):
+        total = self.lines.filter(awarded=True).aggregate(
+            total=models.Sum('price_total')
+        )['total']
+        return total or 0
+
+    @property
+    def awarded_lines_count(self):
+        return self.lines.filter(awarded=True).count()
+
     class Meta:
         ordering = ['-date_order', '-created_at']
 
@@ -151,6 +162,7 @@ class OrderLine(models.Model):
     commission = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     price_subtotal = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     price_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    awarded = models.BooleanField(default=False, help_text='Marked when this order line is confirmed/awarded')
 
     def __str__(self):
         return f'{self.product_name} x {self.quantity}'

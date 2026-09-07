@@ -57,7 +57,11 @@
                     <span v-else style="color:#94a3b8;">not linked</span>
                   </td>
                   <td>{{ fmtDate(o.date_order) }}</td>
-                  <td><strong>{{ money(o.amount_total, o.currency) }}</strong></td>
+                  <td>
+                    <strong>{{ money(o.amount_total, o.currency) }}</strong>
+                    <span v-if="o.partially_confirmed && o.awarded_lines_count < o.total_lines_count"
+                          style="display:block; color:#64748b; font-size:12px;">{{ o.awarded_lines_count }}/{{ o.total_lines_count }} lines awarded</span>
+                  </td>
                   <td><span class="badge" v-bind:class="stateBadge(o.state)">{{ o.state }}</span></td>
                   <td>
                     <button v-if="o.fully_confirmed || o.partially_confirmed"
