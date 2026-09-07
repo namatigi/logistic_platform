@@ -54,7 +54,7 @@
             {% endif %}
           </td>
           <td>
-            {% if order.fully_confirmed %}
+            {% if order.fully_confirmed or order.partially_confirmed %}
             <form method="post" action="{% url 'tenders:order_pay' order.pk %}">
               {% csrf_token %}
               <button type="submit" class="btn btn-primary btn-sm btn-award">Make payment</button>

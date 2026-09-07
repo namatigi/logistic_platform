@@ -142,6 +142,8 @@ def award_order(request, pk):
     if is_ok:
         order.award_response = parsed if isinstance(parsed, dict) else {}
         order.awarded_at = timezone.now()
+        if order.state == 'draft':
+            order.state = 'confirmed'
         order.save()
         confirm_message = parsed.get('message') if isinstance(parsed, dict) else None
         if confirm_message:

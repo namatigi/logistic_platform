@@ -67,7 +67,7 @@
           <span style="color:#94a3b8;">Not linked</span>
         {% endif %}
         <div style="margin-top:10px;">
-          {% if order.fully_confirmed %}
+          {% if order.fully_confirmed or order.partially_confirmed %}
             <form method="post" action="{% url 'tenders:order_pay' order.pk %}">
               {% csrf_token %}
               <button type="submit" class="btn btn-primary btn-award">Make payment</button>
@@ -102,8 +102,6 @@
               <th>Product</th>
               <th style="text-align:right;">Qty</th>
               <th style="text-align:right;">Unit price</th>
-              <th style="text-align:right;">Commission</th>
-              <th style="text-align:right;">Subtotal</th>
               <th style="text-align:right;">Total</th>
               <th>Award</th>
             </tr>
@@ -113,8 +111,6 @@
             <tr>
               <td>{{ line.product_name }}<br><span style="color:#64748b; font-size:13px;">Line #{{ line.line_id }} &middot; Product #{{ line.product_id|default:'-' }}</span></td>
               <td style="text-align:right;">{{ line.quantity|floatformat:2 }}</td>
-              <td style="text-align:right;">{{ line.price_unit|floatformat:2 }}</td>
-              <td style="text-align:right;">{{ line.commission|floatformat:2 }}</td>
               <td style="text-align:right;">{{ line.price_subtotal|floatformat:2 }}</td>
               <td style="text-align:right;"><strong>{{ line.price_total|floatformat:2 }}</strong></td>
               <td>
@@ -128,17 +124,12 @@
               </td>
             </tr>
             {% empty %}
-            <tr><td colspan="7" style="color:#64748b; text-align:center;">No order lines.</td></tr>
+            <tr><td colspan="6" style="color:#64748b; text-align:center;">No order lines.</td></tr>
             {% endfor %}
           </tbody>
         </table>
       </form>
     </div>
-  </div>
-
-  <div class="card">
-    <div class="card-title">Raw webhook payload</div>
-    <pre style="background:#0f172a; color:#e2e8f0; padding:14px; border-radius:8px; font-size:13px; overflow-x:auto;">{{ order.raw_payload|pprint|escape }}</pre>
   </div>
 </div>
 <script>
