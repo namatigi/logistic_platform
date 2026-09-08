@@ -331,3 +331,24 @@ class Transporter(models.Model):
 
     class Meta:
         ordering = ['company_name', 'alias']
+
+
+class Truck(models.Model):
+    transporter = models.ForeignKey(Transporter, on_delete=models.CASCADE, related_name='trucks')
+    model = models.CharField(max_length=120, blank=True, default='')
+    license_plate = models.CharField(max_length=40, blank=True, default='')
+    tags = models.CharField(max_length=200, blank=True, default='')
+    chassis_number = models.CharField(max_length=120, blank=True, default='')
+    model_year = models.PositiveIntegerField(null=True, blank=True)
+    tonnage_capacity = models.FloatField(null=True, blank=True, help_text='Tonnage capacity (tonnes)')
+    number_of_axles = models.PositiveIntegerField(null=True, blank=True)
+    volume_capacity = models.FloatField(null=True, blank=True, help_text='Volume capacity for tanks (cubic metres)')
+    truck_type = models.CharField(max_length=50, choices=Tender.TruckType.choices, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.license_plate or self.model or f'Truck #{self.pk}'
+
+    class Meta:
+        ordering = ['-created_at']

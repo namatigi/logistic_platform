@@ -19,7 +19,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 
 from .forms import AddressForm, ProfileForm, SignUpForm
 from .models import Address, CustomUser, Profile
-from tenders.models import Invoice, Order, OrderLine, Tender, Town, Transporter
+from tenders.models import Invoice, Order, OrderLine, Tender, Town, Transporter, Truck
 from tenders.views import (
     SIM_ACCELERATION,
     SIM_SPEED_KMH,
@@ -374,6 +374,112 @@ def api_agent_invoice_paid(request, pk):
     invoice.status = Invoice.Status.PAID
     invoice.save(update_fields=('status',))
     return JsonResponse({'ok': True, 'message': 'Invoice marked as paid.', 'invoice': _invoice_dict(invoice)})
+
+
+@login_required
+def agent_transporters(request):
+    if request.user.role != CustomUser.Role.AGENT:
+        return redirect('users:profile')
+    return render(request, 'users/agent_transporters.html', {'active_tab': 'agent_transporters'})
+
+
+def _truck_dict(truck):
+    return {
+        'id': truck.pk,
+        'model': truck.model,
+        'license_plate': truck.license_plate,
+        'tags': truck.tags,
+        'chassis_number': truck.chassis_number,
+        'model_year': truck.model_year,
+        'tonnage_capacity': truck.tonnage_capacity,
+        'number_of_axles': truck.number_of_axles,
+        'volume_capacity': truck.volume_capacity,
+        'truck_type': truck.truck_type,
+        'truck_type_label': truck.get_truck_type_display(),
+        'created_at': truck.created_at.isoformat() if truck.created_at else None,
+    }
+
+
+@login_required
+def api_agent_transporters(request):
+    transporters = request.user.linked_transporters.all()
+    return JsonResponse({
+        'ok': True,
+        'transporters': [
+            {
+                'id': t.pk,
+                'company_name': t.company_name,
+                'alias': t.alias,
+                'company_id': t.company_id,
+                'trucks': [_truck_dict(truck) for truck in t.trucks.all()],
+            }
+            for t in transporters
+        ],
+    })
+
+
+@login_required
+@require_POST
+def api_agent_transporter_trucks(request, pk):
+    transporter = request.user.linked_transporters.filter(pk=pk).first()
+    if transporter is None:
+        return JsonResponse({'ok': False, 'error': 'Transporter not found.'}, status=404)
+    data = _json_body(request)
+    errors = {}
+
+    def _whole(name):
+        value = data.get(name)
+        if value in (None, ''):
+            return None
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            errors[name] = [f'{name.replace("_", " ").title()} must be a whole number.']
+            return None
+        if number < 0:
+            errors[name] = [f'{name.replace("_", " ").title()} must be a positive number.']
+            return None
+        return number
+
+    def _decimal(name):
+        value = data.get(name)
+        if value in (None, ''):
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            errors[name] = [f'{name.replace("_", " ").title()} must be a number.']
+            return None
+        if number < 0:
+            errors[name] = [f'{name.replace("_", " ").title()} must be a positive number.']
+            return None
+        return number
+
+    model_year = _whole('model_year')
+    number_of_axles = _whole('number_of_axles')
+    tonnage_capacity = _decimal('tonnage_capacity')
+    volume_capacity = _decimal('volume_capacity')
+
+    truck_type = (data.get('truck_type') or '').strip()
+    if truck_type and truck_type not in Tender.TruckType.values:
+        errors['truck_type'] = ['Choose a valid truck type.']
+
+    if errors:
+        return JsonResponse({'ok': False, 'error': 'Please fix the highlighted fields.', 'errors': errors})
+
+    truck = Truck.objects.create(
+        transporter=transporter,
+        model=(data.get('model') or '').strip()[:120],
+        license_plate=(data.get('license_plate') or '').strip()[:40],
+        tags=(data.get('tags') or '').strip()[:200],
+        chassis_number=(data.get('chassis_number') or '').strip()[:120],
+        model_year=model_year,
+        tonnage_capacity=tonnage_capacity,
+        number_of_axles=number_of_axles,
+        volume_capacity=volume_capacity,
+        truck_type=truck_type,
+    )
+    return JsonResponse({'ok': True, 'message': 'Truck added successfully.', 'truck': _truck_dict(truck)})
 
 
 @login_required

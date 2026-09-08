@@ -10,7 +10,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from tenders.models import Invoice, Order, OrderLine, Tender, Town, Transporter
+from tenders.models import Invoice, Order, OrderLine, Tender, Town, Transporter, Truck
 from .models import Address, CustomUser, Profile
 
 
@@ -445,6 +445,88 @@ class AgentPortalTest(TestCase):
         self.assertNotContains(response, 'Linked transporter')
         data = self.client.get(reverse('users:api_profile')).json()
         self.assertEqual(data['linked_transporters'], [])
+
+
+class AgentTransportersTest(TestCase):
+    def setUp(self):
+        self.owner = CustomUser.objects.create_user(email='owner.t@example.com', password='pass1234')
+        self.agent = CustomUser.objects.create_user(
+            email='agent.t@example.com', password='pass1234', role=CustomUser.Role.AGENT,
+        )
+        self.trans = Transporter.objects.create(company_id=77, company_name='TransFleet X', alias='TX')
+        self.other_trans = Transporter.objects.create(company_id=78, company_name='TransFleet Y', alias='TY')
+        self.trans.agents.add(self.agent)
+        self.truck = Truck.objects.create(
+            transporter=self.trans, model='Volvo FH16', license_plate='T 123 ABC',
+            truck_type='truck', model_year=2021, tonnage_capacity=20,
+        )
+
+    def _login(self, email='agent.t@example.com'):
+        self.client.login(email=email, password='pass1234')
+
+    def _payload(self, **overrides):
+        payload = {
+            'model': 'Scania R450', 'license_plate': 'T 999 XYZ', 'tags': 'fuel',
+            'chassis_number': 'CH-001', 'model_year': 2022, 'tonnage_capacity': 34.5,
+            'number_of_axles': 4, 'volume_capacity': 12.75, 'truck_type': 'flatbed',
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_agent_transporters_page_renders(self):
+        self._login()
+        response = self.client.get(reverse('users:agent_transporters'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '/accounts/api/agents/transporters/')
+
+    def test_non_agent_page_redirects_to_profile(self):
+        self._login('owner.t@example.com')
+        response = self.client.get(reverse('users:agent_transporters'))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('users:profile'), response.url)
+
+    def test_api_lists_only_linked_transporters_with_trucks(self):
+        self._login()
+        response = self.client.get(reverse('users:api_agent_transporters'))
+        data = response.json()
+        self.assertTrue(data['ok'])
+        self.assertEqual([t['company_name'] for t in data['transporters']], ['TransFleet X'])
+        trucks = data['transporters'][0]['trucks']
+        self.assertEqual(len(trucks), 1)
+        self.assertEqual(trucks[0]['license_plate'], 'T 123 ABC')
+        self.assertEqual(trucks[0]['truck_type_label'], 'Truck')
+
+    def test_create_truck_for_linked_transporter(self):
+        self._login()
+        url = reverse('users:api_agent_transporter_trucks', args=[self.trans.pk])
+        response = self.client.post(url, data=self._payload(), content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['truck']['license_plate'], 'T 999 XYZ')
+        self.assertEqual(data['truck']['tonnage_capacity'], 34.5)
+        self.assertEqual(self.trans.trucks.count(), 2)
+
+    def test_create_truck_denied_for_unlinked_transporter(self):
+        self._login()
+        url = reverse('users:api_agent_transporter_trucks', args=[self.other_trans.pk])
+        response = self.client.post(url, data=self._payload(), content_type='application/json')
+        self.assertEqual(response.status_code, 404)
+
+    def test_create_truck_validation_errors(self):
+        self._login()
+        url = reverse('users:api_agent_transporter_trucks', args=[self.trans.pk])
+        response = self.client.post(
+            url,
+            data=self._payload(model_year='abc', number_of_axles=-2, truck_type='hovercraft'),
+            content_type='application/json',
+        )
+        data = response.json()
+        self.assertFalse(data['ok'])
+        self.assertIn('model_year', data['errors'])
+        self.assertIn('number_of_axles', data['errors'])
+        self.assertIn('truck_type', data['errors'])
+        self.assertEqual(self.trans.trucks.count(), 1)
 
 
 class LoginCsrfCookieTest(TestCase):

@@ -1,0 +1,277 @@
+{% extends 'base.html' %}
+{% block title %}My Transporters &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">My Transporters</h1>
+      <p class="page-subtitle">Transporters linked to your account, and the trucks that belong to them</p>
+    </div>
+  </div>
+
+  <div id="agent-transporters-app"
+       data-url="{% url 'users:api_agent_transporters' %}"
+       data-truck-url="{% url 'users:api_agent_transporter_trucks' 0 %}" v-cloak>
+    {% verbatim %}
+    <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
+    <div class="alert alert-success" v-if="message" style="margin-bottom:16px;">{{ message }}</div>
+
+    <div class="alert alert-warning" v-if="!error && loaded && transporters.length === 0" style="margin-bottom:16px;">
+      No transporter is linked to your account yet. Contact the administrator to link one.
+    </div>
+
+    <div v-if="transporters.length" class="transporters-grid">
+      <div class="card" v-for="t in transporters" v-bind:key="t.id">
+        <div class="card-title">
+          {{ t.company_name || t.alias || ('Transporter #' + (t.company_id || t.id)) }}
+        </div>
+        <p class="form-help" style="margin-top:-6px; margin-bottom:12px;">
+          {{ [t.alias, t.company_id ? ('ID: ' + t.company_id) : ''].filter(Boolean).join(' &middot; ') || '&nbsp;' }}
+        </p>
+
+        <div class="truck-list" v-if="t.trucks.length">
+          <div class="truck-item" v-for="tr in t.trucks" v-bind:key="tr.id">
+            <div class="address-body">
+              <strong>{{ plate(tr) }}</strong>
+              <div style="color:#64748b; font-size:14px;">
+                {{ [tr.model, tr.truck_type_label, tr.model_year].filter(Boolean).join(' &middot; ') || '-' }}
+              </div>
+              <div style="color:#94a3b8; font-size:13px;">
+                {{ detail(tr) }}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="empty truck-empty" v-else>
+          <p>No trucks yet.</p>
+        </div>
+
+        <div class="form-actions" style="margin-top:14px;">
+          <button type="button" class="btn btn-primary btn-sm" @click="openAdd(t)">
+            + Add truck
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="empty" v-if="!loaded" style="grid-column:1/-1;">
+      <p style="padding:24px;">Loading transporters...</p>
+    </div>
+
+    <div class="modal-overlay" v-if="showModal" @click.self="closeModal">
+      <div class="modal-panel" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h3>Add a truck</h3>
+          <button type="button" class="modal-close" @click="closeModal" aria-label="Close">&times;</button>
+        </div>
+        <p class="form-help" style="margin-top:-4px;">
+          for <strong>{{ active && (active.company_name || active.alias || ('Transporter #' + active.id)) }}</strong>
+        </p>
+
+        <div class="form-grid modal-grid">
+          <div class="form-row">
+            <label>Model</label>
+            <input type="text" v-model.trim="form.model" placeholder="e.g. Volvo FH16">
+            <div class="field-error" v-if="errors.model"><ul><li v-for="e in errors.model">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-row">
+            <label>Licence Plate</label>
+            <input type="text" v-model.trim="form.license_plate" placeholder="e.g. T 123 ABC">
+            <div class="field-error" v-if="errors.license_plate"><ul><li v-for="e in errors.license_plate">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-row">
+            <label>Tags</label>
+            <input type="text" v-model.trim="form.tags" placeholder="e.g. fuel, fleet-A">
+            <div class="field-error" v-if="errors.tags"><ul><li v-for="e in errors.tags">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-row">
+            <label>Chassis Number</label>
+            <input type="text" v-model.trim="form.chassis_number" placeholder="Vehicle identification number">
+            <div class="field-error" v-if="errors.chassis_number"><ul><li v-for="e in errors.chassis_number">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-row">
+            <label>Model Year</label>
+            <input type="number" v-model="form.model_year" min="1960" max="2100" placeholder="e.g. 2022">
+            <div class="field-error" v-if="errors.model_year"><ul><li v-for="e in errors.model_year">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-row">
+            <label>Tonnage Capacity</label>
+            <input type="number" v-model="form.tonnage_capacity" step="0.1" min="0" placeholder="tonnes">
+            <div class="field-error" v-if="errors.tonnage_capacity"><ul><li v-for="e in errors.tonnage_capacity">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-row">
+            <label>Number of Axles</label>
+            <input type="number" v-model="form.number_of_axles" min="0" placeholder="e.g. 3">
+            <div class="field-error" v-if="errors.number_of_axles"><ul><li v-for="e in errors.number_of_axles">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-row">
+            <label>Volume Capacity (Tanks)</label>
+            <input type="number" v-model="form.volume_capacity" step="0.1" min="0" placeholder="cubic metres">
+            <div class="field-error" v-if="errors.volume_capacity"><ul><li v-for="e in errors.volume_capacity">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-row" style="grid-column: 1 / -1;">
+            <label>Truck Type</label>
+            <select v-model="form.truck_type">
+              <option value="">Select truck type</option>
+              <option value="trailer">Trailer</option>
+              <option value="flatbed">Flatbed</option>
+              <option value="truck">Truck</option>
+              <option value="sideloader">Sideloader</option>
+              <option value="lowbed">Lowbed</option>
+            </select>
+            <div class="field-error" v-if="errors.truck_type"><ul><li v-for="e in errors.truck_type">{{ e }}</li></ul></div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-primary" @click="save(true)" :disabled="saving">
+            <span v-if="saving">Saving...</span>
+            <span v-else>Save and New</span>
+          </button>
+          <button type="button" class="btn btn-secondary" @click="save(false)" :disabled="saving">
+            <span v-if="saving">Saving...</span>
+            <span v-else>Save and Close</span>
+          </button>
+          <button type="button" class="btn btn-secondary" @click="closeModal" :disabled="saving">Cancel</button>
+        </div>
+      </div>
+    </div>
+    {% endverbatim %}
+  </div>
+</div>
+
+<style>
+  .transporters-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(340px,1fr)); gap:18px; }
+  .truck-list { display:flex; flex-direction:column; gap:10px; }
+  .truck-item { border:1px solid var(--border,#e2e8f0); border-radius:10px; padding:10px 12px; background:#f8fafc; }
+  .truck-empty { border:1px dashed var(--border,#e2e8f0); border-radius:10px; }
+  .truck-empty p { padding:14px; margin:0; color:#94a3b8; }
+  .modal-overlay { position:fixed; inset:0; background:rgba(15,23,42,.55); display:flex;
+    align-items:flex-start; justify-content:center; padding:6vh 16px 16px; z-index:1000; }
+  .modal-panel { width:100%; max-width:640px; background:#fff; border-radius:14px; box-shadow:0 20px 50px rgba(0,0,0,.35); padding:22px 24px; }
+  .modal-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:2px; }
+  .modal-header h3 { margin:0; font-size:18px; }
+  .modal-close { border:none; background:transparent; font-size:28px; line-height:1; cursor:pointer; color:#64748b; }
+  .modal-close:hover { color:#0f172a; }
+  .modal-grid { margin-top:14px; }
+  .modal-footer { display:flex; gap:10px; justify-content:flex-end; margin-top:20px; }
+  @media (max-width:640px) {
+    .modal-panel { padding:18px 16px; }
+    .modal-footer { flex-wrap:wrap; }
+  }
+</style>
+
+<script>
+  (function () {
+    var root = document.getElementById('agent-transporters-app');
+    var api = window.HYPAX.api;
+
+    function emptyForm() {
+      return {
+        model: '', license_plate: '', tags: '', chassis_number: '',
+        model_year: '', tonnage_capacity: '', number_of_axles: '', volume_capacity: '', truck_type: ''
+      };
+    }
+
+    Vue.createApp({
+      data: function () {
+        return {
+          transporters: [],
+          error: '',
+          message: '',
+          loaded: false,
+          showModal: false,
+          saving: false,
+          active: null,
+          form: emptyForm(),
+          errors: {}
+        };
+      },
+      created: function () { this.load(); },
+      methods: {
+        withPk: function (urlPrefix, id) {
+          return String(urlPrefix).replace('/0/', '/' + id + '/');
+        },
+        plate: function (tr) {
+          return tr.license_plate || tr.model || ('Truck #' + tr.id);
+        },
+        detail: function (tr) {
+          var parts = [];
+          if (tr.chassis_number) parts.push('Chassis: ' + tr.chassis_number);
+          if (tr.tonnage_capacity !== null && tr.tonnage_capacity !== undefined) parts.push('Tonnage: ' + Number(tr.tonnage_capacity) + ' t');
+          if (tr.number_of_axles !== null && tr.number_of_axles !== undefined) parts.push('Axles: ' + tr.number_of_axles);
+          if (tr.volume_capacity !== null && tr.volume_capacity !== undefined) parts.push('Volume: ' + Number(tr.volume_capacity) + ' m³');
+          return parts.join(' &middot; ') || '';
+        },
+        load: async function () {
+          var self = this;
+          try {
+            var res = await api.get(root.dataset.url);
+            if (res && res.ok === false) { self.error = res.error || 'Failed to load transporters.'; return; }
+            self.transporters = (res && res.transporters) || [];
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.loaded = true;
+          }
+        },
+        openAdd: function (t) {
+          this.active = t;
+          this.form = emptyForm();
+          this.errors = {};
+          this.error = '';
+          this.showModal = true;
+        },
+        closeModal: function () {
+          this.showModal = false;
+          this.active = null;
+          this.saving = false;
+        },
+        save: async function (keepOpen) {
+          var self = this;
+          if (!self.active) return;
+          self.error = '';
+          self.errors = {};
+          self.message = '';
+          self.saving = true;
+          try {
+            var url = self.withPk(root.dataset.truckUrl, self.active.id);
+            var res = await api.post(url, self.form);
+            if (res && res.ok === false) {
+              self.errors = (res && res.errors) || {};
+              self.error = res.error || 'Could not save the truck.';
+              return;
+            }
+            var truck = (res && res.truck) || {};
+            for (var i = 0; i < self.transporters.length; i++) {
+              if (self.transporters[i].id === self.active.id) {
+                self.transporters[i].trucks = (self.transporters[i].trucks || []).concat([truck]);
+                break;
+              }
+            }
+            self.message = (res && res.message) || 'Truck added successfully.';
+            if (keepOpen) {
+              self.form = emptyForm();
+              self.errors = {};
+            } else {
+              self.closeModal();
+            }
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.saving = false;
+          }
+        }
+      }
+    }).mount('#agent-transporters-app');
+  })();
+</script>
+{% endblock %}
