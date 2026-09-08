@@ -264,7 +264,10 @@ STATICFILES_DIRS = [BASE_DIR / 'static']
 
 MEDIA_URL = 'media/'
 
-MEDIA_ROOT = BASE_DIR / 'media'
+# Uploaded files (profile pictures etc.) must live on a persistent volume,
+# not the container filesystem (Railway wipes the filesystem on every build).
+# Point MEDIA_ROOT at a mounted Railway Volume so uploads survive redeploys.
+MEDIA_ROOT = Path(os.environ.get('MEDIA_ROOT', BASE_DIR / 'media'))
 
 
 # Email
