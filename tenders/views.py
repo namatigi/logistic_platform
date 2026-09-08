@@ -1,3 +1,4 @@
+import concurrent.futures
 import json
 import logging
 import math
@@ -10,8 +11,9 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.db.models import Q, Sum, Count
+from django.core.cache import cache
 from django.core.exceptions import ObjectDoesNotExist
-from django.http import Http404, JsonResponse
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
@@ -82,22 +84,26 @@ def get_or_create_invoice(order):
 
 
 def notify_order_update(order):
+    _flush_derived_caches()
     channel_layer = get_channel_layer()
     if channel_layer is None:
         return
     from asgiref.sync import async_to_sync
     send = async_to_sync(channel_layer.group_send)
+
+    def push(group, data):
+        try:
+            send(group, data)
+        except Exception:
+            logger.warning('WebSocket push to group %s failed', group)
+
+    payload = {'type': 'order.update', 'data': {'action': 'refresh'}}
+    push('orders_admins', payload)
     if order.user_id:
-        send(
-            f'orders_user_{order.user_id}',
-            {'type': 'order.update', 'data': {'action': 'refresh'}},
-        )
+        push(f'orders_user_{order.user_id}', payload)
     else:
-        send(
-            'orders_all',
-            {'type': 'order.update', 'data': {'action': 'refresh'}},
-        )
-    send(
+        push('orders_all', payload)
+    push(
         f'order_{order.pk}',
         {'type': 'order.update', 'data': _order_dict(order, include_lines=True)},
     )
@@ -578,6 +584,8 @@ def _order_dict(order, include_lines=False):
         'updated_at': order.updated_at.isoformat() if order.updated_at else None,
         'tender_ref': order.tender.cargo_reference if order.tender else None,
         'tender_route': f"{order.tender.route_loading} -> {order.tender.route_delivery}" if order.tender else '',
+        'tender_loading': order.tender.route_loading if order.tender else '',
+        'tender_delivery': order.tender.route_delivery if order.tender else '',
         'fully_confirmed': order.fully_confirmed,
         'partially_confirmed': order.partially_confirmed,
         'remaining_line_ids': order.remaining_line_ids,
@@ -594,7 +602,9 @@ def _order_dict(order, include_lines=False):
                 'product_id': line.product_id,
                 'product_name': line.product_name,
                 'quantity': str(line.quantity),
+                'price_unit': str(line.price_unit),
                 'price_subtotal': str(line.price_subtotal),
+                'tax': str(line.price_total - line.price_subtotal),
                 'price_total': str(line.price_total),
                 'awarded': line.awarded,
             }
@@ -633,17 +643,20 @@ def _form_meta():
 
 @login_required
 def api_dashboard(request):
-    recent = Tender.objects.filter(user=request.user)[:5]
-    return JsonResponse({
-        'ok': True,
-        'email': request.user.email,
-        'company_count': request.user.companies.count(),
-        'tender_count': Tender.objects.filter(user=request.user).count(),
-        'order_count': Order.objects.filter(
-            Q(user=request.user) | Q(user__isnull=True)
-        ).count(),
-        'recent_tenders': [_tender_dict(t) for t in recent],
-    })
+    def loader():
+        recent = Tender.objects.filter(user=request.user)[:5]
+        return {
+            'ok': True,
+            'email': request.user.email,
+            'company_count': request.user.companies.count(),
+            'tender_count': Tender.objects.filter(user=request.user).count(),
+            'order_count': Order.objects.filter(
+                Q(user=request.user) | Q(user__isnull=True)
+            ).count(),
+            'recent_tenders': [_tender_dict(t) for t in recent],
+        }
+
+    return JsonResponse(_cached(_cache_key('dash', request.user.pk), 60, loader))
 
 
 @login_required
@@ -665,18 +678,68 @@ def _page_meta(page, pages, per_page, total):
     }
 
 
+def _cache_key(prefix, *parts):
+    return 'api:' + prefix + (':' + ':'.join(str(p) for p in parts) if parts else '')
+
+
+def _cached(key, timeout, loader):
+    try:
+        data = cache.get(key)
+        if data is not None:
+            return data
+    except Exception as exc:
+        logger.warning('Cache read failed for %s: %s', key, exc)
+    data = loader()
+    try:
+        cache.set(key, data, timeout)
+    except Exception as exc:
+        logger.warning('Cache write failed for %s: %s', key, exc)
+    return data
+
+
+def _cached_json_bytes(key, timeout, loader):
+    try:
+        raw = cache.get(key)
+        if raw is not None:
+            return HttpResponse(raw, content_type='application/json')
+    except Exception as exc:
+        logger.warning('Cache read failed for %s: %s', key, exc)
+    data = loader()
+    try:
+        cache.set(key, json.dumps(data, separators=(',', ':')), timeout)
+    except Exception as exc:
+        logger.warning('Cache write failed for %s: %s', key, exc)
+    return JsonResponse(data)
+
+
+def _flush_derived_caches():
+    if not hasattr(cache, 'delete_pattern'):
+        return
+    try:
+        cache.delete_pattern('api:dash:*')
+        cache.delete_pattern('api:tl:*')
+        cache.delete_pattern('api:ol:*')
+        cache.delete_pattern('api:trk:*')
+    except Exception as exc:
+        logger.warning('Derived-cache flush failed: %s', exc)
+
+
 @login_required
 def api_tender_list(request):
-    per_page = 15
     page = _page_param(request)
-    qs = Tender.objects.filter(user=request.user)
-    total = qs.count()
-    pages = max((total + per_page - 1) // per_page, 1)
-    page = min(page, pages)
-    tenders = qs.order_by('-created_at')[(page - 1) * per_page: page * per_page]
-    data = _page_meta(page, pages, per_page, total)
-    data.update({'ok': True, 'tenders': [_tender_dict(t) for t in tenders]})
-    return JsonResponse(data)
+
+    def loader():
+        per_page = 15
+        qs = Tender.objects.filter(user=request.user)
+        total = qs.count()
+        pages = max((total + per_page - 1) // per_page, 1)
+        p = min(page, pages)
+        tenders = qs.order_by('-created_at')[(p - 1) * per_page: p * per_page]
+        data = _page_meta(p, pages, per_page, total)
+        data.update({'ok': True, 'tenders': [_tender_dict(t) for t in tenders]})
+        return data
+
+    return JsonResponse(_cached(_cache_key('tl', request.user.pk, page), 30, loader))
 
 
 @login_required
@@ -695,6 +758,7 @@ def api_tender_create(request):
     tender = form.save(commit=False)
     tender.user = request.user
     tender.save()
+    _flush_derived_caches()
 
     setting = _shared_setting()
     if setting is None or not setting.base_url:
@@ -739,34 +803,40 @@ def api_tender_create(request):
 
 @login_required
 def api_order_list(request):
-    per_page = 15
     page = _page_param(request)
-    base = Order.objects.filter(_visible_orders_q(request))
-    total = base.count()
-    pages = max((total + per_page - 1) // per_page, 1)
-    page = min(page, pages)
-    orders = (
-        base.prefetch_related('tender', 'invoice')
-        .annotate(
-            _line_count=Count('lines'),
-            _awarded_line_count=Count('lines', filter=Q(lines__awarded=True)),
-            _awarded_amount_total=Sum('lines__price_total', filter=Q(lines__awarded=True)),
+    role = request.user.role
+    scope = 'all' if role == CustomUser.Role.ADMINISTRATOR else request.user.pk
+
+    def loader():
+        per_page = 15
+        base = Order.objects.filter(_visible_orders_q(request))
+        total = base.count()
+        pages = max((total + per_page - 1) // per_page, 1)
+        p = min(page, pages)
+        orders = (
+            base.prefetch_related('tender', 'invoice')
+            .annotate(
+                _line_count=Count('lines'),
+                _awarded_line_count=Count('lines', filter=Q(lines__awarded=True)),
+                _awarded_amount_total=Sum('lines__price_total', filter=Q(lines__awarded=True)),
+            )
+            .order_by('-date_order', '-created_at')
+            [(p - 1) * per_page: p * per_page]
         )
-        .order_by('-date_order', '-created_at')
-        [(page - 1) * per_page: page * per_page]
-    )
-    grouped = {}
-    for o in orders:
-        key = o.tender.cargo_reference if o.tender else None
-        grouped.setdefault(key, []).append(o)
-    groups = [{
-        'grouper': key or '',
-        'label': key or 'Unlinked orders',
-        'orders': [_order_dict(o) for o in items],
-    } for key, items in grouped.items()]
-    data = _page_meta(page, pages, per_page, total)
-    data.update({'ok': True, 'groups': groups, 'total': len(orders)})
-    return JsonResponse(data)
+        grouped = {}
+        for o in orders:
+            key = o.tender.cargo_reference if o.tender else None
+            grouped.setdefault(key, []).append(o)
+        groups = [{
+            'grouper': key or '',
+            'label': key or 'Unlinked orders',
+            'orders': [_order_dict(o) for o in items],
+        } for key, items in grouped.items()]
+        data = _page_meta(p, pages, per_page, total)
+        data.update({'ok': True, 'groups': groups, 'total': len(orders)})
+        return data
+
+    return JsonResponse(_cached(_cache_key('ol', scope, page), 5, loader))
 
 
 @login_required
@@ -863,11 +933,48 @@ def route_map(request):
     loading = request.GET.get('from', '')
     delivery = request.GET.get('to', '')
     tender_id = request.GET.get('tender_id')
+    source = request.GET.get('source', '')
+    truck = request.GET.get('truck', '')
+    cargo_ref = request.GET.get('cargo_ref', '')
+
+    truck_index = 0
+    try:
+        truck_index = int(truck) if truck else 0
+    except (TypeError, ValueError):
+        truck_index = 0
+
+    truck_label = ''
+    truck_lat = ''
+    truck_lng = ''
+    if truck_index and tender_id:
+        tender = Tender.objects.filter(pk=tender_id).first()
+        if tender is not None:
+            truck_label = f'{tender.cargo_reference or f"T{tender.pk}"} \u00b7 T{truck_index}'
+            origin = Town.objects.filter(name=tender.route_loading).first()
+            dest = Town.objects.filter(name=tender.route_delivery).first()
+            if origin is not None and dest is not None:
+                route_points, route_m = get_route(origin, dest)
+                route_km = route_m / 1000.0
+                if not route_km:
+                    route_km = float(tender.distance_km or 0)
+                if route_km:
+                    sim_duration = max((route_km / SIM_SPEED_KMH) * 3600 / SIM_ACCELERATION, 3.0)
+                    route_distances = _route_arrays(route_points)
+                    stagger = (truck_index - 1) * 120
+                    elapsed = max(0.0, (timezone.now() - tender.created_at).total_seconds() - stagger)
+                    progress = min(1.0, elapsed / sim_duration)
+                    lat, lng = _position_at(route_points, route_distances, progress)
+                    truck_lat = str(round(lat, 6))
+                    truck_lng = str(round(lng, 6))
 
     context = {
         'loading': loading,
         'delivery': delivery,
         'tender_id': tender_id,
+        'source': source,
+        'truck_label': truck_label,
+        'truck_lat': truck_lat,
+        'truck_lng': truck_lng,
     }
     return render(request, 'tenders/route_map.html', context)
 
@@ -929,7 +1036,7 @@ def _osrm_fetch(origin, dest):
         f'{origin.lng},{origin.lat};{dest.lng},{dest.lat}'
         '?overview=full&geometries=geojson&alternatives=false'
     )
-    response = http.get(url, timeout=5)
+    response = http.get(url, timeout=1.5)
     response.raise_for_status()
     route = response.json()['routes'][0]
     return [[lat, lng] for lng, lat in route['geometry']['coordinates']], float(route['distance'])
@@ -940,14 +1047,27 @@ def get_route(origin, dest):
     cached = _route_cache.get(key)
     if cached is not None:
         return cached
+    redis_key = 'route:' + origin.name + '\u2192' + dest.name
+    try:
+        cached = cache.get(redis_key)
+        if cached is not None:
+            _route_cache[key] = cached
+            return cached
+    except Exception:
+        pass
     points = [[origin.lat, origin.lng], [dest.lat, dest.lng]]
     distance = _haversine_m(origin.lat, origin.lng, dest.lat, dest.lng)
     try:
         points, distance = _osrm_fetch(origin, dest)
     except Exception:
         logger.warning('OSRM route lookup failed for %s → %s; falling back to straight line', origin.name, dest.name)
-    _route_cache[key] = (points, distance)
-    return points, distance
+    result = (points, distance)
+    _route_cache[key] = result
+    try:
+        cache.set(redis_key, result, 86400)
+    except Exception:
+        pass
+    return result
 
 
 def _route_arrays(points):
@@ -986,64 +1106,97 @@ def tracker(request):
 
 @login_required
 def api_tracker(request):
-    now = timezone.now()
-    towns_by_name = {t.name: t for t in Town.objects.all()}
-    awarded_orders = (
-        Order.objects.filter(_visible_orders_q(request), lines__awarded=True)
-        .select_related('tender')
-        .distinct()
-        .order_by('-created_at')
-    )
-    orders_out = []
-    for order in awarded_orders:
-        tender = order.tender
-        entry = {
-            'id': order.pk,
-            'order_id': order.order_id,
-            'order_name': order.order_name,
-            'customer': order.customer,
-            'cargo_reference': order.cargo_reference,
-            'state': order.state or '',
-            'tender_ref': tender.cargo_reference if tender else '',
-            'awarded_amount': str(order.awarded_amount),
-            'awarded_lines_count': order.awarded_lines_count,
-            'total_lines_count': order.lines.count(),
-            'fully_confirmed': order.fully_confirmed,
-            'partially_confirmed': order.partially_confirmed,
-        }
-        trucks = []
-        if tender is not None:
+    role = request.user.role
+    scope = 'all' if role == CustomUser.Role.ADMINISTRATOR else request.user.pk
+
+    def loader():
+        now = timezone.now()
+        towns_by_name = {t.name: t for t in Town.objects.all()}
+        awarded_orders = list(
+            Order.objects.filter(_visible_orders_q(request), lines__awarded=True)
+            .select_related('tender')
+            .distinct()
+            .order_by('-created_at')
+            .annotate(
+                _line_count=Count('lines', distinct=True),
+                _awarded_line_count=Count(
+                    'lines', filter=Q(lines__awarded=True), distinct=True
+                ),
+                _awarded_amount_total=Sum(
+                    'lines__price_total', filter=Q(lines__awarded=True)
+                ),
+            )
+        )
+        pairs = {}
+        for order in awarded_orders:
+            tender = order.tender
+            if tender is None:
+                continue
             origin = towns_by_name.get(tender.route_loading)
             dest = towns_by_name.get(tender.route_delivery)
             if origin is not None and dest is not None:
-                route_points, route_m = get_route(origin, dest)
-                route_km = route_m / 1000.0
-                if not route_km:
-                    route_km = float(tender.distance_km or 0)
-                sim_duration = max((route_km / SIM_SPEED_KMH) * 3600 / SIM_ACCELERATION, 3.0)
-                route_distances = _route_arrays(route_points)
-                truck_count = max(tender.number_of_trucks or 1, 1)
-                for i in range(truck_count):
-                    stagger = i * 120
-                    elapsed = max(0.0, (now - tender.created_at).total_seconds() - stagger)
-                    progress = min(1.0, elapsed / sim_duration)
-                    lat, lng = _position_at(route_points, route_distances, progress)
-                    trucks.append({
-                        'label': f'{tender.cargo_reference or f"T{tender.pk}"} · T{i + 1}',
-                        'lat': lat,
-                        'lng': lng,
-                        'status': 'Delivered' if progress >= 1.0 else 'En route',
-                        'progress': round(progress, 4),
+                pairs.setdefault((origin.name, dest.name), (origin, dest))
+        resolved = {}
+        if pairs:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(pairs))) as ex:
+                for names, result in ex.map(
+                    lambda item: (item[0], get_route(*item[1])), pairs.items()
+                ):
+                    resolved[names] = result
+
+        orders_out = []
+        for order in awarded_orders:
+            tender = order.tender
+            entry = {
+                'id': order.pk,
+                'order_id': order.order_id,
+                'order_name': order.order_name,
+                'customer': order.customer,
+                'cargo_reference': order.cargo_reference,
+                'state': order.state or '',
+                'tender_ref': tender.cargo_reference if tender else '',
+                'awarded_amount': str(order._awarded_amount_total or 0),
+                'awarded_lines_count': order._awarded_line_count,
+                'total_lines_count': order._line_count,
+                'fully_confirmed': order.fully_confirmed,
+                'partially_confirmed': order.partially_confirmed,
+            }
+            trucks = []
+            if tender is not None:
+                route = resolved.get((tender.route_loading, tender.route_delivery))
+                if route is not None:
+                    origin = towns_by_name[tender.route_loading]
+                    dest = towns_by_name[tender.route_delivery]
+                    route_points, route_m = route
+                    route_km = route_m / 1000.0
+                    if not route_km:
+                        route_km = float(tender.distance_km or 0)
+                    sim_duration = max((route_km / SIM_SPEED_KMH) * 3600 / SIM_ACCELERATION, 3.0)
+                    route_distances = _route_arrays(route_points)
+                    truck_count = max(tender.number_of_trucks or 1, 1)
+                    for i in range(truck_count):
+                        stagger = i * 120
+                        elapsed = max(0.0, (now - tender.created_at).total_seconds() - stagger)
+                        progress = min(1.0, elapsed / sim_duration)
+                        lat, lng = _position_at(route_points, route_distances, progress)
+                        trucks.append({
+                            'label': f'{tender.cargo_reference or f"T{tender.pk}"} · T{i + 1}',
+                            'lat': lat,
+                            'lng': lng,
+                            'status': 'Delivered' if progress >= 1.0 else 'En route',
+                            'progress': round(progress, 4),
+                        })
+                    entry.update({
+                        'origin': {'name': origin.name, 'lat': origin.lat, 'lng': origin.lng},
+                        'destination': {'name': dest.name, 'lat': dest.lat, 'lng': dest.lng},
+                        'route': route_points,
+                        'distance_km': round(route_km, 1),
+                        'trucks': trucks,
                     })
-                entry.update({
-                    'origin': {'name': origin.name, 'lat': origin.lat, 'lng': origin.lng},
-                    'destination': {'name': dest.name, 'lat': dest.lat, 'lng': dest.lng},
-                    'route': route_points,
-                    'distance_km': round(route_km, 1),
-                    'trucks': trucks,
-                })
-        orders_out.append(entry)
-    return JsonResponse({'ok': True, 'orders': orders_out, 'now': now.isoformat()})
+            orders_out.append(entry)
+        return {'ok': True, 'orders': orders_out, 'now': now.isoformat()}
+
+    return _cached_json_bytes(_cache_key('trk', scope), 15, loader)
 
 
 def _invoice_dict(invoice):
@@ -1059,9 +1212,26 @@ def _invoice_dict(invoice):
         'order_id': order.order_id,
         'order_name': order.order_name or f'#{order.order_id}',
         'transporter': invoice.transporter.company_name if invoice.transporter else (order.company_name or ''),
+        'customer': order.customer or '',
         'cargo_reference': order.cargo_reference,
+        'cargo_id': order.cargo_id,
         'route': f'{tender.route_loading} \u2192 {tender.route_delivery}' if tender else '',
+        'tender_loading': tender.route_loading if tender else '',
+        'tender_delivery': tender.route_delivery if tender else '',
+        'tender_id': tender.pk if tender else None,
         'order_user': order.user.email if order.user else '',
+        'lines': [
+            {
+                'line_id': line.line_id,
+                'product_name': line.product_name,
+                'quantity': str(line.quantity),
+                'price_unit': str(line.price_unit),
+                'price_subtotal': str(line.price_subtotal),
+                'tax': str(line.price_total - line.price_subtotal),
+                'price_total': str(line.price_total),
+            }
+            for line in order.lines.filter(awarded=True).order_by('line_id')
+        ],
     }
 
 
@@ -1108,6 +1278,19 @@ def api_invoices(request):
     return JsonResponse({'ok': True, 'invoices': [_invoice_dict(i) for i in invoices]})
 
 
+def _external_invoice_number(parsed):
+    if not isinstance(parsed, dict):
+        return ''
+    data = parsed.get('data')
+    if isinstance(data, dict):
+        return str(data.get('name', '') or '')
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict) and item.get('name'):
+                return str(item['name'])
+    return ''
+
+
 @login_required
 @require_POST
 def api_invoice_paid(request, pk):
@@ -1144,12 +1327,12 @@ def api_invoice_paid(request, pk):
 
     invoice.status = Invoice.Status.PAID
     update_fields = ['status']
-    if isinstance(parsed, dict):
-        external_name = parsed.get('data', {}).get('name') if isinstance(parsed.get('data'), dict) else None
-        if external_name:
-            invoice.number = str(external_name)[:50]
-            update_fields.append('number')
+    external_name = _external_invoice_number(parsed)
+    if external_name:
+        invoice.number = str(external_name)[:50]
+        update_fields.append('number')
     invoice.save(update_fields=update_fields)
+    _flush_derived_caches()
     return JsonResponse({
         'ok': True,
         'message': 'Invoice confirmed as paid.',

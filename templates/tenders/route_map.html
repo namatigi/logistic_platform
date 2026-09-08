@@ -18,8 +18,17 @@
       {% else %}
       <p class="page-subtitle">Select loading and delivery points to view the route</p>
       {% endif %}
+      {% if truck_label %}
+      <p class="page-subtitle">Locating {{ truck_label }}</p>
+      {% endif %}
     </div>
     <div style="display:flex; gap:10px;">
+      {% if source == 'invoices' %}
+      <a href="{% url 'tenders:invoices' %}" class="btn btn-secondary btn-sm">Back to Invoices</a>
+      {% endif %}
+      {% if source == 'orders' %}
+      <a href="{% url 'tenders:order_list' %}" class="btn btn-secondary btn-sm">Back to Orders</a>
+      {% endif %}
       {% if tender_id %}
       <a href="{% url 'tenders:list' %}" class="btn btn-secondary btn-sm">Back to Tenders</a>
       {% endif %}
@@ -68,6 +77,9 @@
 (function() {
   const loadingTown = "{{ loading|default:''|escapejs }}";
   const deliveryTown = "{{ delivery|default:''|escapejs }}";
+  const truckLabel = "{{ truck_label|default:''|escapejs }}";
+  const truckLat = "{{ truck_lat|default:'' }}";
+  const truckLng = "{{ truck_lng|default:'' }}";
 
   const map = L.map('map').setView([-2, 32], 5);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -109,6 +121,10 @@
     clearMap();
     addMarker(origin.lat, origin.lng, origin.name, '#16a34a');
     addMarker(dest.lat, dest.lng, dest.name, '#dc2626');
+
+    if (truckLabel && truckLat && truckLng) {
+      addMarker(parseFloat(truckLat), parseFloat(truckLng), truckLabel, '#2563eb');
+    }
 
     routeControl = L.Routing.control({
       waypoints: [

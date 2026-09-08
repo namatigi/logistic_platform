@@ -117,8 +117,8 @@
                 <td style="text-align:right;">{{ fmtQty(line.price_subtotal) }}</td>
                 <td style="text-align:right;"><strong>{{ fmtQty(line.price_total) }}</strong></td>
                 <td>
-                  <input v-if="isRemaining(line.line_id)" type="checkbox" checked disabled title="Confirmed line">
-                  <input v-else-if="isRemoved(line.line_id)" type="checkbox" disabled title="Removed line">
+                  <input v-if="isRemoved(line.line_id)" type="checkbox" disabled title="Removed line">
+                  <input v-else-if="line.awarded" type="checkbox" checked disabled title="Confirmed line">
                   <input v-else type="checkbox" class="award-line-checkbox" v-model="selectedIds" v-bind:value="line.line_id">
                 </td>
               </tr>
@@ -206,9 +206,6 @@
         },
         money: function (v, c) { return HY.money(v, c); },
         stateBadge: function (s) { return HY.stateBadgeClass(s); },
-        isRemaining: function (lineId) {
-          return this.order.remaining_line_ids.indexOf(lineId) >= 0;
-        },
         isRemoved: function (lineId) {
           return this.order.removed_line_ids.indexOf(lineId) >= 0;
         },

@@ -192,6 +192,21 @@ class NotifyTest(TestCase):
         self.assertIn(f'orders_user_{user.pk}', sent)
         self.assertNotIn('orders_all', sent)
 
+    def test_notify_always_broadcasts_to_admins(self):
+        user = CustomUser.objects.create_user(email='owner2@example.com', password='pass1234')
+        sent = []
+
+        class FakeLayer:
+            async def group_send(self, group, message):
+                sent.append(group)
+
+        with patch('tenders.views.get_channel_layer', return_value=FakeLayer()):
+            order = Order.objects.create(order_id=5101, order_name='ORD-5101', user=user)
+            tenders_views.notify_order_update(order)
+            unassigned = Order.objects.create(order_id=5102, order_name='ORD-5102')
+            tenders_views.notify_order_update(unassigned)
+        self.assertGreaterEqual(sent.count('orders_admins'), 2)
+
 
 class TrackerTest(TestCase):
     def setUp(self):
@@ -237,6 +252,22 @@ class TrackerTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'tracker-map')
         self.assertContains(response, 'data-url')
+
+    def test_route_map_locates_single_truck(self):
+        order = self._create_awarded_order(9015, 'ORD-9015')
+        response = self.client.get(reverse('tenders:route_map'), {
+            'from': 'Nairobi',
+            'to': 'Mombasa',
+            'source': 'invoices',
+            'truck': '2',
+            'cargo_ref': order.cargo_reference,
+            'tender_id': order.tender_id,
+        })
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+        self.assertIn('Locating', html)
+        self.assertIn('T2', html)
+        self.assertIn('const truckLat = "-', html)
 
     def test_api_tracker_returns_awarded_orders(self):
         self._create_awarded_order(9000, 'ORD-9000')
@@ -538,13 +569,14 @@ class InvoicesPageTest(TestCase):
         invite = self._order(self.user_a, self._tender(self.user_a, 'REF-A'), 7005, 'REF-A')
         self.client.login(email='invoice-a@example.com', password='pass1234')
         with patch('tenders.views.submit_confirmation',
-                   return_value=(200, '{"status":"success","data":{"name":"EXT-INV-7005"}}', True)):
+                   return_value=(200, ('{"status":"success","data":[{"id":41,"name":"INV/2026/00012",'
+                                       '"state":"posted","amount_total":1150.0}]}'), True)):
             response = self.client.post(reverse('tenders:api_invoice_paid', args=[invite.pk]), {})
         data = response.json()
         self.assertTrue(data['ok'])
         invite.refresh_from_db()
         self.assertEqual(invite.status, 'paid')
-        self.assertEqual(invite.number, 'EXT-INV-7005')
+        self.assertEqual(invite.number, 'INV/2026/00012')
 
     def test_other_user_cannot_mark_paid(self):
         invite = self._order(self.user_a, self._tender(self.user_a, 'REF-A'), 7014, 'REF-A')
@@ -560,7 +592,8 @@ class InvoicesPageTest(TestCase):
         invite = self._order(self.user_a, self._tender(self.user_a, 'REF-A'), 7006, 'REF-A')
         self.client.login(email='invoice-admin@example.com', password='pass1234')
         with patch('tenders.views.submit_confirmation',
-                   return_value=(200, '{"status":"success","data":{"name":"EXT-INV-7006"}}', True)) as m:
+                   return_value=(200, ('{"status":"success","data":[{"id":41,"name":"INV/2026/00045",'
+                                       '"state":"posted","amount_total":1150.0}]}'), True)) as m:
             response = self.client.post(reverse('tenders:api_invoice_paid', args=[invite.pk]), {})
         data = response.json()
         self.assertTrue(data['ok'])
@@ -575,7 +608,18 @@ class InvoicesPageTest(TestCase):
         })
         invite.refresh_from_db()
         self.assertEqual(invite.status, 'paid')
-        self.assertEqual(invite.number, 'EXT-INV-7006')
+        self.assertEqual(invite.number, 'INV/2026/00045')
+
+    def test_admin_mark_paid_dict_data_format(self):
+        ApiSetting.objects.create(base_url='https://odo.example.com/')
+        invite = self._order(self.user_a, self._tender(self.user_a, 'REF-A'), 7016, 'REF-A')
+        self.client.login(email='invoice-admin@example.com', password='pass1234')
+        with patch('tenders.views.submit_confirmation',
+                   return_value=(200, '{"status":"success","data":{"name":"EXT-INV-7016"}}', True)):
+            response = self.client.post(reverse('tenders:api_invoice_paid', args=[invite.pk]), {})
+        self.assertTrue(response.json()['ok'])
+        invite.refresh_from_db()
+        self.assertEqual(invite.number, 'EXT-INV-7016')
 
     def test_admin_mark_paid_without_external_name_keeps_local_number(self):
         ApiSetting.objects.create(base_url='https://odo.example.com/')
@@ -607,6 +651,36 @@ class InvoicesPageTest(TestCase):
         self.assertFalse(data['ok'])
         invite.refresh_from_db()
         self.assertEqual(invite.status, 'pending')
+
+    def test_order_detail_includes_route_fields(self):
+        invite = self._order(self.user_a, self._tender(self.user_a, 'REF-A'), 7017, 'REF-A')
+        self.client.login(email='invoice-a@example.com', password='pass1234')
+        response = self.client.get(reverse('tenders:api_order_detail', args=[invite.order.pk]))
+        order = response.json()['order']
+        self.assertEqual(order['tender_loading'], 'Nairobi')
+        self.assertEqual(order['tender_delivery'], 'Mombasa')
+        self.assertEqual(order['tender_route'], 'Nairobi -> Mombasa')
+
+    def test_invoice_dict_includes_route_and_cargo_fields(self):
+        invite = self._order(self.user_a, self._tender(self.user_a, 'REF-A'), 7018, 'REF-A')
+        invite.status = 'paid'
+        invite.save(update_fields=('status',))
+        self.client.login(email='invoice-admin@example.com', password='pass1234')
+        response = self.client.get(reverse('tenders:api_invoices'))
+        data = response.json()['invoices']
+        inv_data = next(i for i in data if i['id'] == invite.pk)
+        self.assertEqual(inv_data['tender_loading'], 'Nairobi')
+        self.assertEqual(inv_data['tender_delivery'], 'Mombasa')
+        self.assertTrue('Nairobi' in inv_data['route'] and 'Mombasa' in inv_data['route'])
+        self.assertIn('cargo_id', inv_data)
+        self.assertIn('order_id', inv_data)
+        self.assertIn('customer', inv_data)
+        self.assertIsNotNone(inv_data['tender_id'])
+        self.assertEqual(len(inv_data['lines']), 1)
+        self.assertEqual(inv_data['lines'][0]['product_name'], 'Sand')
+        self.assertEqual(inv_data['lines'][0]['price_subtotal'], '100.00')
+        self.assertEqual(inv_data['lines'][0]['tax'], '0.00')
+        self.assertEqual(inv_data['lines'][0]['price_total'], '100.00')
 
     def test_invoices_page_renders(self):
         self.client.login(email='invoice-a@example.com', password='pass1234')

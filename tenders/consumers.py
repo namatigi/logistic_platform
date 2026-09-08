@@ -11,15 +11,27 @@ class OrderListConsumer(AsyncWebsocketConsumer):
             return
         self.group_name = f'orders_user_{self.scope["user"].pk}'
         self.all_group = 'orders_all'
-        await self.channel_layer.group_add(self.group_name, self.channel_name)
-        await self.channel_layer.group_add(self.all_group, self.channel_name)
+
+        async def add_group(group):
+            try:
+                await self.channel_layer.group_add(group, self.channel_name)
+            except Exception:
+                pass
+
+        await add_group(self.group_name)
+        await add_group(self.all_group)
+        self.admin_group = 'orders_admins'
+        if getattr(self.scope['user'], 'role', '') == 'administrator':
+            await add_group(self.admin_group)
         await self.accept()
 
     async def disconnect(self, close_code):
-        if hasattr(self, 'group_name'):
-            await self.channel_layer.group_discard(self.group_name, self.channel_name)
-        if hasattr(self, 'all_group'):
-            await self.channel_layer.group_discard(self.all_group, self.channel_name)
+        for group in (getattr(self, 'group_name', None), getattr(self, 'all_group', None), getattr(self, 'admin_group', None)):
+            if group:
+                try:
+                    await self.channel_layer.group_discard(group, self.channel_name)
+                except Exception:
+                    pass
 
     async def receive(self, text_data):
         pass

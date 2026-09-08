@@ -11,6 +11,8 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 import os
+import sys
+
 from pathlib import Path
 
 import dj_database_url
@@ -100,9 +102,32 @@ WSGI_APPLICATION = 'DjangoProject.wsgi.application'
 
 CHANNEL_LAYERS = {
     'default': {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            # REDIS_URL overrides the default local Redis server (e.g. Railway).
+            'hosts': [os.environ.get('REDIS_URL', ('127.0.0.1', 6379))],
+        },
     },
 }
+
+
+def _configure_caches():
+    # The test runner uses a no-op cache so tests stay deterministic and
+    # independent of Redis.
+    if 'test' in sys.argv:
+        return {'default': {'BACKEND': 'django.core.cache.backends.dummy.DummyCache'}}
+    return {
+        'default': {
+            'BACKEND': 'django_redis.cache.RedisCache',
+            'LOCATION': os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/1'),
+            'OPTIONS': {
+                'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            },
+        },
+    }
+
+
+CACHES = _configure_caches()
 
 AUTH_USER_MODEL = 'users.CustomUser'
 

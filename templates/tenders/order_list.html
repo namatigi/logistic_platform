@@ -17,6 +17,7 @@
        data-invoice-paid-base="{% url 'tenders:api_invoice_paid' 0 %}"
        data-tender-list-url="{% url 'tenders:list' %}"
        data-settings-url="{% url 'tenders:api_settings' %}"
+       data-map-url="{% url 'tenders:route_map' %}"
        data-ws-url="{{ ws_scheme }}://{{ ws_host }}/ws/orders/">
     {% verbatim %}
     <div v-cloak>
@@ -52,8 +53,7 @@
                     class="order-row" v-bind:class="{ 'row-expanded': expandedId === o.id }"
                     @click="toggle(o)">
                   <td>
-                    <strong>{{ o.order_name }}</strong><br>
-                    <span style="color:#64748b; font-size:13px;">#{{ o.order_id }}</span>
+                    <strong>{{ o.order_name }}</strong>
                   </td>
                   <td>{{ o.customer || '-' }}</td>
                   <td>{{ o.transporter_alias || '-' }}</td>
@@ -97,6 +97,10 @@
                     <div v-if="detail(o)">
                       <div class="order-detail-summary">
                         <div>
+                          <span class="detail-label">Order ID</span>
+                          <div><strong>#{{ detail(o).order_id }}</strong></div>
+                        </div>
+                        <div>
                           <span class="detail-label">Payment</span>
                           <div><span class="badge" v-bind:class="detail(o).payment_status === 'paid' ? 'badge-success' : 'badge-warning'">{{ detail(o).payment_status === 'paid' ? 'Paid' : (detail(o).invoice_id ? 'Not paid' : '-') }}</span></div>
                         </div>
@@ -121,6 +125,12 @@
                           <div v-else style="color:#94a3b8;">not linked</div>
                         </div>
                         <div>
+                          <span class="detail-label">Route</span>
+                          <a v-if="detail(o).tender_loading && detail(o).tender_delivery"
+                             class="btn btn-primary btn-sm" v-bind:href="routeUrl(detail(o))">View route</a>
+                          <div v-else style="color:#94a3b8;">-</div>
+                        </div>
+                        <div>
                           <span class="detail-label">Total</span>
                           <div><strong>{{ money(detail(o).amount_total, detail(o).currency) }}</strong></div>
                         </div>
@@ -142,13 +152,14 @@
                         </div>
                         <table>
                           <thead>
-                            <tr>
-                              <th>TRUCKS</th>
-                              <th style="text-align:right;">Qty</th>
-                              <th style="text-align:right;">Unit price</th>
-                              <th style="text-align:right;">Total</th>
-                              <th>Select</th>
-                            </tr>
+<tr>
+                            <th>TRUCKS</th>
+                            <th style="text-align:right;">Qty</th>
+                            <th style="text-align:right;">Unit price</th>
+                            <th style="text-align:right;">Tax</th>
+                            <th style="text-align:right;">Total</th>
+                            <th>Select</th>
+                          </tr>
                           </thead>
                           <tbody>
                             <tr v-for="line in detail(o).lines" v-bind:key="line.line_id">
@@ -158,14 +169,15 @@
                               </td>
                               <td style="text-align:right;">{{ fmtQty(line.quantity) }}</td>
                               <td style="text-align:right;">{{ fmtQty(line.price_subtotal) }}</td>
+                              <td style="text-align:right;">{{ fmtQty(line.tax) }}</td>
                               <td style="text-align:right;"><strong>{{ fmtQty(line.price_total) }}</strong></td>
                               <td>
                                 <input type="checkbox"
-                                       v-if="detail(o).remaining_line_ids.indexOf(line.line_id) >= 0"
-                                       checked disabled title="Confirmed line">
-                                <input type="checkbox"
-                                       v-else-if="detail(o).removed_line_ids.indexOf(line.line_id) >= 0"
+                                       v-if="detail(o).removed_line_ids.indexOf(line.line_id) >= 0"
                                        disabled title="Removed line">
+                                <input type="checkbox"
+                                       v-else-if="line.awarded"
+                                       checked disabled title="Confirmed line">
                                 <input v-else type="checkbox" class="award-line-checkbox"
                                        v-model="selIds[o.id]" v-bind:value="line.line_id">
                               </td>
@@ -243,12 +255,14 @@
           details: {},
           loadingIds: {},
           selIds: {},
+          wsActive: false,
           _loadSeq: 0,
           detailBase: stripBase(root.dataset.detailBase),
           awardBase: stripBase(root.dataset.awardBase, 'award'),
           payBase: stripBase(root.dataset.payBase, 'pay'),
           tenderListUrl: root.dataset.tenderListUrl,
-          invoicePaidBase: root.dataset.invoicePaidBase
+          invoicePaidBase: root.dataset.invoicePaidBase,
+          mapUrl: root.dataset.mapUrl
         };
       },
       computed: {
@@ -271,26 +285,43 @@
       created: async function () {
         await this.load();
         this.connectWs();
+        this.startPoll();
       },
       methods: {
         connectWs: function () {
           var self = this;
           var wsUrl = root.dataset.wsUrl;
           if (!wsUrl) return;
+          self.wsActive = false;
           var ws = new WebSocket(wsUrl);
+          ws.onopen = function () { self.wsActive = true; };
           ws.onmessage = function (e) {
             try {
               var data = JSON.parse(e.data);
               if (data && data.action === 'refresh') {
-                self.load();
+                if (self._refreshTimer) clearTimeout(self._refreshTimer);
+                self._refreshTimer = setTimeout(function () {
+                  self._refreshTimer = null;
+                  self.load();
+                }, 200);
               }
             } catch (err) { /* ignore */ }
           };
           ws.onclose = function () {
+            self.wsActive = false;
             setTimeout(function () { self.connectWs(); }, 3000);
           };
           ws.onerror = function () { ws.close(); };
           self._ws = ws;
+        },
+        startPoll: function () {
+          var self = this;
+          if (self._pollTimer) return;
+          self._pollTimer = setInterval(function () {
+            if (document.visibilityState === 'visible') {
+              self.load();
+            }
+          }, 5000);
         },
         load: async function (page) {
           page = page || this.page || 1;
@@ -343,6 +374,10 @@
           }
         },
         detail: function (o) { return this.details[o.id] || null; },
+        routeUrl: function (o) {
+          return this.mapUrl + '?from=' + encodeURIComponent(o.tender_loading || '') +
+            '&to=' + encodeURIComponent(o.tender_delivery || '') + '&source=orders';
+        },
         detailLoading: function (o) { return !!this.loadingIds[o.id]; },
         sel: function (o) { return this.selIds[o.id] || []; },
         partialAward: async function (o) {

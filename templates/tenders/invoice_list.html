@@ -11,7 +11,10 @@
     </div>
   </div>
 
-  <div id="invoices-app" data-url="{% url 'tenders:api_invoices' %}" v-cloak>
+  <div id="invoices-app"
+       data-url="{% url 'tenders:api_invoices' %}"
+       data-map-url="{% url 'tenders:route_map' %}"
+       v-cloak>
     {% verbatim %}
     <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
     <div class="alert alert-warning" v-if="!error && loaded && invoices.length === 0">
@@ -27,25 +30,113 @@
               <th>Transporter</th>
               <th>Order</th>
               <th>Cargo ref</th>
-              <th>Route</th>
-              <th>Date</th>
+              <th>Invoice Date</th>
               <th>Amount</th>
               <th>Status</th>
+              <th>Route</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="inv in invoices" v-bind:key="inv.id">
+            <template v-for="inv in invoices" v-bind:key="inv.id">
+            <tr class="order-row" v-bind:class="{ 'row-expanded': expandedId === inv.id }"
+                @click="toggle(inv)">
               <td><strong>{{ inv.number }}</strong></td>
               <td>{{ inv.transporter }}</td>
               <td>{{ inv.order_name }}</td>
               <td>{{ inv.cargo_reference || '-' }}</td>
-              <td>{{ inv.route || '-' }}</td>
-              <td>{{ inv.created_at }}</td>
+              <td>{{ fmtDate(inv.created_at) }}</td>
               <td><strong>{{ money(inv.amount_total, inv.currency) }}</strong></td>
               <td><span class="badge badge-success">{{ inv.status }}</span></td>
+              <td>
+                <a v-if="inv.tender_loading && inv.tender_delivery" class="btn btn-primary btn-sm" v-bind:href="routeUrl(inv)">View route</a>
+                <span v-else style="color:#94a3b8;">-</span>
+              </td>
             </tr>
+            <tr v-if="expandedId === inv.id" class="order-detail-row">
+              <td colspan="8" style="padding:0;">
+                <div class="order-detail-summary">
+                  <div>
+                    <span class="detail-label">Invoice number</span>
+                    <div><strong>{{ inv.number }}</strong></div>
+                  </div>
+                  <div>
+                    <span class="detail-label">Order</span>
+                    <div><strong>{{ inv.order_name }}</strong> <span style="color:#64748b; font-size:12px;">#{{ inv.order_id }}</span></div>
+                  </div>
+                  <div>
+                    <span class="detail-label">Transporter</span>
+                    <div><strong>{{ inv.transporter || '-' }}</strong></div>
+                  </div>
+                  <div>
+                    <span class="detail-label">Cargo reference</span>
+                    <div><strong>{{ inv.cargo_reference || '-' }}</strong></div>
+                  </div>
+                  <div>
+                    <span class="detail-label">Cargo ID</span>
+                    <div><strong>{{ inv.cargo_id || '-' }}</strong></div>
+                  </div>
+                  <div>
+                    <span class="detail-label">Route</span>
+                    <a v-if="inv.tender_loading && inv.tender_delivery" v-bind:href="routeUrl(inv)">{{ inv.route }}</a>
+                    <div v-else style="color:#94a3b8;">{{ inv.route || '-' }}</div>
+                  </div>
+                  <div>
+                    <span class="detail-label">Company</span>
+                    <div><strong>{{ inv.customer || '-' }}</strong></div>
+                  </div>
+                  <div>
+                    <span class="detail-label">Amount</span>
+                    <div><strong>{{ money(inv.amount_total, inv.currency) }}</strong></div>
+                  </div>
+                  <div>
+                    <span class="detail-label">Invoice Date</span>
+                    <div>{{ fmtDate(inv.created_at) }}</div>
+                  </div>
+                  <div>
+                    <span class="detail-label">Status</span>
+                    <div><span class="badge badge-success">{{ inv.status }}</span></div>
+                  </div>
+                </div>
+
+                <div class="order-detail-lines" style="margin-top:12px; border-top:1px solid var(--border,#e2e8f0);">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Description</th>
+                        <th style="text-align:right;">Qty</th>
+                        <th style="text-align:right;">Unit price</th>
+                        <th style="text-align:right;">Tax</th>
+                        <th style="text-align:right;">Total</th>
+                        <th>Location</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="(line, idx) in inv.lines" v-bind:key="line.line_id">
+                        <td>{{ line.product_name }}</td>
+                        <td style="text-align:right;">{{ fmtQty(line.quantity) }}</td>
+                        <td style="text-align:right;">{{ fmtQty(line.price_subtotal) }}</td>
+                        <td style="text-align:right;">{{ fmtQty(line.tax) }}</td>
+                        <td style="text-align:right;"><strong>{{ fmtQty(line.price_total) }}</strong></td>
+                        <td>
+                          <a v-if="inv.tender_loading && inv.tender_delivery" class="btn btn-primary btn-sm"
+                             v-bind:href="locateUrl(inv, idx + 1)">Locate</a>
+                          <span v-else style="color:#94a3b8;">-</span>
+                        </td>
+                      </tr>
+                      <tr v-if="!inv.lines.length">
+                        <td colspan="5" style="color:#64748b; text-align:center;">No invoiced items.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </td>
+            </tr>
+            </template>
           </tbody>
         </table>
+      </div>
+      <div class="empty" v-else-if="loaded">
+        <p style="padding:24px;">No paid invoices yet.</p>
       </div>
       <div class="empty" v-else>
         <p style="padding:24px;">Loading invoices...</p>
@@ -63,11 +154,30 @@
 
     Vue.createApp({
       data: function () {
-        return { invoices: [], error: '', loaded: false };
+        return { invoices: [], error: '', loaded: false, expandedId: null };
       },
       created: function () { this.load(); },
       methods: {
         money: function (v, c) { return HY.money(v, c); },
+        fmtDate: function (v) { return HY.fmtDate(v); },
+        fmtQty: function (v) {
+          var n = Number(v);
+          return isNaN(n) ? (v || '0.00') : n.toFixed(2);
+        },
+        toggle: function (inv) {
+          this.expandedId = (this.expandedId === inv.id) ? null : inv.id;
+        },
+        routeUrl: function (inv) {
+          return String(root.dataset.mapUrl) + '?from=' + encodeURIComponent(inv.tender_loading || '') +
+            '&to=' + encodeURIComponent(inv.tender_delivery || '') + '&source=invoices';
+        },
+        locateUrl: function (inv, truckIndex) {
+          return String(root.dataset.mapUrl) + '?from=' + encodeURIComponent(inv.tender_loading || '') +
+            '&to=' + encodeURIComponent(inv.tender_delivery || '') + '&source=invoices' +
+            '&truck=' + truckIndex +
+            '&cargo_ref=' + encodeURIComponent(inv.cargo_reference || '') +
+            '&tender_id=' + (inv.tender_id || '');
+        },
         load: async function () {
           var self = this;
           try {
