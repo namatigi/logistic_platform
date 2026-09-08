@@ -1,7 +1,24 @@
+from io import BytesIO
+from unittest.mock import patch
+
+from PIL import Image
+from django.contrib.auth.models import Group
+from django.contrib.gis.geos import Point
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core import mail
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
+from tenders.models import Invoice, Order, OrderLine, Tender, Town, Transporter
 from .models import Address, CustomUser, Profile
+
+
+def _make_image(size=2000, fmt='PNG'):
+    buffer = BytesIO()
+    Image.new('RGB', (size, size), (120, 60, 200)).save(buffer, format=fmt)
+    buffer.seek(0)
+    return SimpleUploadedFile('avatar.png', buffer.read(), content_type='image/png')
 
 
 class ProfileViewsTest(TestCase):
@@ -19,6 +36,18 @@ class ProfileViewsTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'profile-app')
 
+    def test_navbar_shows_avatar_placeholder_not_email(self):
+        response = self.client.get(reverse('users:profile'))
+        self.assertNotContains(response, 'alice@example.com')
+        self.assertContains(response, 'nav-avatar')
+        self.assertContains(response, 'A')
+
+    def test_navbar_avatar_initials(self):
+        self.assertEqual(self.user.avatar_initials(), 'A')
+        self.user.email = 'leon.mangu@gmail.com'
+        self.assertEqual(self.user.avatar_initials(), 'LM')
+        self.assertEqual(self.user.avatar_picture(), '')
+
     def test_api_profile_returns_defaults(self):
         response = self.client.get(reverse('users:api_profile'))
         self.assertEqual(response.status_code, 200)
@@ -26,6 +55,37 @@ class ProfileViewsTest(TestCase):
         self.assertTrue(data['ok'])
         self.assertEqual(data['profile']['email'], 'alice@example.com')
         self.assertEqual(data['addresses'], [])
+
+    def test_profile_picture_is_resized(self):
+        response = self.client.post(reverse('users:api_profile_save'), {
+            'email': 'alice@example.com',
+            'bio': 'Freight coordinator',
+            'phone': '',
+            'profile_picture': _make_image(),
+        })
+        self.assertEqual(response.status_code, 200)
+        profile = Profile.objects.get(user=self.user)
+        with profile.profile_picture.open('rb') as f:
+            with Image.open(f) as img:
+                self.assertLessEqual(img.width, 512)
+                self.assertLessEqual(img.height, 512)
+                self.assertEqual(img.format, 'JPEG')
+        self.assertLess(profile.profile_picture.size, 200000)
+
+    def test_profile_picture_can_be_removed(self):
+        profile = Profile.objects.create(user=self.user)
+        profile.profile_picture.save('avatar.jpg', SimpleUploadedFile('avatar.jpg', _make_image().read(), content_type='image/jpeg'))
+        profile.refresh_from_db()
+        self.assertTrue(profile.profile_picture)
+        response = self.client.post(reverse('users:api_profile_save'), {
+            'email': 'alice@example.com',
+            'bio': 'Freight coordinator',
+            'phone': '',
+            'remove_picture': 'true',
+        })
+        self.assertEqual(response.status_code, 200)
+        profile.refresh_from_db()
+        self.assertFalse(profile.profile_picture)
 
     def test_api_profile_save_bio_and_email(self):
         response = self.client.post(reverse('users:api_profile_save'), {
@@ -39,6 +99,26 @@ class ProfileViewsTest(TestCase):
         profile = Profile.objects.get(user=self.user)
         self.assertEqual(profile.bio, 'Freight coordinator')
         self.assertEqual(profile.phone, '+1 555 0100')
+
+    def test_api_profile_save_first_and_last_name(self):
+        response = self.client.post(reverse('users:api_profile_save'), {
+            'email': 'alice@example.com',
+            'phone': '',
+            'bio': '',
+            'first_name': 'Alice',
+            'last_name': 'Mangu',
+        })
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['profile']['first_name'], 'Alice')
+        self.assertEqual(data['profile']['last_name'], 'Mangu')
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.first_name, 'Alice')
+        self.assertEqual(self.user.last_name, 'Mangu')
+        get_data = self.client.get(reverse('users:api_profile')).json()
+        self.assertEqual(get_data['profile']['first_name'], 'Alice')
+        self.assertEqual(get_data['profile']['last_name'], 'Mangu')
 
     def test_api_profile_save_email_change(self):
         response = self.client.post(reverse('users:api_profile_save'), {
@@ -96,3 +176,249 @@ class ProfileViewsTest(TestCase):
         self.client.post(url, {'label': 'Home', 'street': 'A', 'is_primary': True})
         self.client.post(url, {'label': 'Office', 'street': 'B', 'is_primary': True})
         self.assertEqual(Address.objects.filter(user=self.user, is_primary=True).count(), 1)
+
+
+class RolesGroupsTest(TestCase):
+    def test_migration_creates_role_groups(self):
+        self.assertEqual(
+            set(Group.objects.filter(name__in=('Administrator', 'Agents', 'Users')).values_list('name', flat=True)),
+            {'Administrator', 'Agents', 'Users'},
+        )
+
+    def test_user_save_syncs_role_group(self):
+        user = CustomUser.objects.create_user(email='agent@example.com', password='pass1234', role=CustomUser.Role.AGENT)
+        self.assertEqual(list(user.groups.values_list('name', flat=True)), ['Agents'])
+        user.role = CustomUser.Role.USER
+        user.save(update_fields=('role',))
+        self.assertEqual(list(user.groups.values_list('name', flat=True)), ['Users'])
+
+
+class AdminDashboardTest(TestCase):
+    def setUp(self):
+        self.admin = CustomUser.objects.create_user(
+            email='admin@example.com', password='pass1234', role=CustomUser.Role.ADMINISTRATOR,
+        )
+        self.client.login(email='admin@example.com', password='pass1234')
+
+    def test_non_admin_cannot_access_admin_panel(self):
+        user = CustomUser.objects.create_user(email='user@example.com', password='pass1234')
+        self.client.logout()
+        self.client.login(email='user@example.com', password='pass1234')
+        response = self.client.get(reverse('users:admin_dashboard'))
+        self.assertRedirects(response, reverse('users:profile'))
+        response = self.client.get(reverse('users:api_admin_dashboard'))
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_page_renders(self):
+        response = self.client.get(reverse('users:admin_dashboard'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'admin-app')
+
+    def test_api_admin_dashboard_lists_transporters_and_agents(self):
+        safari = Transporter.objects.create(company_id=9001, company_name='Safari Freight', alias='SF')
+        Transporter.objects.create(company_id=9002, company_name='Arusha Movers', alias='AM')
+        safari.agents.add(
+            CustomUser.objects.create_user(
+                email='agent2@example.com', password='pass1234',
+                first_name='Grace', last_name='Njeri', role=CustomUser.Role.AGENT,
+            )
+        )
+        response = self.client.get(reverse('users:api_admin_dashboard'))
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['ok'])
+        names = sorted(t['company_name'] for t in data['transporters'])
+        self.assertEqual(names, ['Arusha Movers', 'Safari Freight'])
+        self.assertEqual(data['agents'][0]['email'], 'agent2@example.com')
+
+    def test_api_admin_agent_create_with_picture(self):
+        response = self.client.post(reverse('users:api_admin_agent_create'), {
+            'first_name': 'James',
+            'last_name': 'Otieno',
+            'email': 'james@example.com',
+            'phone': '+254 700 000 000',
+            'bio': 'Field agent',
+            'profile_picture': _make_image(),
+        })
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['ok'])
+        agent = CustomUser.objects.get(email='james@example.com')
+        self.assertEqual(agent.role, CustomUser.Role.AGENT)
+        self.assertEqual(agent.first_name, 'James')
+        self.assertEqual(agent.last_name, 'Otieno')
+        self.assertEqual(list(agent.groups.values_list('name', flat=True)), ['Agents'])
+        profile = agent.profile
+        self.assertEqual(profile.phone, '+254 700 000 000')
+        self.assertTrue(profile.profile_picture)
+        self.assertTrue(data['password'])
+
+    def test_api_admin_agent_create_duplicate_email(self):
+        CustomUser.objects.create_user(email='dup@example.com', password='pass1234')
+        response = self.client.post(reverse('users:api_admin_agent_create'), {
+            'first_name': 'Dup', 'email': 'dup@example.com',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()['ok'])
+
+    def test_api_admin_agent_create_with_password_sends_email(self):
+        response = self.client.post(reverse('users:api_admin_agent_create'), {
+            'first_name': 'Pam',
+            'last_name': 'Njeri',
+            'email': 'pam@example.com',
+            'password': 'Secret123!',
+        })
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['password'], 'Secret123!')
+        self.assertTrue(agent := CustomUser.objects.get(email='pam@example.com'))
+        self.assertTrue(agent.check_password('Secret123!'))
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ['pam@example.com'])
+        self.assertIn('pam@example.com', mail.outbox[0].body)
+        self.assertIn('Secret123!', mail.outbox[0].body)
+        self.assertIn(('Agents',), list(agent.groups.values_list('name')))
+
+    def test_api_admin_agent_create_rejects_short_password(self):
+        response = self.client.post(reverse('users:api_admin_agent_create'), {
+            'first_name': 'Pam', 'email': 'pam2@example.com', 'password': 'short',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()['ok'])
+        self.assertFalse(CustomUser.objects.filter(email='pam2@example.com').exists())
+
+    def test_admin_links_agent_to_multiple_transporters(self):
+        c1 = Transporter.objects.create(company_id=101, company_name='Trans A')
+        c2 = Transporter.objects.create(company_id=102, company_name='Trans B')
+        agent = CustomUser.objects.create_user(
+            email='agent3@example.com', password='pass1234', role=CustomUser.Role.AGENT,
+        )
+        url = reverse('users:api_admin_agent_transporters', args=[agent.pk])
+        response = self.client.post(url, {'transporter_ids': [c1.pk, c2.pk]}, content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['ok'])
+        self.assertEqual(list(agent.linked_transporters.order_by('pk').values_list('pk', flat=True)), [c1.pk, c2.pk])
+        response = self.client.post(url, {'transporter_ids': [c2.pk]}, content_type='application/json')
+        self.assertEqual(list(agent.linked_transporters.values_list('pk', flat=True)), [c2.pk])
+
+
+class AgentPortalTest(TestCase):
+    def setUp(self):
+        self.osrm_patcher = patch('tenders.views._osrm_fetch', side_effect=OSError('no network'))
+        self.addCleanup(self.osrm_patcher.stop)
+        self.osrm_patcher.start()
+        import tenders.views as tviews
+        tviews._route_cache.clear()
+        Town.objects.get_or_create(name='Nairobi', defaults={'country': 'Kenya', 'point': Point(36.8219, -1.2921, srid=4326)})
+        Town.objects.get_or_create(name='Mombasa', defaults={'country': 'Kenya', 'point': Point(39.6682, -4.0435, srid=4326)})
+        self.admin = CustomUser.objects.create_user(
+            email='admin@example.com', password='pass1234', role=CustomUser.Role.ADMINISTRATOR,
+        )
+        self.owner = CustomUser.objects.create_user(email='owner@example.com', password='pass1234')
+        self.trans_a = Transporter.objects.create(company_id=1, company_name='TransFleet A', alias='TA')
+        self.trans_b = Transporter.objects.create(company_id=2, company_name='TransFleet B', alias='TB')
+        self.agent_a = CustomUser.objects.create_user(
+            email='agent.a@example.com', password='pass1234', role=CustomUser.Role.AGENT,
+        )
+        self.agent_b = CustomUser.objects.create_user(
+            email='agent.b@example.com', password='pass1234', role=CustomUser.Role.AGENT,
+        )
+        self.trans_a.agents.add(self.agent_a)
+        self.trans_b.agents.add(self.agent_b)
+
+        def make_tender(name, customer):
+            return Tender.objects.create(
+                user=self.owner, route_loading='Nairobi', route_delivery='Mombasa',
+                customer=customer, cargo_type=Tender.CargoType.DRY_VAN,
+                truck_type=Tender.TruckType.TRUCK, weight=20.0, number_of_trucks=2,
+                distance_km=480, cargo_date=timezone.localdate(), status=Tender.Status.SUCCESS,
+            )
+
+        self.tender_a = make_tender('CA', 'TransFleet A')
+        self.tender_b = make_tender('CB', 'TransFleet B')
+
+        def award_order(order_id, tender, company_name, company_id):
+            order = Order.objects.create(
+                order_id=order_id, order_name=f'ORD-{order_id}', customer=company_name,
+                company_name=company_name, company_id=company_id, tender=tender,
+            )
+            OrderLine.objects.create(
+                order=order, line_id=1, product_name='Sand', quantity=1, price_unit=100,
+                commission=0, price_subtotal=100, price_total=100, awarded=True,
+            )
+            return order
+
+        self.order_a = award_order(9100, self.tender_a, 'TransFleet A', 1)
+        self.order_b = award_order(9101, self.tender_b, 'TransFleet B', 2)
+
+    def _login(self, email):
+        self.client.login(email=email, password='pass1234')
+
+    def test_agent_sees_only_own_transporter_awarded_orders(self):
+        partial = Order.objects.create(
+            order_id=9102, order_name='ORD-9102', customer='TransFleet A',
+            company_name='TransFleet A', company_id=1, tender=self.tender_a,
+        )
+        OrderLine.objects.create(
+            order=partial, line_id=1, product_name='Sand', quantity=1, price_unit=100,
+            commission=0, price_subtotal=100, price_total=100, awarded=True,
+        )
+        OrderLine.objects.create(
+            order=partial, line_id=2, product_name='Gravel', quantity=1, price_unit=100,
+            commission=0, price_subtotal=100, price_total=100, awarded=False,
+        )
+        self._login('agent.a@example.com')
+        response = self.client.get(reverse('users:api_agent_awarded'))
+        data = response.json()
+        self.assertTrue(data['ok'])
+        names = [o['company_name'] for o in data['orders']]
+        self.assertEqual(names, ['TransFleet A', 'TransFleet A'])
+        by_name = {o['order_name']: o for o in data['orders']}
+        full = by_name['ORD-9100']
+        self.assertEqual(full['awarded_amount'], '100.00')
+        self.assertEqual(full['awarded_lines'], 1)
+        self.assertEqual(full['lines_total'], 1)
+        self.assertEqual(full['confirmation'], 'full')
+        part = by_name['ORD-9102']
+        self.assertEqual(part['awarded_lines'], 1)
+        self.assertEqual(part['lines_total'], 2)
+        self.assertEqual(part['confirmation'], 'partial')
+
+    def test_agent_tracker_scoped_to_linked_transporters(self):
+        self._login('agent.a@example.com')
+        response = self.client.get(reverse('users:api_agent_tracker'))
+        data = response.json()
+        self.assertTrue(data['ok'])
+        self.assertEqual([o['company_name'] for o in data['orders']], ['TransFleet A'])
+
+    def test_agent_invoices_scoped_and_mark_paid(self):
+        self._login('agent.a@example.com')
+        response = self.client.get(reverse('users:api_agent_invoices'))
+        data = response.json()
+        self.assertTrue(data['ok'])
+        self.assertEqual(len(data['invoices']), 1)
+        invoice_id = data['invoices'][0]['id']
+        self.assertEqual(data['invoices'][0]['number'], 'INV-9100')
+        self.assertEqual(data['invoices'][0]['status'], 'pending')
+        invoice = Invoice.objects.get(pk=invoice_id)
+        self.assertEqual(invoice.transporter, self.trans_a)
+
+        paid_url = reverse('users:api_agent_invoice_paid', args=[invoice_id])
+        response = self.client.post(paid_url, {})
+        self.assertTrue(response.json()['ok'])
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.Status.PAID)
+
+    def test_agent_cannot_mark_other_transporter_invoice_paid(self):
+        self._login('agent.a@example.com')
+        from tenders.views import get_or_create_invoice
+        other_invoice = get_or_create_invoice(self.order_b)
+        response = self.client.post(reverse('users:api_agent_invoice_paid', args=[other_invoice.pk]), {})
+        self.assertEqual(response.status_code, 404)
+
+    def test_agent_pages_render(self):
+        self._login('agent.a@example.com')
+        for name in ('agent_awarded', 'agent_tracker', 'agent_invoices'):
+            response = self.client.get(reverse('users:' + name))
+            self.assertEqual(response.status_code, 200, name)

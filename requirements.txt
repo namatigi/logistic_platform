@@ -5,3 +5,4 @@ requests==2.34.2
 channels==4.3.2
 daphne==4.2.3
 Pillow==11.2.1
+GDAL==3.4.1

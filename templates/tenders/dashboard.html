@@ -13,9 +13,9 @@
   <div id="dashboard-app"
        data-url="{% url 'tenders:api_dashboard' %}"
        data-company-url="{% url 'companies:create' %}"
-       data-api-url="{% url 'tenders:api_settings' %}"
        data-list-url="{% url 'tenders:list' %}"
-       data-create-url="{% url 'tenders:create' %}">
+       data-create-url="{% url 'tenders:create' %}"
+       {% if user.role != 'agent' %}data-can-companies{% endif %}>
     {% verbatim %}
     <div v-cloak>
 
@@ -32,13 +32,9 @@
           <div class="stat-value">{{ order_count }}</div>
           <div class="stat-label">Orders received</div>
         </div>
-        <div class="stat">
+        <div class="stat" v-if="canCompanies">
           <a v-bind:href="companyUrl" class="btn btn-secondary btn-sm">+ Add company</a>
           <div class="stat-label" style="margin-top:8px;">Manage your companies</div>
-        </div>
-        <div class="stat">
-          <a v-bind:href="apiUrl" class="btn btn-secondary btn-sm">Configure API</a>
-          <div class="stat-label" style="margin-top:8px;">Set base URL &amp; auth</div>
         </div>
       </div>
 
@@ -99,8 +95,8 @@
           order_count: 0,
           recent_tenders: [],
           loaded: false,
+          canCompanies: 'canCompanies' in root.dataset,
           companyUrl: root.dataset.companyUrl,
-          apiUrl: root.dataset.apiUrl,
           listUrl: root.dataset.listUrl,
           createUrl: root.dataset.createUrl
         };

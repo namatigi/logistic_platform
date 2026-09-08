@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 from datetime import datetime
 from decimal import Decimal
 
@@ -7,27 +8,83 @@ import requests as http
 from channels.layers import get_channel_layer
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.mixins import LoginRequiredMixin
-from django.db.models import Q
+from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
+from django.db.models import Q, Sum, Count
+from django.core.exceptions import ObjectDoesNotExist
 from django.http import Http404, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
 from .forms import ApiSettingForm, TenderForm
-from .models import ApiSetting, Order, OrderLine, Tender, Town, generate_transporter_alias
+from .models import ApiSetting, Invoice, Order, OrderLine, Tender, Town, Transporter, generate_transporter_alias
 from .towns import TOWN_CHOICES
+from companies.models import Company
+from users.models import CustomUser
 
 logger = logging.getLogger(__name__)
+
+
+def _shared_setting():
+    return ApiSetting.get()
+
+
+class AdminRequiredMixin(UserPassesTestMixin):
+    def test_func(self):
+        return getattr(self.request.user, 'role', None) == CustomUser.Role.ADMINISTRATOR
+
+
+def get_or_create_transporter(order):
+    company_id = order.company_id
+    company_name = (order.company_name or '').strip()
+    transporter = None
+    if company_id:
+        transporter = Transporter.objects.filter(company_id=company_id).first()
+    if transporter is None and company_name:
+        transporter = Transporter.objects.filter(company_name__iexact=company_name).first()
+    if transporter is None:
+        transporter = Transporter.objects.create(
+            company_id=company_id or None,
+            company_name=company_name,
+            alias=order.transporter_alias or '',
+        )
+    else:
+        update_fields = []
+        if company_id and transporter.company_id != company_id:
+            transporter.company_id = company_id
+            update_fields.append('company_id')
+        if company_name and transporter.company_name != company_name:
+            transporter.company_name = company_name
+            update_fields.append('company_name')
+        if transporter.alias != order.transporter_alias:
+            transporter.alias = order.transporter_alias or ''
+            update_fields.append('alias')
+        if update_fields:
+            transporter.save(update_fields=update_fields)
+    return transporter
+
+
+def get_or_create_invoice(order):
+    invoice = Invoice.objects.filter(order=order).first()
+    if invoice is not None:
+        return invoice
+    transporter = get_or_create_transporter(order)
+    return Invoice.objects.create(
+        number=f'INV-{order.order_id}',
+        order=order,
+        transporter=transporter,
+        amount_total=order.awarded_amount,
+        currency=order.currency or 'TZS',
+    )
 
 
 def notify_order_update(order):
     channel_layer = get_channel_layer()
     if channel_layer is None:
         return
-    order_data = _order_dict(order, include_lines=True)
     from asgiref.sync import async_to_sync
     send = async_to_sync(channel_layer.group_send)
     if order.user_id:
@@ -35,9 +92,14 @@ def notify_order_update(order):
             f'orders_user_{order.user_id}',
             {'type': 'order.update', 'data': {'action': 'refresh'}},
         )
+    else:
+        send(
+            'orders_all',
+            {'type': 'order.update', 'data': {'action': 'refresh'}},
+        )
     send(
         f'order_{order.pk}',
-        {'type': 'order.update', 'data': order_data},
+        {'type': 'order.update', 'data': _order_dict(order, include_lines=True)},
     )
 
 
@@ -159,6 +221,8 @@ def perform_award(order, setting, line_ids, is_partial):
         order.state = 'confirmed'
     order.save()
 
+    get_or_create_invoice(order)
+
     notify_order_update(order)
 
     message = parsed.get('message') if isinstance(parsed, dict) else None
@@ -175,9 +239,9 @@ def award_order(request, pk):
     if order is None:
         raise Http404()
 
-    setting = ApiSetting.objects.filter(user=request.user).first()
+    setting = _shared_setting()
     if setting is None or not setting.base_url:
-        messages.warning(request, 'Configure your API base URL in API Settings before awarding.')
+        messages.warning(request, 'Configure your API base URL in Setting before awarding.')
         return redirect('tenders:api_settings')
 
     line_ids_raw = request.POST.getlist('line_ids')
@@ -271,6 +335,8 @@ def webhook_orders(request):
             price_total=to_decimal(line.get('price_total')),
         )
 
+    get_or_create_transporter(order)
+
     notify_order_update(order)
 
     return JsonResponse({
@@ -318,28 +384,27 @@ class TenderCreate(LoginRequiredMixin, CreateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        setting = ApiSetting.objects.filter(user=self.request.user).first()
-        context['api_setting'] = setting
+        context['api_setting'] = _shared_setting()
         return context
 
     def form_valid(self, form):
         tender = form.save(commit=False)
         tender.user = self.request.user
 
-        setting = ApiSetting.objects.filter(user=self.request.user).first()
-        if setting is None:
+        setting = _shared_setting()
+        if setting is None or not setting.base_url:
             messages.warning(
                 self.request,
-                'No API settings found. Configure your base URL and auth before sending.',
+                'No API settings found. The administrator must configure the shared base URL and auth.',
             )
             tender.status = Tender.Status.PENDING
             tender.save()
-            return redirect('tenders:api_settings')
+            return redirect('tenders:create')
         if not setting.base_url:
             messages.warning(self.request, 'API base URL is missing.')
             tender.status = Tender.Status.PENDING
             tender.save()
-            return redirect('tenders:api_settings')
+            return redirect('tenders:create')
 
         status_code, body, _ok = submit_tender(setting, tender)
         tender.response_code = status_code
@@ -414,15 +479,14 @@ class OrderDetail(LoginRequiredMixin, DetailView):
         return context
 
 
-class ApiSettingUpdate(LoginRequiredMixin, UpdateView):
+class ApiSettingUpdate(AdminRequiredMixin, LoginRequiredMixin, UpdateView):
     model = ApiSetting
     form_class = ApiSettingForm
     template_name = 'tenders/api_setting_form.html'
     success_url = reverse_lazy('tenders:api_settings')
 
     def get_object(self, queryset=None):
-        setting, _created = ApiSetting.objects.get_or_create(user=self.request.user)
-        return setting
+        return _shared_setting()
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -466,7 +530,33 @@ def _tender_dict(tender):
     }
 
 
+def _order_invoice(order):
+    try:
+        return order.invoice
+    except ObjectDoesNotExist:
+        return None
+
+
+def _visible_orders_q(request):
+    if request.user.role == CustomUser.Role.ADMINISTRATOR:
+        return Q()
+    return Q(user=request.user) | Q(user__isnull=True)
+
+
 def _order_dict(order, include_lines=False):
+    if hasattr(order, '_line_count'):
+        line_count = order._line_count or 0
+    else:
+        line_count = order.lines.count()
+    if hasattr(order, '_awarded_line_count'):
+        awarded_count = order._awarded_line_count or 0
+    else:
+        awarded_count = order.awarded_lines_count
+    if hasattr(order, '_awarded_amount_total'):
+        awarded_amount = order._awarded_amount_total or 0
+    else:
+        awarded_amount = order.awarded_amount
+    invoice = _order_invoice(order)
     data = {
         'id': order.pk,
         'order_id': order.order_id,
@@ -478,9 +568,9 @@ def _order_dict(order, include_lines=False):
         'company_id': order.company_id,
         'currency': order.currency,
         'amount_total': str(order.amount_total),
-        'awarded_amount': str(order.awarded_amount),
-        'awarded_lines_count': order.awarded_lines_count,
-        'total_lines_count': order.lines.count(),
+        'awarded_amount': str(awarded_amount or 0),
+        'awarded_lines_count': awarded_count,
+        'total_lines_count': line_count,
         'cargo_reference': order.cargo_reference,
         'cargo_id': order.cargo_id,
         'date_order': order.date_order.isoformat() if order.date_order else None,
@@ -494,6 +584,8 @@ def _order_dict(order, include_lines=False):
         'removed_line_ids': order.removed_line_ids,
         'awarded_at': order.awarded_at.isoformat() if order.awarded_at else None,
         'award_message': (order.award_response_data or {}).get('message', ''),
+        'invoice_id': invoice.pk if invoice else None,
+        'payment_status': invoice.status if invoice else None,
     }
     if include_lines:
         data['lines'] = [
@@ -555,9 +647,36 @@ def api_dashboard(request):
 
 
 @login_required
+def _page_param(request):
+    try:
+        return max(int(request.GET.get('page', 1)), 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _page_meta(page, pages, per_page, total):
+    return {
+        'page': page,
+        'pages': pages,
+        'per_page': per_page,
+        'total': total,
+        'has_next': page < pages,
+        'has_prev': page > 1,
+    }
+
+
+@login_required
 def api_tender_list(request):
-    tenders = Tender.objects.filter(user=request.user)
-    return JsonResponse({'ok': True, 'tenders': [_tender_dict(t) for t in tenders]})
+    per_page = 15
+    page = _page_param(request)
+    qs = Tender.objects.filter(user=request.user)
+    total = qs.count()
+    pages = max((total + per_page - 1) // per_page, 1)
+    page = min(page, pages)
+    tenders = qs.order_by('-created_at')[(page - 1) * per_page: page * per_page]
+    data = _page_meta(page, pages, per_page, total)
+    data.update({'ok': True, 'tenders': [_tender_dict(t) for t in tenders]})
+    return JsonResponse(data)
 
 
 @login_required
@@ -577,11 +696,11 @@ def api_tender_create(request):
     tender.user = request.user
     tender.save()
 
-    setting = ApiSetting.objects.filter(user=request.user).first()
+    setting = _shared_setting()
     if setting is None or not setting.base_url:
         result = {
             'ok': True,
-            'message': 'Tender saved locally. Configure your API base URL in API Settings before sending.',
+            'message': 'Tender saved locally. Configure your API base URL in Setting before sending.',
             'tender': _tender_dict(tender),
             'needs_settings': True,
         }
@@ -620,10 +739,21 @@ def api_tender_create(request):
 
 @login_required
 def api_order_list(request):
+    per_page = 15
+    page = _page_param(request)
+    base = Order.objects.filter(_visible_orders_q(request))
+    total = base.count()
+    pages = max((total + per_page - 1) // per_page, 1)
+    page = min(page, pages)
     orders = (
-        Order.objects.filter(Q(user=request.user) | Q(user__isnull=True))
-        .select_related('tender')
+        base.prefetch_related('tender', 'invoice')
+        .annotate(
+            _line_count=Count('lines'),
+            _awarded_line_count=Count('lines', filter=Q(lines__awarded=True)),
+            _awarded_amount_total=Sum('lines__price_total', filter=Q(lines__awarded=True)),
+        )
         .order_by('-date_order', '-created_at')
+        [(page - 1) * per_page: page * per_page]
     )
     grouped = {}
     for o in orders:
@@ -634,13 +764,15 @@ def api_order_list(request):
         'label': key or 'Unlinked orders',
         'orders': [_order_dict(o) for o in items],
     } for key, items in grouped.items()]
-    return JsonResponse({'ok': True, 'groups': groups, 'total': len(orders)})
+    data = _page_meta(page, pages, per_page, total)
+    data.update({'ok': True, 'groups': groups, 'total': len(orders)})
+    return JsonResponse(data)
 
 
 @login_required
 def api_order_detail(request, pk):
     order = (
-        Order.objects.filter(Q(user=request.user) | Q(user__isnull=True))
+        Order.objects.filter(_visible_orders_q(request))
         .select_related('tender')
         .filter(pk=pk)
         .first()
@@ -655,18 +787,18 @@ def api_order_award(request, pk):
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required.'}, status=405)
     order = (
-        Order.objects.filter(Q(user=request.user) | Q(user__isnull=True))
+        Order.objects.filter(_visible_orders_q(request))
         .filter(pk=pk)
         .first()
     )
     if order is None:
         return JsonResponse({'ok': False, 'error': 'Order not found.'})
 
-    setting = ApiSetting.objects.filter(user=request.user).first()
+    setting = _shared_setting()
     if setting is None or not setting.base_url:
         return JsonResponse({
             'ok': False,
-            'error': 'Configure your API base URL in API Settings before awarding.',
+            'error': 'Configure your API base URL in Setting before awarding.',
             'redirect': reverse('tenders:api_settings'),
         })
 
@@ -692,7 +824,7 @@ def api_order_pay(request, pk):
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required.'}, status=405)
     order = (
-        Order.objects.filter(Q(user=request.user) | Q(user__isnull=True))
+        Order.objects.filter(_visible_orders_q(request))
         .filter(pk=pk)
         .first()
     )
@@ -706,8 +838,10 @@ def api_order_pay(request, pk):
 
 @login_required
 def api_settings(request):
-    setting, _created = ApiSetting.objects.get_or_create(user=request.user)
+    setting = _shared_setting()
     if request.method == 'POST':
+        if request.user.role != CustomUser.Role.ADMINISTRATOR:
+            return JsonResponse({'ok': False, 'error': 'Administrator access required.'}, status=403)
         form = ApiSettingForm(_json_body(request), instance=setting)
         if not form.is_valid():
             return JsonResponse({'ok': False, 'error': 'Please fix the highlighted fields.', 'errors': form.errors})
@@ -740,13 +874,13 @@ def route_map(request):
 
 @login_required
 def api_towns(request):
-    towns = Town.objects.all().values('name', 'country', 'latitude', 'longitude')
+    towns = Town.objects.all().values('name', 'country', 'point')
     data = [
         {
             'name': town['name'],
             'country': town['country'],
-            'lat': float(town['latitude']),
-            'lng': float(town['longitude']),
+            'lat': town['point'].y,
+            'lng': town['point'].x,
         }
         for town in towns
     ]
@@ -770,4 +904,255 @@ def api_town_route(request):
         'ok': True,
         'origin': {'name': origin.name, 'lat': float(origin.lat), 'lng': float(origin.lng)},
         'destination': {'name': dest.name, 'lat': float(dest.lat), 'lng': float(dest.lng)},
+    })
+
+SIM_SPEED_KMH = 55.0
+SIM_ACCELERATION = 240.0
+
+_route_cache = {}
+
+
+def _haversine_m(lat1, lng1, lat2, lng2):
+    radius = 6371000.0
+    dlat = math.radians(lat2 - lat1)
+    dlng = math.radians(lng2 - lng1)
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlng / 2) ** 2
+    )
+    return 2 * radius * math.asin(min(1.0, math.sqrt(a)))
+
+
+def _osrm_fetch(origin, dest):
+    url = (
+        'https://router.project-osrm.org/route/v1/driving/'
+        f'{origin.lng},{origin.lat};{dest.lng},{dest.lat}'
+        '?overview=full&geometries=geojson&alternatives=false'
+    )
+    response = http.get(url, timeout=5)
+    response.raise_for_status()
+    route = response.json()['routes'][0]
+    return [[lat, lng] for lng, lat in route['geometry']['coordinates']], float(route['distance'])
+
+
+def get_route(origin, dest):
+    key = (origin.name, dest.name)
+    cached = _route_cache.get(key)
+    if cached is not None:
+        return cached
+    points = [[origin.lat, origin.lng], [dest.lat, dest.lng]]
+    distance = _haversine_m(origin.lat, origin.lng, dest.lat, dest.lng)
+    try:
+        points, distance = _osrm_fetch(origin, dest)
+    except Exception:
+        logger.warning('OSRM route lookup failed for %s → %s; falling back to straight line', origin.name, dest.name)
+    _route_cache[key] = (points, distance)
+    return points, distance
+
+
+def _route_arrays(points):
+    distances = [0.0]
+    for i in range(1, len(points)):
+        distances.append(distances[-1] + _haversine_m(points[i - 1][0], points[i - 1][1], points[i][0], points[i][1]))
+    return distances
+
+
+def _position_at(points, distances, progress):
+    total = distances[-1]
+    if total <= 0 or not points:
+        return points[0] if points else [0, 0]
+    target = progress * total
+    for i in range(1, len(points)):
+        if distances[i] >= target:
+            seg_len = distances[i] - distances[i - 1]
+            frac = (target - distances[i - 1]) / seg_len if seg_len else 0
+            lat = points[i - 1][0] + (points[i][0] - points[i - 1][0]) * frac
+            lng = points[i - 1][1] + (points[i][1] - points[i - 1][1]) * frac
+            return [round(lat, 6), round(lng, 6)]
+    return points[-1]
+
+
+def _is_awarded_tender(tender):
+    return (
+        tender.status == Tender.Status.SUCCESS
+        or tender.orders.filter(lines__awarded=True).exists()
+    )
+
+
+@login_required
+def tracker(request):
+    return render(request, 'tenders/tracker.html')
+
+
+@login_required
+def api_tracker(request):
+    now = timezone.now()
+    towns_by_name = {t.name: t for t in Town.objects.all()}
+    awarded_orders = (
+        Order.objects.filter(_visible_orders_q(request), lines__awarded=True)
+        .select_related('tender')
+        .distinct()
+        .order_by('-created_at')
+    )
+    orders_out = []
+    for order in awarded_orders:
+        tender = order.tender
+        entry = {
+            'id': order.pk,
+            'order_id': order.order_id,
+            'order_name': order.order_name,
+            'customer': order.customer,
+            'cargo_reference': order.cargo_reference,
+            'state': order.state or '',
+            'tender_ref': tender.cargo_reference if tender else '',
+            'awarded_amount': str(order.awarded_amount),
+            'awarded_lines_count': order.awarded_lines_count,
+            'total_lines_count': order.lines.count(),
+            'fully_confirmed': order.fully_confirmed,
+            'partially_confirmed': order.partially_confirmed,
+        }
+        trucks = []
+        if tender is not None:
+            origin = towns_by_name.get(tender.route_loading)
+            dest = towns_by_name.get(tender.route_delivery)
+            if origin is not None and dest is not None:
+                route_points, route_m = get_route(origin, dest)
+                route_km = route_m / 1000.0
+                if not route_km:
+                    route_km = float(tender.distance_km or 0)
+                sim_duration = max((route_km / SIM_SPEED_KMH) * 3600 / SIM_ACCELERATION, 3.0)
+                route_distances = _route_arrays(route_points)
+                truck_count = max(tender.number_of_trucks or 1, 1)
+                for i in range(truck_count):
+                    stagger = i * 120
+                    elapsed = max(0.0, (now - tender.created_at).total_seconds() - stagger)
+                    progress = min(1.0, elapsed / sim_duration)
+                    lat, lng = _position_at(route_points, route_distances, progress)
+                    trucks.append({
+                        'label': f'{tender.cargo_reference or f"T{tender.pk}"} · T{i + 1}',
+                        'lat': lat,
+                        'lng': lng,
+                        'status': 'Delivered' if progress >= 1.0 else 'En route',
+                        'progress': round(progress, 4),
+                    })
+                entry.update({
+                    'origin': {'name': origin.name, 'lat': origin.lat, 'lng': origin.lng},
+                    'destination': {'name': dest.name, 'lat': dest.lat, 'lng': dest.lng},
+                    'route': route_points,
+                    'distance_km': round(route_km, 1),
+                    'trucks': trucks,
+                })
+        orders_out.append(entry)
+    return JsonResponse({'ok': True, 'orders': orders_out, 'now': now.isoformat()})
+
+
+def _invoice_dict(invoice):
+    order = invoice.order
+    tender = order.tender
+    return {
+        'id': invoice.pk,
+        'number': invoice.number,
+        'status': invoice.status,
+        'amount_total': str(invoice.amount_total),
+        'currency': invoice.currency,
+        'created_at': invoice.created_at.isoformat(),
+        'order_id': order.order_id,
+        'order_name': order.order_name or f'#{order.order_id}',
+        'transporter': invoice.transporter.company_name if invoice.transporter else (order.company_name or ''),
+        'cargo_reference': order.cargo_reference,
+        'route': f'{tender.route_loading} \u2192 {tender.route_delivery}' if tender else '',
+        'order_user': order.user.email if order.user else '',
+    }
+
+
+def _company_for_order(order):
+    if order.customer:
+        company = Company.objects.filter(name=order.customer).first()
+        if company is not None:
+            return company
+    if order.user_id:
+        return order.user.companies.first()
+    return None
+
+
+def _invoice_payload(invoice):
+    order = invoice.order
+    company = _company_for_order(order)
+    return {
+        'order_id': order.order_id,
+        'cargo_name': order.cargo_reference or '',
+        'customer_name': (order.customer or '').strip(),
+        'tax_id': company.tin if company else '',
+        'country': company.country if company else '',
+    }
+
+
+@login_required
+def invoice_list(request):
+    return render(request, 'tenders/invoice_list.html', {'active_tab': 'invoices'})
+
+
+@login_required
+def api_invoices(request):
+    order_q = _visible_orders_q(request)
+    for order in Order.objects.filter(order_q, lines__awarded=True).select_related('tender').distinct():
+        get_or_create_invoice(order)
+    invoices = (
+        Invoice.objects.filter(
+            order__in=Order.objects.filter(order_q),
+            status=Invoice.Status.PAID,
+        )
+        .select_related('order__tender', 'transporter')
+        .order_by('-created_at')
+    )
+    return JsonResponse({'ok': True, 'invoices': [_invoice_dict(i) for i in invoices]})
+
+
+@login_required
+@require_POST
+def api_invoice_paid(request, pk):
+    invoice = Invoice.objects.select_related('order__tender', 'transporter').filter(pk=pk).first()
+    if invoice is None:
+        return JsonResponse({'ok': False, 'error': 'Invoice not found.'}, status=404)
+    order = invoice.order
+    is_admin = request.user.role == CustomUser.Role.ADMINISTRATOR
+    in_scope = order.user_id is None or order.user_id == request.user.pk
+    if not (is_admin or in_scope):
+        return JsonResponse({'ok': False, 'error': 'Invoice not found.'}, status=404)
+    setting = _shared_setting()
+    if not setting.base_url:
+        return JsonResponse({'ok': False, 'error': 'Configure the shared API base URL in Setting before confirming an invoice.'})
+
+    payload = _invoice_payload(invoice)
+    url = setting.order_invoice_url()
+    status_code, body, _ok = submit_confirmation(setting, url, payload)
+
+    is_ok = status_code is not None and 200 <= status_code < 300
+    parsed = {}
+    try:
+        parsed = json.loads(body) if body else {}
+    except (ValueError, TypeError):
+        pass
+    if isinstance(parsed, dict) and parsed.get('status') == 'success':
+        is_ok = True
+
+    if not is_ok:
+        return JsonResponse({
+            'ok': False,
+            'error': f'Invoice confirmation to {url} failed (HTTP {status_code}). Response: {body[:300]}',
+        })
+
+    invoice.status = Invoice.Status.PAID
+    update_fields = ['status']
+    if isinstance(parsed, dict):
+        external_name = parsed.get('data', {}).get('name') if isinstance(parsed.get('data'), dict) else None
+        if external_name:
+            invoice.number = str(external_name)[:50]
+            update_fields.append('number')
+    invoice.save(update_fields=update_fields)
+    return JsonResponse({
+        'ok': True,
+        'message': 'Invoice confirmed as paid.',
+        'invoice': _invoice_dict(invoice),
+        'submitted': payload,
     })

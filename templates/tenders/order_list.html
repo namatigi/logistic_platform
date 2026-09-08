@@ -14,6 +14,7 @@
        data-detail-base="{% url 'tenders:api_order_detail' 0 %}"
        data-award-base="{% url 'tenders:api_order_award' 0 %}"
        data-pay-base="{% url 'tenders:api_order_pay' 0 %}"
+       data-invoice-paid-base="{% url 'tenders:api_invoice_paid' 0 %}"
        data-tender-list-url="{% url 'tenders:list' %}"
        data-settings-url="{% url 'tenders:api_settings' %}"
        data-ws-url="{{ ws_scheme }}://{{ ws_host }}/ws/orders/">
@@ -41,6 +42,7 @@
                   <th>Date</th>
                   <th>Amount</th>
                   <th>State</th>
+                  <th>Paid</th>
                   <th>Award</th>
                 </tr>
               </thead>
@@ -68,23 +70,36 @@
                   </td>
                   <td><span class="badge" v-bind:class="stateBadge(o.state)">{{ o.state }}</span></td>
                   <td>
-                    <button v-if="o.fully_confirmed || o.partially_confirmed"
+                    <span v-if="o.invoice_id" class="badge" v-bind:class="o.payment_status === 'paid' ? 'badge-success' : 'badge-warning'">
+                      {{ o.payment_status === 'paid' ? 'Paid' : 'Not paid' }}
+                    </span>
+                    <span v-else style="color:#94a3b8;">-</span>
+                  </td>
+                  <td>
+                    <span v-if="!o.fully_confirmed && !o.partially_confirmed">
+                      <button type="button" class="btn btn-primary btn-sm btn-award"
+                              @click.stop="award(o)" :disabled="awardId === o.id">
+                        <span v-if="awardId === o.id">Awarding...</span>
+                        <span v-else>Award</span>
+                      </button>
+                    </span>
+                    <button v-else-if="o.invoice_id && o.payment_status !== 'paid'"
                             type="button" class="btn btn-primary btn-sm btn-award"
-                            @click.stop="pay(o)" :disabled="payId === o.id">
+                            @click.stop="confirmPaid(o)" :disabled="payId === o.id">
                       <span v-if="payId === o.id">Paying...</span>
                       <span v-else>Make payment</span>
                     </button>
-                    <button v-else type="button" class="btn btn-primary btn-sm btn-award"
-                            @click.stop="award(o)" :disabled="awardId === o.id">
-                      <span v-if="awardId === o.id">Awarding...</span>
-                      <span v-else>Award</span>
-                    </button>
+                    <span v-else style="color:#94a3b8;">-</span>
                   </td>
                 </tr>
                 <tr v-if="expandedId === o.id" class="order-detail-row">
-                  <td colspan="9" style="padding:0;">
+                  <td colspan="10" style="padding:0;">
                     <div v-if="detail(o)">
                       <div class="order-detail-summary">
+                        <div>
+                          <span class="detail-label">Payment</span>
+                          <div><span class="badge" v-bind:class="detail(o).payment_status === 'paid' ? 'badge-success' : 'badge-warning'">{{ detail(o).payment_status === 'paid' ? 'Paid' : (detail(o).invoice_id ? 'Not paid' : '-') }}</span></div>
+                        </div>
                         <div>
                           <span class="detail-label">State</span>
                           <div><span class="badge" v-bind:class="stateBadge(detail(o).state)">{{ detail(o).state || '-' }}</span></div>
@@ -116,31 +131,43 @@
                       </div>
 
                       <div class="order-detail-lines">
-                        <div class="order-detail-heading">Order lines</div>
+                        <div class="order-detail-heading">
+                          <span>Order lines</span>
+                          <button type="button" class="btn btn-primary btn-sm"
+                                  @click="partialAward(o)"
+                                  :disabled="partialAwardId === o.id || !(sel(o).length)">
+                            <span v-if="partialAwardId === o.id">Awarding...</span>
+                            <span v-else>Partial award ({{ sel(o).length }})</span>
+                          </button>
+                        </div>
                         <table>
                           <thead>
                             <tr>
-                              <th>Product</th>
+                              <th>TRUCKS</th>
                               <th style="text-align:right;">Qty</th>
                               <th style="text-align:right;">Unit price</th>
                               <th style="text-align:right;">Total</th>
-                              <th>Status</th>
+                              <th>Select</th>
                             </tr>
                           </thead>
                           <tbody>
                             <tr v-for="line in detail(o).lines" v-bind:key="line.line_id">
                               <td>
-                                {{ line.product_name }}<br>
-                                <span style="color:#64748b; font-size:12px;">Line #{{ line.line_id }} &middot; Product #{{ line.product_id || '-' }}</span>
+                                {{ line.product_name }}
+                                <span class="award-flag" v-if="line.awarded">Awarded</span>
                               </td>
                               <td style="text-align:right;">{{ fmtQty(line.quantity) }}</td>
                               <td style="text-align:right;">{{ fmtQty(line.price_subtotal) }}</td>
                               <td style="text-align:right;"><strong>{{ fmtQty(line.price_total) }}</strong></td>
                               <td>
-                                <span class="award-flag" v-if="line.awarded">Awarded</span>
-                                <span v-else-if="detail(o).remaining_line_ids.indexOf(line.line_id) >= 0" style="color:#64748b;">Remaining</span>
-                                <span v-else-if="detail(o).removed_line_ids.indexOf(line.line_id) >= 0" style="color:#b91c1c;">Removed</span>
-                                <span v-else style="color:#94a3b8;">Pending</span>
+                                <input type="checkbox"
+                                       v-if="detail(o).remaining_line_ids.indexOf(line.line_id) >= 0"
+                                       checked disabled title="Confirmed line">
+                                <input type="checkbox"
+                                       v-else-if="detail(o).removed_line_ids.indexOf(line.line_id) >= 0"
+                                       disabled title="Removed line">
+                                <input v-else type="checkbox" class="award-line-checkbox"
+                                       v-model="selIds[o.id]" v-bind:value="line.line_id">
                               </td>
                             </tr>
                             <tr v-if="!detail(o).lines.length">
@@ -161,11 +188,20 @@
         </div>
       </div>
 
+      <div class="pagination" v-if="groups.length">
+        <button type="button" class="btn btn-sm btn-secondary" @click="go(page - 1)" :disabled="!hasPrev">&laquo; Prev</button>
+        <template v-for="p in pageList" :key="'p' + p">
+          <button type="button" v-if="p !== '…'" class="btn btn-sm pagination-num"
+                  :class="{ 'pagination-current': p === page }" @click="go(p)">{{ p }}</button>
+          <span v-else class="pagination-ellipsis">…</span>
+        </template>
+        <button type="button" class="btn btn-sm btn-secondary" @click="go(page + 1)" :disabled="!hasNext">Next &raquo;</button>
+      </div>
+
       <div class="card" v-else-if="loaded">
         <div class="empty">
           <div class="empty-icon">&#128203;</div>
-          <p>No orders have been received yet.<br>
-            Configure the webhook URL in <a v-bind:href="settingsUrl">API Settings</a> and share it with the external system.</p>
+          <p>No orders have been received yet.</p>
         </div>
       </div>
 
@@ -194,19 +230,43 @@
         return {
           groups: [],
           loaded: false,
+          page: 1,
+          pages: 1,
+          hasNext: false,
+          hasPrev: false,
           notice: '',
           error: '',
           awardId: null,
           payId: null,
+          partialAwardId: null,
           expandedId: null,
           details: {},
           loadingIds: {},
+          selIds: {},
+          _loadSeq: 0,
           detailBase: stripBase(root.dataset.detailBase),
           awardBase: stripBase(root.dataset.awardBase, 'award'),
           payBase: stripBase(root.dataset.payBase, 'pay'),
           tenderListUrl: root.dataset.tenderListUrl,
-          settingsUrl: root.dataset.settingsUrl
+          invoicePaidBase: root.dataset.invoicePaidBase
         };
+      },
+      computed: {
+        pageList: function () {
+          var pages = this.pages, page = this.page;
+          var shown = [];
+          for (var i = 1; i <= pages; i++) {
+            if (i === 1 || i === pages || Math.abs(i - page) <= 2) shown.push(i);
+          }
+          var out = [];
+          var prev = 0;
+          for (var j = 0; j < shown.length; j++) {
+            if (shown[j] - prev > 1) out.push('…');
+            out.push(shown[j]);
+            prev = shown[j];
+          }
+          return out;
+        },
       },
       created: async function () {
         await this.load();
@@ -232,17 +292,29 @@
           ws.onerror = function () { ws.close(); };
           self._ws = ws;
         },
-        load: async function () {
+        load: async function (page) {
+          page = page || this.page || 1;
+          var seq = ++this._loadSeq;
           try {
-            var res = await api.get(root.dataset.url);
+            var res = await api.get(root.dataset.url + '?page=' + page);
+            if (seq !== this._loadSeq) return;
             this.groups = (res && res.groups) || [];
-            this.details = {};
-            this.expandedId = null;
+            this.page = (res && res.page) || page;
+            this.pages = (res && res.pages) || 1;
+            this.hasNext = !!(res && res.has_next);
+            this.hasPrev = !!(res && res.has_prev);
           } catch (e) {
-            this.error = e.message;
+            if (seq === this._loadSeq) this.error = e.message;
           } finally {
-            this.loaded = true;
+            if (seq === this._loadSeq) this.loaded = true;
           }
+        },
+        go: function (page) {
+          if (page < 1 || page > this.pages) return;
+          this.details = {};
+          this.expandedId = null;
+          this.selIds = {};
+          this.load(page);
         },
         toggle: async function (o) {
           var self = this;
@@ -251,6 +323,9 @@
             return;
           }
           self.expandedId = o.id;
+          if (self.selIds[o.id] === undefined) {
+            self.selIds[o.id] = [];
+          }
           if (!self.details[o.id]) {
             self.loadingIds[o.id] = true;
             try {
@@ -269,6 +344,34 @@
         },
         detail: function (o) { return this.details[o.id] || null; },
         detailLoading: function (o) { return !!this.loadingIds[o.id]; },
+        sel: function (o) { return this.selIds[o.id] || []; },
+        partialAward: async function (o) {
+          var self = this;
+          var ids = self.sel(o);
+          if (!ids.length) return;
+          self.error = '';
+          self.notice = '';
+          self.partialAwardId = o.id;
+          try {
+            var res = await api.post(this.awardBase + o.id + '/award/', {
+              line_ids: ids,
+              partial: true
+            });
+            if (res && res.ok === false) {
+              self.error = res.error || 'Partial award failed.';
+              return;
+            }
+            self.notice = (res && res.message) || 'Order partially confirmed.';
+            if (res && res.order) {
+              self.details[o.id] = res.order;
+            }
+            await self.load();
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.partialAwardId = null;
+          }
+        },
         fmtQty: function (v) {
           var n = Number(v);
           return isNaN(n) ? (v || '0.00') : n.toFixed(2);
@@ -288,6 +391,9 @@
               return;
             }
             self.notice = (res && res.message) || 'Order confirmed successfully.';
+            if (res && res.order) {
+              self.details[o.id] = res.order;
+            }
             await self.load();
           } catch (e) {
             self.error = e.message;
@@ -295,18 +401,21 @@
             self.awardId = null;
           }
         },
-        pay: async function (o) {
+        confirmPaid: async function (o) {
           var self = this;
+          if (!o.invoice_id) return;
           self.error = '';
           self.notice = '';
           self.payId = o.id;
           try {
-            var res = await api.post(this.payBase + o.id + '/pay/', {});
+            var url = self.invoicePaidBase.replace('0', String(o.invoice_id));
+            var res = await api.post(url, {});
             if (res && res.ok === false) {
-              self.error = res.error || 'Payment failed.';
+              self.error = res.error || 'Payment confirmation failed.';
               return;
             }
-            self.notice = (res && res.message) || 'Payment request sent.';
+            self.notice = (res && res.message) || 'Invoice confirmed as paid.';
+            await self.load();
           } catch (e) {
             self.error = e.message;
           } finally {

@@ -1,0 +1,87 @@
+{% extends 'base.html' %}
+{% block title %}Invoices &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Invoices</h1>
+      <p class="page-subtitle">
+        {% if user.role == 'administrator' %}Paid invoices across the platform{% else %}Paid invoices for your confirmed orders{% endif %}
+      </p>
+    </div>
+  </div>
+
+  <div id="invoices-app" data-url="{% url 'tenders:api_invoices' %}" v-cloak>
+    {% verbatim %}
+    <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
+    <div class="alert alert-warning" v-if="!error && loaded && invoices.length === 0">
+      No paid invoices yet.
+    </div>
+
+    <div class="card">
+      <div class="table-wrap" v-if="invoices.length">
+        <table>
+          <thead>
+            <tr>
+              <th>Invoice no</th>
+              <th>Transporter</th>
+              <th>Order</th>
+              <th>Cargo ref</th>
+              <th>Route</th>
+              <th>Date</th>
+              <th>Amount</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="inv in invoices" v-bind:key="inv.id">
+              <td><strong>{{ inv.number }}</strong></td>
+              <td>{{ inv.transporter }}</td>
+              <td>{{ inv.order_name }}</td>
+              <td>{{ inv.cargo_reference || '-' }}</td>
+              <td>{{ inv.route || '-' }}</td>
+              <td>{{ inv.created_at }}</td>
+              <td><strong>{{ money(inv.amount_total, inv.currency) }}</strong></td>
+              <td><span class="badge badge-success">{{ inv.status }}</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="empty" v-else>
+        <p style="padding:24px;">Loading invoices...</p>
+      </div>
+    </div>
+    {% endverbatim %}
+  </div>
+</div>
+
+<script>
+  (function () {
+    var root = document.getElementById('invoices-app');
+    var api = window.HYPAX.api;
+    var HY = window.HYPAX;
+
+    Vue.createApp({
+      data: function () {
+        return { invoices: [], error: '', loaded: false };
+      },
+      created: function () { this.load(); },
+      methods: {
+        money: function (v, c) { return HY.money(v, c); },
+        load: async function () {
+          var self = this;
+          try {
+            var res = await api.get(root.dataset.url);
+            if (res && res.ok === false) { self.error = res.error || 'Failed to load invoices.'; return; }
+            self.invoices = (res && res.invoices) || [];
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.loaded = true;
+          }
+        }
+      }
+    }).mount('#invoices-app');
+  })();
+</script>
+{% endblock %}

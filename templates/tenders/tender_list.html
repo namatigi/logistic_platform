@@ -5,7 +5,6 @@
   <div class="page-header">
     <div>
       <h1 class="page-title">Tenders</h1>
-      <p class="page-subtitle">Tenders submitted through the HYPAX API</p>
     </div>
     <a class="btn btn-primary" href="{% url 'tenders:create' %}">+ New tender</a>
   </div>
@@ -29,7 +28,7 @@
               <th>Distance</th>
               <th>Cargo date</th>
               <th>Status</th>
-              <th>HTTP</th>
+              <th>Map</th>
             </tr>
           </thead>
           <tbody>
@@ -43,13 +42,23 @@
               <td>{{ t.distance_km }} km</td>
               <td>{{ t.cargo_date }}</td>
               <td><span class="badge" v-bind:class="'badge-' + t.status">{{ t.status_label }}</span></td>
-              <td>{{ t.response_code || '-' }}</td>
               <td>
                 <a class="btn btn-sm btn-secondary" v-bind:href="routeHref(t)" title="View route on map">Route</a>
               </td>
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <div class="pagination" v-if="tenders.length">
+        <button type="button" class="btn btn-sm btn-secondary" @click="go(page - 1)" :disabled="!hasPrev">&laquo; Prev</button>
+        <template v-for="p in pageList" :key="'p' + p">
+          <button type="button" v-if="p !== '…'" class="btn btn-sm pagination-num"
+                  :class="{ 'pagination-current': p === page }" @click="go(p)">{{ p }}</button>
+          <span v-else class="pagination-ellipsis">…</span>
+        </template>
+        <button type="button" class="btn btn-sm btn-secondary" @click="go(page + 1)" :disabled="!hasNext">Next &raquo;</button>
+        <span class="pagination-info">{{ total }} tenders</span>
       </div>
 
       <div class="card" v-else-if="loaded">
@@ -76,11 +85,50 @@
         return {
           tenders: [],
           loaded: false,
+          page: 1,
+          pages: 1,
+          hasNext: false,
+          hasPrev: false,
+          total: 0,
           createUrl: root.dataset.createUrl,
           routeUrl: root.dataset.routeUrl,
         };
       },
+      computed: {
+        pageList: function () {
+          var pages = this.pages, page = this.page;
+          var shown = [];
+          for (var i = 1; i <= pages; i++) {
+            if (i === 1 || i === pages || Math.abs(i - page) <= 2) shown.push(i);
+          }
+          var out = [];
+          var prev = 0;
+          for (var j = 0; j < shown.length; j++) {
+            if (shown[j] - prev > 1) out.push('…');
+            out.push(shown[j]);
+            prev = shown[j];
+          }
+          return out;
+        },
+      },
       methods: {
+        load: async function (page) {
+          try {
+            var res = await api.get(root.dataset.url + '?page=' + page);
+            this.tenders = (res && res.tenders) || [];
+            this.page = (res && res.page) || page;
+            this.pages = (res && res.pages) || 1;
+            this.hasNext = !!(res && res.has_next);
+            this.hasPrev = !!(res && res.has_prev);
+            this.total = (res && res.total) || 0;
+          } finally {
+            this.loaded = true;
+          }
+        },
+        go: function (page) {
+          if (page < 1 || page > this.pages) return;
+          this.load(page);
+        },
         routeHref: function (t) {
           var route = t.route || '';
           var from = '', to = '';
@@ -93,12 +141,7 @@
         },
       },
       created: async function () {
-        try {
-          var res = await api.get(root.dataset.url);
-          this.tenders = (res && res.tenders) || [];
-        } finally {
-          this.loaded = true;
-        }
+        await this.load(1);
       }
     }).mount('#tenders-app');
   })();

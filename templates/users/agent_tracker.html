@@ -1,0 +1,186 @@
+{% extends 'base.html' %}
+{% block title %}Tracker &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Tracker</h1>
+      <p class="page-subtitle">Awarded orders and routes on your linked transporters</p>
+    </div>
+  </div>
+
+  <div id="agent-tracker-app" data-url="{% url 'users:api_agent_tracker' %}" v-cloak>
+    {% verbatim %}
+    <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
+    <div class="alert alert-warning" v-if="!error && orders.length === 0">
+      No awarded orders to track yet.
+    </div>
+
+    <div class="tracker-layout">
+      <div class="card tracker-sidebar">
+        <div class="card-title">Awarded orders</div>
+        <div class="tracker-list">
+          <div v-for="o in orders" v-bind:key="o.id" class="tracker-item"
+               v-bind:class="{ 'tracker-item-active': o.id === selected }"
+               @click="select(o.id)">
+            <div class="tracker-item-head">
+              <strong>{{ o.order_name || ('#' + o.order_id) }}</strong>
+              <span class="badge" v-bind:class="stateBadge(o.state)">{{ o.state || '-' }}</span>
+            </div>
+            <div class="tracker-item-sub">{{ o.company_name || o.customer }} &middot; {{ o.tender_ref || 'no tender' }}</div>
+            <div class="tracker-item-sub tracker-item-route">{{ routeText(o) }}</div>
+            <div class="tracker-item-sub" v-if="o.route">
+              {{ o.distance_km }} km &middot; {{ o.trucks.length }} truck{{ o.trucks.length === 1 ? '' : 's' }}
+            </div>
+          </div>
+          <div class="tracker-empty" v-if="!orders.length">Loading orders...</div>
+        </div>
+      </div>
+
+      <div class="card" style="padding:0; overflow:hidden; position:relative;">
+        <div id="tracker-map" style="height: 620px; width: 100%;"></div>
+        <div class="tracker-map-hint" v-if="selectedInfo && selectedInfo.route">
+          <strong>{{ selectedInfo.order_name || ('#' + selectedInfo.order_id) }}</strong> &mdash;
+          {{ selectedInfo.origin.name }} &rarr; {{ selectedInfo.destination.name }}
+          &middot; {{ selectedInfo.distance_km }} km
+        </div>
+        <div class="tracker-map-hint" v-if="selectedInfo && !selectedInfo.route">
+          <strong>{{ selectedInfo.order_name || ('#' + selectedInfo.order_id) }}</strong> &mdash; no route available
+        </div>
+      </div>
+    </div>
+    {% endverbatim %}
+  </div>
+</div>
+
+<script>
+  (function () {
+    var root = document.getElementById('agent-tracker-app');
+    var api = window.HYPAX.api;
+    var HY = window.HYPAX;
+
+    var map = null;
+    var routeLine = null;
+    var originMarker = null;
+    var destMarker = null;
+    var truckMarkers = [];
+    var truckIcon = L.divIcon({
+      className: 'custom-marker',
+      html: '<div style="width:20px;height:20px;border-radius:50%;background:#1d4ed8;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.45);"></div>',
+      iconSize: [26, 26],
+      iconAnchor: [13, 13]
+    });
+
+    function baseIcon(color) {
+      return L.divIcon({
+        className: 'custom-marker',
+        html: '<div style="width:14px;height:14px;border-radius:50%;background:' + color + ';border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35);"></div>',
+        iconSize: [20, 20],
+        iconAnchor: [10, 10]
+      });
+    }
+
+    function initMap() {
+      map = L.map('tracker-map').setView([-2, 32], 5);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 18
+      }).addTo(map);
+    }
+
+    function clearTruckMarkers() {
+      truckMarkers.forEach(function (m) {
+        if (map) map.removeLayer(m);
+      });
+      truckMarkers = [];
+    }
+
+    Vue.createApp({
+      data: function () {
+        return { orders: [], selected: null, error: '' };
+      },
+      computed: {
+        selectedInfo: function () {
+          var self = this;
+          for (var i = 0; i < self.orders.length; i++) {
+            if (self.orders[i].id === self.selected) return self.orders[i];
+          }
+          return null;
+        }
+      },
+      created: function () {
+        this.load();
+        this.timer = setInterval(this.load.bind(this), 5000);
+      },
+      methods: {
+        stateBadge: function (s) { return HY.stateBadgeClass(s); },
+        routeText: function (o) {
+          return o.origin && o.destination ? (o.origin.name + ' \u2192 ' + o.destination.name) : 'no route';
+        },
+        load: async function () {
+          var self = this;
+          try {
+            var res = await api.get(root.dataset.url);
+            if (res && res.ok === false) { self.error = res.error || 'Failed to load tracker.'; return; }
+            self.orders = (res && res.orders) || [];
+            if (!self.selected && self.orders.length) {
+              self.select(self.orders[0].id);
+            } else {
+              self.drawSelected(false);
+            }
+          } catch (e) {
+            self.error = e.message;
+          }
+        },
+        select: function (id) {
+          this.selected = id;
+          this.drawSelected(true);
+        },
+        drawSelected: function (fit) {
+          var o = this.selectedInfo;
+          if (!o) return;
+          if (!map) initMap();
+
+          clearTruckMarkers();
+
+          if (o.route) {
+            if (routeLine) {
+              routeLine.setLatLngs(o.route);
+              routeLine.bindPopup('<b>' + o.origin.name + ' &rarr; ' + o.destination.name + '</b>');
+            } else {
+              routeLine = L.polyline(o.route, { color: '#1d4ed8', weight: 4, opacity: 0.75 }).addTo(map);
+              routeLine.bindPopup('<b>' + o.origin.name + ' &rarr; ' + o.destination.name + '</b>');
+            }
+
+            if (originMarker) originMarker.setLatLng([o.origin.lat, o.origin.lng]);
+            else originMarker = L.marker([o.origin.lat, o.origin.lng], { icon: baseIcon('#16a34a') }).addTo(map).bindPopup('<b>' + o.origin.name + '</b>');
+
+            if (destMarker) destMarker.setLatLng([o.destination.lat, o.destination.lng]);
+            else destMarker = L.marker([o.destination.lat, o.destination.lng], { icon: baseIcon('#dc2626') }).addTo(map).bindPopup('<b>' + o.destination.name + '</b>');
+
+            (o.trucks || []).forEach(function (t) {
+              var m = L.marker([t.lat, t.lng], { icon: truckIcon }).addTo(map)
+                .bindPopup('<b>' + t.label + '</b> &middot; ' + t.status);
+              truckMarkers.push(m);
+            });
+
+            if (fit) {
+              var bounds = L.latLngBounds(o.route);
+              if (bounds.isValid()) {
+                map.fitBounds(bounds.pad(0.1));
+              }
+            }
+          } else {
+            if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+            if (originMarker) { map.removeLayer(originMarker); originMarker = null; }
+            if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
+          }
+        }
+      }
+    }).mount('#agent-tracker-app');
+  })();
+</script>
+{% endblock %}

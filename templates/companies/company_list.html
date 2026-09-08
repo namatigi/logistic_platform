@@ -23,6 +23,7 @@
             <tr>
               <th>Company</th>
               <th>Reg. Number</th>
+              <th>TIN</th>
               <th>Contact</th>
               <th>Phone</th>
               <th>City / Country</th>
@@ -33,6 +34,7 @@
             <tr v-for="c in companies" v-bind:key="c.id">
               <td><strong>{{ c.name }}</strong><br><span style="color:#64748b; font-size:13px;">{{ c.email }}</span></td>
               <td>{{ c.registration_number || '-' }}</td>
+              <td>{{ c.tin || '-' }}</td>
               <td>{{ c.contact_person || '-' }}</td>
               <td>{{ c.phone || '-' }}</td>
               <td>{{ c.city || '-' }} / {{ c.country || '-' }}</td>

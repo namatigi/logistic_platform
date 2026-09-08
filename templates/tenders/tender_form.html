@@ -2,6 +2,11 @@
 {% block title %}New Tender &middot; HYPAX{% endblock %}
 {% block content %}
 <div class="container">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
+  <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
+
   <div class="page-header">
     <div>
       <h1 class="page-title">Send tender</h1>
@@ -16,14 +21,18 @@
        data-submit-url="{% url 'tenders:api_tender_create' %}"
        data-list-url="{% url 'tenders:list' %}"
        data-companies-url="{% url 'companies:api_list' %}"
-       data-settings-page-url="{% url 'tenders:api_settings' %}">
+       data-settings-page-url="{% url 'tenders:api_settings' %}"
+       data-can-edit-settings="{% if user.role == 'administrator' %}1{% else %}0{% endif %}"
+       data-towns-url="{% url 'tenders:api_towns' %}">
     {% verbatim %}
 
     <div class="alert" v-if="!loaded"><p>Loading form...</p></div>
 
     <div class="alert alert-warning" v-if="loaded && !hasBaseUrl">
-      You need to configure your <strong>base URL and auth</strong> before sending tenders.
-      <a v-bind:href="settingsPageUrl">Configure API settings now &rarr;</a>
+      The shared API setting is not configured yet.
+      <span v-if="canEditSettings">Configure the <strong>base URL and auth</strong> before sending tenders.
+        <a v-bind:href="settingsPageUrl">Configure API settings now &rarr;</a></span>
+      <span v-else>Your administrator must configure it before tenders can be sent.</span>
     </div>
 
     <div class="alert alert-success" v-if="success" style="margin:14px 0;">{{ message }} Redirecting...</div>
@@ -116,7 +125,7 @@
             <div class="field-error" v-if="errors.distance_km"><ul><li v-for="e in errors.distance_km">{{ e }}</li></ul></div>
           </div>
           <div class="form-row">
-            <label>Cargo date</label>
+            <label>Pickup date</label>
             <input type="date" v-model="form.cargo_date" required>
             <div class="field-error" v-if="errors.cargo_date"><ul><li v-for="e in errors.cargo_date">{{ e }}</li></ul></div>
           </div>
@@ -129,6 +138,17 @@
           <a class="btn btn-secondary" v-bind:href="listUrl">Cancel</a>
         </div>
       </form>
+    </div>
+
+    <div class="card" id="tender-route-card" v-show="routeReady" v-cloak style="margin-top:16px;">
+      <div style="padding:14px 18px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-bottom:1px solid #e2e8f0;">
+        <h2 class="card-title" style="margin:0;">Route Map</h2>
+        <span class="route-summary" style="display:flex; gap:22px; flex-wrap:wrap;">
+          <span><span class="detail-label">Distance</span> <strong>{{ distanceText }}</strong></span>
+          <span><span class="detail-label">Duration</span> <strong>{{ durationText }}</strong></span>
+        </span>
+      </div>
+      <div id="tender-route-map" style="height: 320px; width: 100%;"></div>
     </div>
 
     {% endverbatim %}
@@ -167,8 +187,16 @@
           loading: false,
           loaded: false,
           hasBaseUrl: false,
+          canEditSettings: root.dataset.canEditSettings === '1',
           listUrl: root.dataset.listUrl,
-          settingsPageUrl: root.dataset.settingsPageUrl
+          settingsPageUrl: root.dataset.settingsPageUrl,
+          townsByCoord: {},
+          map: null,
+          routeControl: null,
+          routeMarkers: [],
+          routeReady: false,
+          distanceText: '-',
+          durationText: '-'
         };
       },
       created: async function () {
@@ -177,6 +205,11 @@
           this.towns = (meta.meta && meta.meta.towns) || [];
           this.cargoTypes = (meta.meta && meta.meta.cargo_types) || [];
           this.truckTypes = (meta.meta && meta.meta.truck_types) || [];
+
+          var towns = await api.get(root.dataset.townsUrl);
+          var byName = {};
+          (towns.towns || []).forEach(function (t) { byName[t.name] = t; });
+          this.townsByCoord = byName;
 
           var s = await api.get(root.dataset.settingsUrl);
           var setting = (s && s.setting) || {};
@@ -280,11 +313,90 @@
           return String(s).replace(/[&<>"']/g, function (c) {
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
           });
+        },
+        maybeRunRoute: function () {
+          var f = this.form;
+          if (!f.route_loading || !f.route_delivery || f.route_loading === f.route_delivery) return;
+          var o = this.townsByCoord[f.route_loading];
+          var d = this.townsByCoord[f.route_delivery];
+          if (!o || !d) return;
+          this.showRoute(o, d);
+        },
+        showRoute: function (o, d) {
+          var self = this;
+          self.clearRoute();
+          self.routeReady = true;
+          self.distanceText = '-';
+          self.durationText = '-';
+          self.$nextTick(function () {
+            if (!self.map) {
+              self.map = L.map('tender-route-map').setView([-2, 32], 5);
+              L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                maxZoom: 18
+              }).addTo(self.map);
+            }
+            self.routesCanvas();
+            self.addRouteMarker(o.lat, o.lng, o.name, '#16a34a');
+            self.addRouteMarker(d.lat, d.lng, d.name, '#dc2626');
+            self.routeControl = L.Routing.control({
+              waypoints: [L.latLng(o.lat, o.lng), L.latLng(d.lat, d.lng)],
+              routeWhileDragging: false,
+              addWaypoints: false,
+              show: false,
+              lineOptions: { styles: [{ color: '#1d4ed8', weight: 5, opacity: 0.8 }] },
+              createMarker: function () { return null; }
+            }).addTo(self.map);
+            self.routeControl.on('routesfound', function (e) {
+              var route = e.routes[0];
+              if (!route) return;
+              var km = (route.summary.totalDistance / 1000).toFixed(1);
+              var hrs = Math.floor(route.summary.totalTime / 3600);
+              var mins = Math.round((route.summary.totalTime % 3600) / 60);
+              self.form.distance_km = Number(km);
+              self.distanceText = km + ' km';
+              self.durationText = (hrs > 0 ? hrs + 'h ' : '') + mins + ' min';
+            });
+            self.fitRoute();
+          });
+        },
+        routesCanvas: function () {
+          var self = this;
+          if (!self.map) return;
+          setTimeout(function () { if (self.map) self.map.invalidateSize(); }, 200);
+        },
+        clearRoute: function () {
+          var self = this;
+          if (self.routeControl) {
+            if (self.map) self.map.removeControl(self.routeControl);
+            self.routeControl = null;
+          }
+          self.routeMarkers.forEach(function (m) { if (self.map) self.map.removeLayer(m); });
+          self.routeMarkers = [];
+        },
+        addRouteMarker: function (lat, lng, label, color) {
+          var icon = L.divIcon({
+            className: 'custom-marker',
+            html: '<div style="background:' + color + ';width:14px;height:14px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35);"></div>',
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
+          });
+          var m = L.marker([lat, lng], { icon: icon }).addTo(this.map).bindPopup('<b>' + label + '</b>');
+          this.routeMarkers.push(m);
+          return m;
+        },
+        fitRoute: function () {
+          if (!this.map || !this.routeMarkers.length) return;
+          this.map.fitBounds(L.featureGroup(this.routeMarkers).getBounds().pad(0.15));
         }
       },
       computed: {
         filteredLoading: function () { return this.matchTowns(this.loadingQuery); },
         filteredDelivery: function () { return this.matchTowns(this.deliveryQuery); }
+      },
+      watch: {
+        'form.route_loading': function () { this.maybeRunRoute(); },
+        'form.route_delivery': function () { this.maybeRunRoute(); }
       }
     }).mount('#tender-form-app');
   })();

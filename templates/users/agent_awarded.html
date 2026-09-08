@@ -1,0 +1,91 @@
+{% extends 'base.html' %}
+{% block title %}Awarded Orders &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Awarded Orders</h1>
+      <p class="page-subtitle">Orders awarded to your linked transporters</p>
+    </div>
+  </div>
+
+  <div id="agent-awarded-app" data-url="{% url 'users:api_agent_awarded' %}" v-cloak>
+    {% verbatim %}
+    <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
+    <div class="alert alert-warning" v-if="!error && orders.length === 0">
+      No awarded orders yet for your linked transporters.
+    </div>
+
+    <div class="card">
+      <div class="table-wrap" v-if="orders.length">
+        <table>
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th>Tender ref</th>
+              <th>Route</th>
+              <th>Cargo</th>
+              <th>Transporter</th>
+              <th>Confirmation</th>
+              <th>State</th>
+              <th>Amount</th>
+              <th>Received</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="o in orders" v-bind:key="o.id">
+              <td><strong>{{ o.order_name }}</strong><br><span style="color:#64748b; font-size:13px;">#{{ o.order_id }}</span></td>
+              <td>{{ o.tender_ref || '-' }}</td>
+              <td>{{ o.route || '-' }}</td>
+              <td>{{ o.cargo_type || '-' }}<br><span style="color:#64748b; font-size:13px;">{{ o.truck_type }}</span></td>
+              <td>{{ o.company_name || '-' }}</td>
+              <td>
+                <span class="badge" v-bind:class="o.confirmation === 'full' ? 'badge-success' : 'badge-warning'">{{ o.confirmation_label }}</span>
+                <br><span style="color:#64748b; font-size:13px;">{{ o.awarded_lines }} of {{ o.lines_total }} lines</span>
+              </td>
+              <td><span class="badge" v-bind:class="'badge-' + o.state">{{ o.state || '-' }}</span></td>
+              <td><strong>{{ money(o.awarded_amount, 'TZS') }}</strong></td>
+              <td>{{ o.created_at }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="empty" v-else>
+        <p style="padding:24px;">Loading awarded orders...</p>
+      </div>
+    </div>
+    {% endverbatim %}
+  </div>
+</div>
+
+<script>
+  (function () {
+    var root = document.getElementById('agent-awarded-app');
+    var api = window.HYPAX.api;
+    var HY = window.HYPAX;
+
+    Vue.createApp({
+      data: function () {
+        return { orders: [], error: '' };
+      },
+      created: function () {
+        this.load();
+        this.timer = setInterval(this.load.bind(this), 15000);
+      },
+      methods: {
+        money: function (v, c) { return HY.money(v, c); },
+        load: async function () {
+          var self = this;
+          try {
+            var res = await api.get(root.dataset.url);
+            if (res && res.ok === false) { self.error = res.error || 'Failed to load awarded orders.'; return; }
+            self.orders = (res && res.orders) || [];
+          } catch (e) {
+            self.error = e.message;
+          }
+        }
+      }
+    }).mount('#agent-awarded-app');
+  })();
+</script>
+{% endblock %}

@@ -35,6 +35,16 @@
               <div class="field-error" v-if="errors.registration_number"><ul><li v-for="e in errors.registration_number">{{ e }}</li></ul></div>
             </div>
             <div class="form-row">
+              <label>TIN (Tax Identification Number)</label>
+              <input type="text" v-model.trim="form.tin">
+              <div class="field-error" v-if="errors.tin"><ul><li v-for="e in errors.tin">{{ e }}</li></ul></div>
+            </div>
+            <div class="form-row">
+              <label>VAT number</label>
+              <input type="text" v-model.trim="form.vat">
+              <div class="field-error" v-if="errors.vat"><ul><li v-for="e in errors.vat">{{ e }}</li></ul></div>
+            </div>
+            <div class="form-row">
               <label>Contact person</label>
               <input type="text" v-model.trim="form.contact_person">
               <div class="field-error" v-if="errors.contact_person"><ul><li v-for="e in errors.contact_person">{{ e }}</li></ul></div>
@@ -85,7 +95,7 @@
     var api = window.HYPAX.api;
 
     function blank() {
-      return { name: '', registration_number: '', contact_person: '', phone: '', email: '', address: '', city: '', country: '' };
+      return { name: '', registration_number: '', tin: '', vat: '', contact_person: '', phone: '', email: '', address: '', city: '', country: '' };
     }
 
     Vue.createApp({
@@ -110,6 +120,8 @@
             this.form = {
               name: found.name || '',
               registration_number: found.registration_number || '',
+              tin: found.tin || '',
+              vat: found.vat || '',
               contact_person: found.contact_person || '',
               phone: found.phone || '',
               email: found.email || '',

@@ -1,0 +1,326 @@
+{% extends 'base.html' %}
+{% block title %}Administration &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Administration</h1>
+      <p class="page-subtitle">Transporters and agents management</p>
+    </div>
+    <a class="btn btn-secondary" href="{% url 'tenders:dashboard' %}">&larr; Dashboard</a>
+  </div>
+
+  <div id="admin-app"
+       data-url="{% url 'users:api_admin_dashboard' %}"
+       data-agent-create-url="{% url 'users:api_admin_agent_create' %}"
+       data-agent-transporters-base="{% url 'users:api_admin_agent_transporters' 0 %}">
+    {% verbatim %}
+    <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
+    <div class="alert alert-success" v-if="message" style="margin-bottom:16px;">{{ message }}</div>
+    <div class="alert alert-info" v-if="createdPassword" style="margin-bottom:16px;">
+      <strong>Temporary password:</strong> <code>{{ createdPassword }}</code><br>
+      <span style="font-size:13px;">It was emailed to the agent. Share it once; they can change it later.</span>
+      <button type="button" class="btn btn-secondary btn-sm" style="margin-left:8px;" @click="createdPassword = ''">Dismiss</button>
+    </div>
+
+    <div class="card" v-cloak>
+      <h2 class="card-title">Transporters</h2>
+      <p class="profile-hint" style="margin:-8px 0 12px;">Transport companies assigned by the external system to awarded orders.</p>
+
+      <div v-if="!transporters.length" class="empty">
+        <div class="empty-icon">&#128666;</div>
+        <p>No transporters registered yet.</p>
+      </div>
+
+      <div class="table-wrap" v-else>
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Alias</th>
+              <th>External ID</th>
+              <th>Awarded orders</th>
+              <th>Agents</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="t in transporters" v-bind:key="t.id">
+              <td><strong>{{ t.company_name || '-' }}</strong></td>
+              <td>{{ t.alias || '-' }}</td>
+              <td>{{ t.company_id || '-' }}</td>
+              <td>{{ t.awarded_orders }}</td>
+              <td>{{ t.agent_count }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" v-cloak>
+      <h2 class="card-title">Agents</h2>
+      <p class="profile-hint" style="margin:-8px 0 12px;">Registered agents of the platform.</p>
+
+      <div v-if="!agents.length" class="empty">
+        <div class="empty-icon">&#129489;</div>
+        <p>No agents registered yet.</p>
+      </div>
+
+      <div class="address-list" v-else>
+        <div class="address-item" v-for="a in agents" v-bind:key="a.id">
+          <div class="profile-avatar" style="width:44px; height:44px; flex:none;">
+            <img v-if="a.picture" v-bind:src="a.picture" alt="Agent photo">
+            <span v-else>{{ agentInitials(a) }}</span>
+          </div>
+          <div class="address-body">
+            <strong>{{ a.first_name }} {{ a.last_name }}</strong>
+            <div style="color:#64748b; font-size:14px;">
+              {{ a.email }}<br v-if="a.phone">
+              {{ a.phone }}
+            </div>
+            <div v-if="a.linked.length" style="margin-top:4px;">
+              <span class="badge badge-info" v-for="cid in a.linked" v-bind:key="cid" style="font-size:12px; margin-right:4px;">
+                {{ companyName(cid) }}
+              </span>
+            </div>
+            <div v-else style="color:#b91c1c; font-size:13px; margin-top:4px;">Not linked to any transporter</div>
+          </div>
+          <div class="address-actions">
+            <button type="button" class="btn btn-secondary btn-sm" @click="toggleLink(a)">
+              {{ linkedOpen[a.id] ? 'Close' : 'Link transporters' }}
+            </button>
+            <span class="badge badge-warning" style="font-size:12px;">{{ a.created_at }}</span>
+          </div>
+        </div>
+
+        <div v-if="linkAgent" class="address-form" style="margin-top:12px; padding-top:12px; border-top:1px solid #e2e8f0;">
+          <h3 style="font-size:14px; font-weight:700; margin-bottom:12px;">
+            Link {{ linkAgent.first_name }} {{ linkAgent.last_name }} to transporters
+          </h3>
+          <div v-if="!transporters.length" class="profile-hint">No transporters to link.</div>
+          <div v-else class="form-grid">
+            <label v-for="t in transporters" v-bind:key="t.id" class="checkbox-link">
+              <input type="checkbox" v-model="linkedSel[t.id]">&nbsp;
+              {{ t.company_name || ('#' + t.company_id) }}
+              <span v-if="t.company_name" style="color:#64748b; font-size:12px;">({{ t.alias }})</span>
+            </label>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-primary" @click="saveLinks" :disabled="savingLinks">
+              {{ savingLinks ? 'Saving...' : 'Save transporters' }}
+            </button>
+            <button type="button" class="btn btn-secondary" @click="closeLink">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:16px;">
+        <button type="button" class="btn btn-secondary" @click="showForm = !showForm">
+          {{ showForm ? 'Close' : 'Register a new agent' }}
+        </button>
+      </div>
+
+      <div class="address-form" v-if="showForm" style="margin-top:16px; padding-top:16px; border-top:1px solid #e2e8f0;">
+        <div class="form-grid">
+          <div class="form-row">
+            <label>First name</label>
+            <input type="text" v-model.trim="agentForm.first_name" required>
+          </div>
+          <div class="form-row">
+            <label>Last name</label>
+            <input type="text" v-model.trim="agentForm.last_name">
+          </div>
+          <div class="form-row">
+            <label>Email address</label>
+            <input type="email" v-model.trim="agentForm.email" required>
+          </div>
+          <div class="form-row">
+            <label>Phone</label>
+            <input type="text" v-model.trim="agentForm.phone">
+          </div>
+          <div class="form-row">
+            <label>Password</label>
+            <input type="text" v-model="agentForm.password" placeholder="Leave blank to auto-generate">
+            <div class="form-help">Shared with the agent by email. Min 8 characters.</div>
+          </div>
+          <div class="form-row" style="grid-column: 1 / -1;">
+            <label>Bio</label>
+            <textarea rows="3" v-model.trim="agentForm.bio" placeholder="Short description of the agent..."></textarea>
+          </div>
+          <div class="form-row" style="grid-column: 1 / -1;">
+            <label>Profile picture</label>
+            <input type="file" accept="image/png, image/jpeg, image/webp" @change="onPictureChange">
+            <div class="form-help">JPG, PNG or WebP, max 2 MB.</div>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-primary" @click="createAgent" :disabled="saving">
+            <span v-if="saving">Registering...</span>
+            <span v-else>Register agent</span>
+          </button>
+          <button type="button" class="btn btn-secondary" @click="closeForm">Cancel</button>
+        </div>
+      </div>
+    </div>
+    {% endverbatim %}
+  </div>
+</div>
+
+<script>
+  (function () {
+    var root = document.getElementById('admin-app');
+    var api = window.HYPAX.api;
+
+    function blankAgent() {
+      return { first_name: '', last_name: '', email: '', phone: '', password: '', bio: '', picture: null };
+    }
+
+    Vue.createApp({
+      data: function () {
+        return {
+          transporters: [],
+          agents: [],
+          agentForm: blankAgent(),
+          showForm: false,
+          saving: false,
+          createdPassword: '',
+          linkedOpen: {},
+          linkedSel: {},
+          linkAgent: null,
+          savingLinks: false,
+          error: '',
+          message: ''
+        };
+      },
+      created: function () { this.load(); },
+      methods: {
+        load: async function () {
+          var self = this;
+          try {
+            var res = await api.get(root.dataset.url);
+            if (res && res.ok === false) { self.error = res.error || 'Failed to load admin panel.'; return; }
+            self.transporters = (res && res.transporters) || [];
+            self.agents = (res && res.agents) || [];
+          } catch (e) {
+            self.error = e.message;
+          }
+        },
+        companyById: function (id) {
+          for (var i = 0; i < this.transporters.length; i++) {
+            if (this.transporters[i].id === id) return this.transporters[i];
+          }
+          return null;
+        },
+        companyName: function (id) {
+          var c = this.companyById(id);
+          return c ? (c.company_name || ('#' + c.company_id)) : ('#' + id);
+        },
+        agentInitials: function (a) {
+          return ((a.first_name || '').charAt(0) || '') + ((a.last_name || '').charAt(0) || 'A');
+        },
+        onPictureChange: function (e) {
+          var file = e.target.files && e.target.files[0];
+          if (!file) return;
+          if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
+            this.error = 'Please choose a JPG, PNG or WebP image.';
+            return;
+          }
+          this.agentForm.picture = file;
+          this.error = '';
+        },
+        toggleLink: function (a) {
+          if (this.linkAgent && this.linkAgent.id === a.id) {
+            this.closeLink();
+            return;
+          }
+          this.linkAgent = a;
+          var sel = {};
+          var self = this;
+          (a.linked || []).forEach(function (id) { sel[id] = true; });
+          this.linkedSel = sel;
+          this.linkedOpen[a.id] = true;
+        },
+        closeLink: function () {
+          if (this.linkAgent) this.linkedOpen[this.linkAgent.id] = false;
+          this.linkAgent = null;
+          this.linkedSel = {};
+        },
+        saveLinks: async function () {
+          var self = this;
+          if (!self.linkAgent) return;
+          self.savingLinks = true;
+          self.error = '';
+          self.message = '';
+          var companyIds = [];
+          for (var key in self.linkedSel) {
+            if (self.linkedSel[key]) companyIds.push(parseInt(key, 10));
+          }
+          var url = root.dataset.agentTransportersBase.replace('0', String(self.linkAgent.id));
+          try {
+            var res = await api.post(url, { transporter_ids: companyIds });
+            if (res && res.ok === false) {
+              self.error = res.error || 'Could not update transporters.';
+              return;
+            }
+            self.linkAgent.linked = res.linked || [];
+            self.message = res.message || 'Transporters updated.';
+            self.closeLink();
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.savingLinks = false;
+          }
+        },
+        createAgent: async function () {
+          var self = this;
+          self.error = '';
+          self.message = '';
+          self.createdPassword = '';
+          if (!self.agentForm.email || !self.agentForm.first_name) {
+            self.error = 'Email and first name are required.';
+            return;
+          }
+          self.saving = true;
+          try {
+            var fd = new FormData();
+            fd.append('first_name', self.agentForm.first_name || '');
+            fd.append('last_name', self.agentForm.last_name || '');
+            fd.append('email', self.agentForm.email || '');
+            fd.append('phone', self.agentForm.phone || '');
+            fd.append('bio', self.agentForm.bio || '');
+            if (self.agentForm.password) fd.append('password', self.agentForm.password);
+            if (self.agentForm.picture) fd.append('profile_picture', self.agentForm.picture, self.agentForm.picture.name);
+
+            var resp = await fetch(root.dataset.agentCreateUrl, {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRFToken': window.HYPAX.csrftoken() },
+              body: fd
+            });
+            var res = {};
+            try { res = await resp.json(); } catch (err) { /* non-JSON */ }
+            if (!resp.ok || res.ok === false) {
+              self.error = res.error || 'Agent could not be registered.';
+              return;
+            }
+            self.agents.unshift(res.agent);
+            self.createdPassword = res.password || '';
+            self.message = res.message || 'Agent registered successfully.';
+            self.showForm = false;
+            self.agentForm = blankAgent();
+          } catch (e) {
+            self.error = e.message || 'Agent could not be registered.';
+          } finally {
+            self.saving = false;
+          }
+        },
+        closeForm: function () {
+          this.showForm = false;
+          this.agentForm = blankAgent();
+          this.createdPassword = '';
+          this.error = '';
+        }
+      }
+    }).mount('#admin-app');
+  })();
+</script>
+{% endblock %}

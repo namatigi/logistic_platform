@@ -15,7 +15,12 @@
        data-profile-save-url="{% url 'users:api_profile_save' %}"
        data-address-create-url="{% url 'users:api_address_create' %}"
        data-address-update-base="{% url 'users:api_address_update' 0 %}"
-       data-address-delete-base="{% url 'users:api_address_delete' 0 %}">
+       data-address-delete-base="{% url 'users:api_address_delete' 0 %}"
+       data-companies-url="{% url 'companies:api_list' %}"
+       data-company-create-url="{% url 'companies:api_create' %}"
+       data-company-update-base="{% url 'companies:api_update' 0 %}"
+       data-company-delete-base="{% url 'companies:api_delete' 0 %}"
+       {% if user.role != 'agent' %}data-show-companies{% endif %}>
     {% verbatim %}
     <div class="card" v-cloak>
       <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
@@ -31,12 +36,24 @@
             Upload picture
             <input type="file" accept="image/*" hidden @change="onPictureChange">
           </label>
+          <button type="button" class="btn btn-danger btn-block" style="margin-top:8px;" @click="removePicture" v-if="form.picture" :disabled="saving">
+            <span v-if="saving">Removing...</span>
+            <span v-else>Remove picture</span>
+          </button>
           <p class="profile-hint">JPG or PNG, max 2&nbsp;MB.</p>
         </div>
 
         <div class="profile-main">
           <h2 class="card-title">Basic information</h2>
           <div class="form-grid">
+            <div class="form-row">
+              <label>First name</label>
+              <input type="text" v-model.trim="form.first_name">
+            </div>
+            <div class="form-row">
+              <label>Last name</label>
+              <input type="text" v-model.trim="form.last_name">
+            </div>
             <div class="form-row">
               <label>Email address</label>
               <input type="email" v-model.trim="form.email" required>
@@ -68,7 +85,7 @@
 
       <div v-if="!addresses.length" class="empty">
         <div class="empty-icon">&#127758;</div>
-        <p>No addresses yet. Add home, office or warehouse locations below.</p>
+        <p>No addresses yet.</p>
       </div>
 
       <div class="address-list">
@@ -88,7 +105,13 @@
         </div>
       </div>
 
-      <div class="address-form" style="margin-top:16px; padding-top:16px; border-top:1px solid #e2e8f0;">
+      <div style="margin-top:16px;">
+        <button type="button" class="btn btn-secondary" @click="toggleAddressForm">
+          {{ showAddressForm ? 'Close' : 'Add address' }}
+        </button>
+      </div>
+
+      <div class="address-form" v-if="showAddressForm || editing" style="margin-top:16px; padding-top:16px; border-top:1px solid #e2e8f0;">
         <h3 style="font-size:14px; font-weight:700; margin-bottom:12px;">
           {{ editing ? 'Edit address' : 'Add an address' }}
         </h3>
@@ -122,13 +145,109 @@
         <div class="form-actions">
           <button type="button" class="btn btn-primary" @click="saveAddress" :disabled="addrSaving">
             <span v-if="addrSaving">Saving...</span>
-            <span v-else>{{ editing ? 'Save changes' : 'Add address' }}</span>
+            <span v-else>{{ editing ? 'Save changes' : 'Save' }}</span>
           </button>
-          <button v-if="editing" type="button" class="btn btn-secondary" @click="cancelAddress">Cancel</button>
+          <button type="button" class="btn btn-secondary" @click="cancelAddress">Cancel</button>
         </div>
       </div>
     </div>
     {% endverbatim %}
+
+    {% if user.role != 'agent' %}
+    {% verbatim %}
+    <div class="card" v-cloak>
+      <h2 class="card-title">Companies</h2>
+      <p class="profile-hint" style="margin:-8px 0 12px;">Companies you ship or transport cargo with. Register a company to manage your operations.</p>
+
+      <div v-if="!companies.length" class="empty">
+        <div class="empty-icon">&#127970;</div>
+        <p>No companies registered yet.</p>
+      </div>
+
+      <div class="address-list">
+        <div class="address-item" v-for="c in companies" v-bind:key="c.id">
+          <div class="address-body">
+            <strong>{{ c.name }}</strong>
+            <div style="color:#64748b; font-size:14px;">
+              {{ c.contact_person || '-' }}<br v-if="c.contact_person">
+              {{ [c.city, c.country].filter(Boolean).join(', ') || '&nbsp;' }}
+            </div>
+          </div>
+          <div class="address-actions">
+            <button type="button" class="btn btn-secondary btn-sm" @click="editCompany(c)">Edit</button>
+            <button type="button" class="btn btn-danger btn-sm" @click="removeCompany(c)" :disabled="companyDeletingId === c.id">Delete</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:16px;">
+        <button type="button" class="btn btn-secondary" @click="toggleCompanyForm">
+          {{ showCompanyForm ? 'Close' : 'Register a company' }}
+        </button>
+      </div>
+
+      <div class="address-form" v-if="showCompanyForm || editingCompany" style="margin-top:16px; padding-top:16px; border-top:1px solid #e2e8f0;">
+        <h3 style="font-size:14px; font-weight:700; margin-bottom:12px;">
+          {{ editingCompany ? 'Edit company' : 'Register a company' }}
+        </h3>
+        <div class="form-grid">
+          <div class="form-row">
+            <label>Name</label>
+            <input type="text" v-model.trim="company.name" required>
+            <div class="field-error" v-if="companyErrors.name"><ul><li v-for="e in companyErrors.name">{{ e }}</li></ul></div>
+          </div>
+          <div class="form-row">
+            <label>Registration number</label>
+            <input type="text" v-model.trim="company.registration_number">
+            <div class="field-error" v-if="companyErrors.registration_number"><ul><li v-for="e in companyErrors.registration_number">{{ e }}</li></ul></div>
+          </div>
+          <div class="form-row">
+            <label>TIN (Tax Identification Number)</label>
+            <input type="text" v-model.trim="company.tin">
+            <div class="field-error" v-if="companyErrors.tin"><ul><li v-for="e in companyErrors.tin">{{ e }}</li></ul></div>
+          </div>
+          <div class="form-row">
+            <label>VAT number</label>
+            <input type="text" v-model.trim="company.vat">
+            <div class="field-error" v-if="companyErrors.vat"><ul><li v-for="e in companyErrors.vat">{{ e }}</li></ul></div>
+          </div>
+          <div class="form-row">
+            <label>Contact person</label>
+            <input type="text" v-model.trim="company.contact_person">
+          </div>
+          <div class="form-row">
+            <label>Phone</label>
+            <input type="text" v-model.trim="company.phone">
+          </div>
+          <div class="form-row">
+            <label>Email</label>
+            <input type="email" v-model.trim="company.email">
+            <div class="field-error" v-if="companyErrors.email"><ul><li v-for="e in companyErrors.email">{{ e }}</li></ul></div>
+          </div>
+          <div class="form-row">
+            <label>City</label>
+            <input type="text" v-model.trim="company.city">
+          </div>
+          <div class="form-row" style="grid-column: 1 / -1;">
+            <label>Address</label>
+            <input type="text" v-model.trim="company.address">
+          </div>
+          <div class="form-row">
+            <label>Country</label>
+            <input type="text" v-model.trim="company.country">
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-primary" @click="saveCompany" :disabled="companySaving">
+            <span v-if="companySaving">Saving...</span>
+            <span v-else>{{ editingCompany ? 'Save changes' : 'Save' }}</span>
+          </button>
+          <button type="button" class="btn btn-secondary" @click="cancelCompany">Cancel</button>
+        </div>
+      </div>
+    </div>
+    {% endverbatim %}
+    {% endif %}
   </div>
 </div>
 
@@ -141,10 +260,14 @@
       return { id: null, label: '', street: '', city: '', postal_code: '', country: '', is_primary: false };
     }
 
+    function blankCompany() {
+      return { id: null, name: '', registration_number: '', tin: '', vat: '', contact_person: '', phone: '', email: '', address: '', city: '', country: '' };
+    }
+
     Vue.createApp({
       data: function () {
         return {
-          form: { email: '', phone: '', bio: '', picture: '', newPicture: null },
+          form: { first_name: '', last_name: '', email: '', phone: '', bio: '', picture: '', newPicture: null },
           errors: {},
           error: '',
           message: '',
@@ -152,12 +275,23 @@
           addresses: [],
           addr: blankAddress(),
           editing: false,
+          showAddressForm: false,
           addrSaving: false,
-          deletingId: null
+          deletingId: null,
+          companies: [],
+          company: blankCompany(),
+          companyErrors: {},
+          editingCompany: false,
+          showCompanyForm: false,
+          companySaving: false,
+          companyDeletingId: null
         };
       },
       computed: {
         initials: function () {
+          if (this.form.first_name || this.form.last_name) {
+            return ((this.form.first_name || '').charAt(0) || '') + ((this.form.last_name || '').charAt(0) || '');
+          }
           return (this.form.email || '?').charAt(0).toUpperCase();
         }
       },
@@ -168,11 +302,17 @@
             var res = await api.get(root.dataset.profileUrl);
             if (res && res.ok === false) { this.error = res.error || 'Failed to load profile.'; return; }
             var p = (res && res.profile) || {};
+            this.form.first_name = p.first_name || '';
+            this.form.last_name = p.last_name || '';
             this.form.email = p.email || '';
             this.form.phone = p.phone || '';
             this.form.bio = p.bio || '';
             this.form.picture = p.picture || '';
             this.addresses = (res && res.addresses) || [];
+            if ('showCompanies' in root.dataset) {
+              var cres = await api.get(root.dataset.companiesUrl);
+              this.companies = (cres && cres.companies) || [];
+            }
           } catch (e) {
             this.error = e.message;
           }
@@ -196,6 +336,8 @@
           self.saving = true;
           try {
             var fd = new FormData();
+            fd.append('first_name', self.form.first_name || '');
+            fd.append('last_name', self.form.last_name || '');
             fd.append('email', self.form.email || '');
             fd.append('phone', self.form.phone || '');
             fd.append('bio', self.form.bio || '');
@@ -217,6 +359,8 @@
             self.message = 'Profile saved successfully.';
             if (res.profile) {
               self.form.email = res.profile.email || self.form.email;
+              self.form.first_name = res.profile.first_name || '';
+              self.form.last_name = res.profile.last_name || '';
               self.form.picture = res.profile.picture || self.form.picture;
             }
             self.form.newPicture = null;
@@ -237,10 +381,21 @@
             is_primary: !!a.is_primary
           };
           this.editing = true;
+          this.showAddressForm = true;
+        },
+        toggleAddressForm: function () {
+          if (this.showAddressForm || this.editing) {
+            this.cancelAddress();
+          } else {
+            this.addr = blankAddress();
+            this.editing = false;
+            this.showAddressForm = true;
+          }
         },
         cancelAddress: function () {
           this.addr = blankAddress();
           this.editing = false;
+          this.showAddressForm = false;
         },
         saveAddress: async function () {
           var self = this;
@@ -285,6 +440,121 @@
             self.error = e.message;
           } finally {
             self.deletingId = null;
+          }
+        },
+        removePicture: async function () {
+          var self = this;
+          if (!window.confirm('Remove your profile picture?')) return;
+          self.error = '';
+          self.message = '';
+          self.saving = true;
+          try {
+            var fd = new FormData();
+            fd.append('email', self.form.email || '');
+            fd.append('phone', self.form.phone || '');
+            fd.append('bio', self.form.bio || '');
+            fd.append('remove_picture', 'true');
+
+            var resp = await fetch(root.dataset.profileSaveUrl, {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRFToken': window.HYPAX.csrftoken() },
+              body: fd
+            });
+            var res = {};
+            try { res = await resp.json(); } catch (err) { /* non-JSON */ }
+            if (!resp.ok || res.ok === false) {
+              self.error = (res.error) || 'Picture could not be removed.';
+              return;
+            }
+            self.form.picture = '';
+            self.form.newPicture = null;
+            self.message = 'Profile picture removed.';
+          } catch (e) {
+            self.error = e.message || 'Picture could not be removed.';
+          } finally {
+            self.saving = false;
+          }
+        },
+        editCompany: function (c) {
+          this.company = {
+            id: c.id,
+            name: c.name || '',
+            registration_number: c.registration_number || '',
+            tin: c.tin || '',
+            vat: c.vat || '',
+            contact_person: c.contact_person || '',
+            phone: c.phone || '',
+            email: c.email || '',
+            address: c.address || '',
+            city: c.city || '',
+            country: c.country || ''
+          };
+          this.companyErrors = {};
+          this.editingCompany = true;
+          this.showCompanyForm = true;
+        },
+        toggleCompanyForm: function () {
+          if (this.showCompanyForm || this.editingCompany) {
+            this.cancelCompany();
+          } else {
+            this.company = blankCompany();
+            this.companyErrors = {};
+            this.editingCompany = false;
+            this.showCompanyForm = true;
+          }
+        },
+        cancelCompany: function () {
+          this.company = blankCompany();
+          this.companyErrors = {};
+          this.editingCompany = false;
+          this.showCompanyForm = false;
+        },
+        saveCompany: async function () {
+          var self = this;
+          self.error = '';
+          self.message = '';
+          self.companyErrors = {};
+          self.companySaving = true;
+          var url = self.company.id
+            ? root.dataset.companyUpdateBase.replace('0', String(self.company.id))
+            : root.dataset.companyCreateUrl;
+          try {
+            var res = await api.post(url, self.company);
+            if (res && res.ok === false) {
+              if (res.errors) { self.companyErrors = res.errors; }
+              self.error = res.error || 'Company could not be saved.';
+              return;
+            }
+            self.message = (res && res.message) || 'Company saved successfully.';
+            await self.load();
+            self.cancelCompany();
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.companySaving = false;
+          }
+        },
+        removeCompany: async function (c) {
+          var self = this;
+          if (!window.confirm('Delete this company?')) return;
+          self.error = '';
+          self.message = '';
+          self.companyDeletingId = c.id;
+          try {
+            var url = root.dataset.companyDeleteBase.replace('0', String(c.id));
+            var res = await api.post(url, {});
+            if (res && res.ok === false) {
+              self.error = res.error || 'Company could not be deleted.';
+              return;
+            }
+            self.message = (res && res.message) || 'Company deleted successfully.';
+            if (self.company.id === c.id) self.cancelCompany();
+            await self.load();
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.companyDeletingId = null;
           }
         }
       }

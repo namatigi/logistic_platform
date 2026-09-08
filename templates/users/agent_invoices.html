@@ -1,0 +1,109 @@
+{% extends 'base.html' %}
+{% block title %}Invoices &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Invoices</h1>
+      <p class="page-subtitle">Invoices for awarded orders on your linked transporters</p>
+    </div>
+  </div>
+
+  <div id="agent-invoices-app" data-url="{% url 'users:api_agent_invoices' %}"
+       data-paid-base="{% url 'users:api_agent_invoice_paid' 0 %}" v-cloak>
+    {% verbatim %}
+    <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
+    <div class="alert alert-success" v-if="message" style="margin-bottom:16px;">{{ message }}</div>
+    <div class="alert alert-warning" v-if="!error && invoices.length === 0">
+      No invoices yet.
+    </div>
+
+    <div class="card">
+      <div class="table-wrap" v-if="invoices.length">
+        <table>
+          <thead>
+            <tr>
+              <th>Invoice no</th>
+              <th>Transporter</th>
+              <th>Order</th>
+              <th>Cargo ref</th>
+              <th>Route</th>
+              <th>Date</th>
+              <th>Amount</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="inv in invoices" v-bind:key="inv.id">
+              <td><strong>{{ inv.number }}</strong></td>
+              <td>{{ inv.transporter }}</td>
+              <td>{{ inv.order_name }}</td>
+              <td>{{ inv.cargo_reference || '-' }}</td>
+              <td>{{ inv.route || '-' }}</td>
+              <td>{{ inv.created_at }}</td>
+              <td><strong>{{ money(inv.amount_total, inv.currency) }}</strong></td>
+              <td><span class="badge" v-bind:class="inv.status === 'paid' ? 'badge-success' : 'badge-warning'">{{ inv.status }}</span></td>
+              <td>
+                <button v-if="inv.status === 'pending'" type="button" class="btn btn-secondary btn-sm"
+                        @click="markPaid(inv)" :disabled="payingId === inv.id">
+                  {{ payingId === inv.id ? 'Saving...' : 'Mark as paid' }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="empty" v-else>
+        <p style="padding:24px;">Loading invoices...</p>
+      </div>
+    </div>
+    {% endverbatim %}
+  </div>
+</div>
+
+<script>
+  (function () {
+    var root = document.getElementById('agent-invoices-app');
+    var api = window.HYPAX.api;
+    var HY = window.HYPAX;
+
+    Vue.createApp({
+      data: function () {
+        return { invoices: [], error: '', message: '', payingId: null };
+      },
+      created: function () { this.load(); },
+      methods: {
+        money: function (v, c) { return HY.money(v, c); },
+        load: async function () {
+          var self = this;
+          try {
+            var res = await api.get(root.dataset.url);
+            if (res && res.ok === false) { self.error = res.error || 'Failed to load invoices.'; return; }
+            self.invoices = (res && res.invoices) || [];
+          } catch (e) {
+            self.error = e.message;
+          }
+        },
+        markPaid: async function (inv) {
+          var self = this;
+          self.error = '';
+          self.message = '';
+          self.payingId = inv.id;
+          try {
+            var url = root.dataset.paidBase.replace('0', String(inv.id));
+            var res = await api.post(url, {});
+            if (res && res.ok === false) { self.error = res.error || 'Could not update invoice.'; return; }
+            inv.status = 'paid';
+            self.message = res.message || 'Invoice marked as paid.';
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.payingId = null;
+          }
+        }
+      }
+    }).mount('#agent-invoices-app');
+  })();
+</script>
+{% endblock %}

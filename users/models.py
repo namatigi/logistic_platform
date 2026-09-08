@@ -35,13 +35,61 @@ class UserManager(BaseUserManager):
 
 
 class CustomUser(AbstractUser):
+    class Role(models.TextChoices):
+        ADMINISTRATOR = 'administrator', 'Administrator'
+        AGENT = 'agent', 'Agent'
+        USER = 'user', 'User'
+
     username = None
     email = models.EmailField(_('email address'), unique=True)
+    role = models.CharField(
+        max_length=20,
+        choices=Role.choices,
+        default=Role.USER,
+        help_text='Role in the HYPAX platform',
+    )
 
     objects = UserManager()
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = []
+
+    def avatar_picture(self):
+        try:
+            profile = self.profile
+        except Profile.DoesNotExist:
+            return ''
+        return profile.profile_picture.url if profile.profile_picture else ''
+
+    def avatar_initials(self):
+        local = (self.email or '?').split('@', 1)[0]
+        words = [w for w in local.replace('_', ' ').replace('.', ' ').replace('-', ' ').split() if w]
+        return ''.join(w[0].upper() for w in words[:2]) or '?'
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        self.sync_role_groups()
+
+    def sync_role_groups(self):
+        from django.contrib.auth.models import Group
+
+        groups = {
+            self.Role.ADMINISTRATOR: 'Administrator',
+            self.Role.AGENT: 'Agents',
+            self.Role.USER: 'Users',
+        }
+        target = groups.get(self.role)
+        if not target:
+            return
+        member_of = set(self.groups.values_list('name', flat=True))
+        desired = set(groups.values())
+        for name in desired - {target}:
+            if name in member_of:
+                group = Group.objects.filter(name=name).first()
+                if group:
+                    self.groups.remove(group)
+        group, _ = Group.objects.get_or_create(name=target)
+        self.groups.add(group)
 
 
 class Profile(models.Model):

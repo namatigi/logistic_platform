@@ -6,6 +6,8 @@ class Company(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='companies')
     name = models.CharField(max_length=200)
     registration_number = models.CharField(max_length=100, blank=True)
+    tin = models.CharField(max_length=100, blank=True, help_text='Tax Identification Number (TIN)')
+    vat = models.CharField(max_length=100, blank=True, help_text='Value Added Tax (VAT) number')
     contact_person = models.CharField(max_length=200, blank=True)
     phone = models.CharField(max_length=50, blank=True)
     email = models.EmailField(blank=True)

@@ -1,15 +1,46 @@
 import json
+import secrets
+from io import BytesIO
 
+from PIL import Image, ImageOps
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView
+from django.core.files.base import ContentFile
+from django.core.mail import send_mail
+from django.db.models import Count, Q, Sum
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from .forms import AddressForm, ProfileForm, SignUpForm
 from .models import Address, CustomUser, Profile
+from tenders.models import Invoice, Order, OrderLine, Tender, Town, Transporter
+from tenders.views import (
+    SIM_ACCELERATION,
+    SIM_SPEED_KMH,
+    _invoice_dict,
+    _position_at,
+    _route_arrays,
+    get_or_create_invoice,
+    get_route,
+)
+
+MAX_PROFILE_SIZE = (512, 512)
+
+
+def _resize_profile_picture(uploaded):
+    image = Image.open(uploaded)
+    image = ImageOps.exif_transpose(image).convert('RGB')
+    image.thumbnail(MAX_PROFILE_SIZE, Image.LANCZOS)
+    buffer = BytesIO()
+    image.save(buffer, format='JPEG', quality=82, optimize=True)
+    buffer.seek(0)
+    base_name = (uploaded.name or 'profile').rsplit('.', 1)[0].replace('\\', '/').split('/')[-1]
+    return ContentFile(buffer.read(), name=f'{base_name}.jpg')
 
 
 class EmailLoginView(LoginView):
@@ -42,6 +73,303 @@ def _json_body(request):
         if post:
             return {key: post.getlist(key) if len(post.getlist(key)) > 1 else post.get(key) for key in post.keys()}
         return {}
+
+
+@login_required
+def admin_dashboard(request):
+    if request.user.role != CustomUser.Role.ADMINISTRATOR:
+        return redirect('users:profile')
+    return render(request, 'users/admin_dashboard.html', {'active_tab': 'admin'})
+
+
+def _transporter_dict(transporter):
+    awarded_orders = Order.objects.filter(
+        lines__awarded=True,
+    ).filter(
+        Q(company_id=transporter.company_id) | Q(company_name__iexact=transporter.company_name)
+    ).distinct().count()
+    return {
+        'id': transporter.pk,
+        'company_name': transporter.company_name,
+        'alias': transporter.alias,
+        'company_id': transporter.company_id,
+        'awarded_orders': awarded_orders,
+        'agent_count': transporter.agents.count(),
+    }
+
+
+def _agent_dict(user):
+    profile = getattr(user, 'profile', None)
+    return {
+        'id': user.pk,
+        'email': user.email,
+        'first_name': user.first_name,
+        'last_name': user.last_name,
+        'phone': profile.phone if profile else '',
+        'bio': profile.bio if profile else '',
+        'picture': profile.profile_picture.url if (profile and profile.profile_picture) else '',
+        'created_at': user.date_joined.isoformat(),
+        'linked': sorted(user.linked_transporters.values_list('id', flat=True)),
+    }
+
+
+@login_required
+def api_admin_dashboard(request):
+    if request.user.role != CustomUser.Role.ADMINISTRATOR:
+        return JsonResponse({'ok': False, 'error': 'Administrator access required.'}, status=403)
+    transporters = Transporter.objects.order_by('company_name', 'alias')
+    agents = CustomUser.objects.filter(role=CustomUser.Role.AGENT).select_related('profile').order_by('-date_joined')
+    return JsonResponse({
+        'ok': True,
+        'transporters': [_transporter_dict(t) for t in transporters],
+        'agents': [_agent_dict(a) for a in agents],
+    })
+
+
+@login_required
+@require_POST
+def api_admin_agent_create(request):
+    if request.user.role != CustomUser.Role.ADMINISTRATOR:
+        return JsonResponse({'ok': False, 'error': 'Administrator access required.'}, status=403)
+    email = CustomUser.objects.normalize_email((request.POST.get('email') or '').strip())
+    first_name = (request.POST.get('first_name') or '').strip()[:150]
+    last_name = (request.POST.get('last_name') or '').strip()[:150]
+    phone = (request.POST.get('phone') or '').strip()
+    bio = (request.POST.get('bio') or '').strip()
+    password = request.POST.get('password') or ''
+    if not email or '@' not in email or not first_name:
+        return JsonResponse({'ok': False, 'error': 'Email and first name are required.'})
+    if password and len(password) < 8:
+        return JsonResponse({'ok': False, 'error': 'Password must be at least 8 characters long.'})
+    if CustomUser.objects.filter(email=email).exists():
+        return JsonResponse({'ok': False, 'error': 'A user with that email already exists.'})
+    if not password:
+        password = secrets.token_urlsafe(8)
+    user = CustomUser.objects.create_user(
+        email=email,
+        password=password,
+        first_name=first_name,
+        last_name=last_name,
+        role=CustomUser.Role.AGENT,
+    )
+    profile = Profile.objects.create(user=user, phone=phone, bio=bio)
+    uploaded = request.FILES.get('profile_picture')
+    if uploaded:
+        try:
+            resized = _resize_profile_picture(uploaded)
+            profile.profile_picture.save(resized.name, resized, save=False)
+            profile.save()
+        except Exception:
+            user.delete()
+            return JsonResponse({'ok': False, 'error': 'The uploaded picture could not be processed.'})
+    _send_agent_credentials(email, password)
+    return JsonResponse({
+        'ok': True,
+        'message': f'Agent {first_name} registered successfully.',
+        'agent': _agent_dict(user),
+        'password': password,
+    })
+
+
+def _send_agent_credentials(email, password):
+    subject = 'Your HYPAX agent account'
+    message = (
+        'Welcome to HYPAX.\n\n'
+        'An agent account was created for you.\n\n'
+        f'Email: {email}\n'
+        f'Password: {password}\n\n'
+        'You can sign in at the HYPAX login page with these credentials.'
+    )
+    try:
+        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+    except Exception:
+        pass
+
+
+@login_required
+@require_POST
+def api_admin_agent_transporters(request, pk):
+    if request.user.role != CustomUser.Role.ADMINISTRATOR:
+        return JsonResponse({'ok': False, 'error': 'Administrator access required.'}, status=403)
+    agent = CustomUser.objects.filter(pk=pk, role=CustomUser.Role.AGENT).first()
+    if agent is None:
+        return JsonResponse({'ok': False, 'error': 'Agent not found.'})
+    body = _json_body(request)
+    transporter_ids = body.get('transporter_ids') or body.get('company_ids') or []
+    try:
+        transporter_ids = [int(i) for i in transporter_ids]
+    except (TypeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'Invalid transporter selection.'})
+    transporters = Transporter.objects.filter(pk__in=transporter_ids)
+    agent.linked_transporters.set(transporters)
+    return JsonResponse({
+        'ok': True,
+        'message': f'{agent.first_name} {agent.last_name} linked to {transporters.count()} transporter(s).',
+        'linked': sorted(agent.linked_transporters.values_list('id', flat=True)),
+    })
+
+
+def _agent_match_q(agent):
+    q = Q()
+    for transporter in agent.linked_transporters.all():
+        per = Q()
+        if transporter.company_id:
+            per |= Q(company_id=transporter.company_id)
+        if transporter.company_name:
+            per |= Q(company_name__iexact=transporter.company_name)
+        q |= per
+    return q
+
+
+def agent_awarded(request):
+    return render(request, 'users/agent_awarded.html', {'active_tab': 'agents'})
+
+
+def agent_tracker(request):
+    return render(request, 'users/agent_tracker.html', {'active_tab': 'agents'})
+
+
+def agent_invoices(request):
+    return render(request, 'users/agent_invoices.html', {'active_tab': 'agents'})
+
+
+@login_required
+def api_agent_awarded(request):
+    q = _agent_match_q(request.user)
+    if not q:
+        return JsonResponse({'ok': True, 'orders': []})
+    orders = (
+        Order.objects.filter(q, lines__awarded=True)
+        .select_related('tender')
+        .distinct()
+        .order_by('-created_at')
+    )
+    out = []
+    for order in orders:
+        tender = order.tender
+        lines_total = order.lines.count()
+        awarded_lines = order.lines.filter(awarded=True).count()
+        confirmation = 'partial'
+        if awarded_lines and awarded_lines >= lines_total:
+            confirmation = 'full'
+        out.append({
+            'id': order.pk,
+            'order_id': order.order_id,
+            'order_name': order.order_name or f'#{order.order_id}',
+            'cargo_reference': order.cargo_reference or '',
+            'tender_ref': tender.cargo_reference if tender else '',
+            'customer': tender.customer if tender else order.customer,
+            'route': f'{tender.route_loading} \u2192 {tender.route_delivery}' if tender else '',
+            'cargo_type': tender.get_cargo_type_display() if tender else '',
+            'truck_type': tender.get_truck_type_display() if tender else '',
+            'weight': tender.weight if tender else None,
+            'number_of_trucks': tender.number_of_trucks if tender else None,
+            'company_name': order.company_name,
+            'state': order.state or '',
+            'awarded_amount': str(order.awarded_amount),
+            'lines_total': lines_total,
+            'awarded_lines': awarded_lines,
+            'confirmation': confirmation,
+            'confirmation_label': 'Fully confirmed' if confirmation == 'full' else 'Partially confirmed',
+            'created_at': order.created_at.isoformat(),
+        })
+    return JsonResponse({'ok': True, 'orders': out})
+
+
+@login_required
+def api_agent_tracker(request):
+    now = timezone.now()
+    q = _agent_match_q(request.user)
+    if not q:
+        return JsonResponse({'ok': True, 'orders': []})
+    towns_by_name = {t.name: t for t in Town.objects.all()}
+    orders = (
+        Order.objects.filter(q, lines__awarded=True)
+        .select_related('tender')
+        .distinct()
+        .order_by('-created_at')
+    )
+    out = []
+    for order in orders:
+        tender = order.tender
+        entry = {
+            'id': order.pk,
+            'order_id': order.order_id,
+            'order_name': order.order_name,
+            'customer': order.customer,
+            'company_name': order.company_name,
+            'cargo_reference': order.cargo_reference,
+            'tender_ref': tender.cargo_reference if tender else '',
+            'state': order.state or '',
+            'awarded_amount': str(order.awarded_amount),
+        }
+        trucks = []
+        if tender is not None:
+            origin = towns_by_name.get(tender.route_loading)
+            dest = towns_by_name.get(tender.route_delivery)
+            if origin is not None and dest is not None:
+                route_points, route_m = get_route(origin, dest)
+                route_km = route_m / 1000.0
+                if not route_km:
+                    route_km = float(tender.distance_km or 0)
+                sim_duration = max((route_km / SIM_SPEED_KMH) * 3600 / SIM_ACCELERATION, 3.0)
+                route_distances = _route_arrays(route_points)
+                for i in range(max(tender.number_of_trucks or 1, 1)):
+                    stagger = i * 120
+                    elapsed = max(0.0, (now - tender.created_at).total_seconds() - stagger)
+                    progress = min(1.0, elapsed / sim_duration)
+                    lat, lng = _position_at(route_points, route_distances, progress)
+                    trucks.append({
+                        'label': f'{tender.cargo_reference or f"T{tender.pk}"} \u00b7 T{i + 1}',
+                        'lat': lat,
+                        'lng': lng,
+                        'status': 'Delivered' if progress >= 1.0 else 'En route',
+                        'progress': round(progress, 4),
+                    })
+                entry.update({
+                    'origin': {'name': origin.name, 'lat': origin.lat, 'lng': origin.lng},
+                    'destination': {'name': dest.name, 'lat': dest.lat, 'lng': dest.lng},
+                    'route': route_points,
+                    'distance_km': round(route_km, 1),
+                    'trucks': trucks,
+                })
+        out.append(entry)
+    return JsonResponse({'ok': True, 'orders': out, 'now': now.isoformat()})
+
+
+@login_required
+def api_agent_invoices(request):
+    transporters = list(request.user.linked_transporters.all())
+    if not transporters:
+        return JsonResponse({'ok': True, 'invoices': []})
+    q = Q()
+    for transporter in transporters:
+        per = Q()
+        if transporter.company_id:
+            per |= Q(company_id=transporter.company_id)
+        if transporter.company_name:
+            per |= Q(company_name__iexact=transporter.company_name)
+        q |= per
+    awarded_orders = Order.objects.filter(q, lines__awarded=True).select_related('tender').distinct()
+    for order in awarded_orders:
+        get_or_create_invoice(order)
+    invoices = (
+        Invoice.objects.filter(transporter__in=transporters)
+        .select_related('order__tender', 'transporter')
+        .order_by('-created_at')
+    )
+    return JsonResponse({'ok': True, 'invoices': [_invoice_dict(i) for i in invoices]})
+
+
+@login_required
+@require_POST
+def api_agent_invoice_paid(request, pk):
+    invoice = Invoice.objects.filter(pk=pk, transporter__agents=request.user).first()
+    if invoice is None:
+        return JsonResponse({'ok': False, 'error': 'Invoice not found.'}, status=404)
+    invoice.status = Invoice.Status.PAID
+    invoice.save(update_fields=('status',))
+    return JsonResponse({'ok': True, 'message': 'Invoice marked as paid.', 'invoice': _invoice_dict(invoice)})
 
 
 @login_required
@@ -102,6 +430,23 @@ def api_profile_save(request):
             return JsonResponse({'ok': False, 'error': 'That email address is already in use.'})
         request.user.email = email
         request.user.save(update_fields=('email',))
+    first_name = (request.POST.get('first_name') or '').strip()[:150]
+    last_name = (request.POST.get('last_name') or '').strip()[:150]
+    if first_name != request.user.first_name or last_name != request.user.last_name:
+        request.user.first_name = first_name
+        request.user.last_name = last_name
+        request.user.save(update_fields=('first_name', 'last_name'))
+    uploaded = request.FILES.get('profile_picture')
+    if request.POST.get('remove_picture') in ('1', 'true', 'True') and profile.profile_picture:
+        profile.profile_picture.delete(save=False)
+    elif uploaded:
+        try:
+            resized = _resize_profile_picture(uploaded)
+            if profile.profile_picture:
+                profile.profile_picture.delete(save=False)
+            profile.profile_picture.save(resized.name, resized, save=False)
+        except Exception:
+            return JsonResponse({'ok': False, 'error': 'The uploaded picture could not be processed.'})
     form.save()
     return JsonResponse({
         'ok': True,

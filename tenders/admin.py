@@ -19,8 +19,8 @@ class TenderAdmin(admin.ModelAdmin):
 
 @admin.register(ApiSetting)
 class ApiSettingAdmin(admin.ModelAdmin):
-    list_display = ('user', 'base_url', 'auth_type', 'updated_at')
-    search_fields = ('user__email', 'base_url')
+    list_display = ('base_url', 'auth_type', 'updated_at')
+    search_fields = ('base_url',)
 
 
 class OrderLineInline(admin.TabularInline):

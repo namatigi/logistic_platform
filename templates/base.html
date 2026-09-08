@@ -24,6 +24,19 @@
         <span>HYPAX<small>Cargo Logistic &amp; Transportation</small></span>
       </a>
 
+      {% if user.role == 'agent' %}
+      <ul class="nav-links">
+        <li class="{% if request.resolver_match.url_name == 'agent_awarded' %}active{% endif %}">
+          <a href="{% url 'users:agent_awarded' %}">Awarded Orders</a>
+        </li>
+        <li class="{% if request.resolver_match.url_name == 'agent_tracker' %}active{% endif %}">
+          <a href="{% url 'users:agent_tracker' %}">Tracker</a>
+        </li>
+        <li class="{% if request.resolver_match.url_name == 'agent_invoices' %}active{% endif %}">
+          <a href="{% url 'users:agent_invoices' %}">Invoices</a>
+        </li>
+      </ul>
+      {% else %}
       <ul class="nav-links">
         <li class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
           <a href="{% url 'tenders:dashboard' %}">Dashboard</a>
@@ -31,25 +44,34 @@
         <li class="{% if request.resolver_match.url_name in 'list create' %}active{% endif %}">
           <a href="{% url 'tenders:list' %}">Tenders</a>
         </li>
-        <li class="{% if request.resolver_match.url_name == 'route_map' %}active{% endif %}">
-          <a href="{% url 'tenders:route_map' %}">Route Map</a>
-        </li>
         <li class="{% if request.resolver_match.url_name in 'order_list order_detail' %}active{% endif %}">
           <a href="{% url 'tenders:order_list' %}">Orders</a>
         </li>
-        <li class="{% if request.resolver_match.namespace == 'companies' %}active{% endif %}">
-          <a href="{% url 'companies:list' %}">Companies</a>
+        <li class="{% if request.resolver_match.url_name == 'invoices' %}active{% endif %}">
+          <a href="{% url 'tenders:invoices' %}">Invoices</a>
         </li>
+        <li class="{% if request.resolver_match.url_name == 'tracker' %}active{% endif %}">
+          <a href="{% url 'tenders:tracker' %}">Tracker</a>
+        </li>
+        {% if user.role == 'administrator' %}
         <li class="{% if request.resolver_match.url_name == 'api_settings' %}active{% endif %}">
-          <a href="{% url 'tenders:api_settings' %}">API Settings</a>
+          <a href="{% url 'tenders:api_settings' %}">Setting</a>
         </li>
-        <li class="{% if request.resolver_match.url_name == 'profile' %}active{% endif %}">
-          <a href="{% url 'users:profile' %}">Profile</a>
+        <li class="{% if request.resolver_match.url_name == 'admin_dashboard' %}active{% endif %}">
+          <a href="{% url 'users:admin_dashboard' %}">Admin</a>
         </li>
+        {% endif %}
       </ul>
+      {% endif %}
 
       <div class="nav-user">
-        <span class="user-chip">{{ user.email }}</span>
+        <a href="{% url 'users:profile' %}" class="nav-avatar" title="Your profile">
+          {% if user.avatar_picture %}
+            <img src="{{ user.avatar_picture }}" alt="Profile photo">
+          {% else %}
+            <span class="nav-avatar-placeholder">{{ user.avatar_initials }}</span>
+          {% endif %}
+        </a>
         <form method="post" action="{% url 'users:logout' %}">
           {% csrf_token %}
           <button type="submit" class="btn-logout">Logout</button>

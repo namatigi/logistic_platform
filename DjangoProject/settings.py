@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.gis',
     'channels',
     'users',
     'companies',
@@ -116,14 +117,16 @@ LOGOUT_REDIRECT_URL = 'users:login'
 def _configure_database():
     from django.core.exceptions import ImproperlyConfigured
 
+    gis_engine = 'django.contrib.gis.db.backends.postgis'
+
     url = os.environ.get('DATABASE_URL')
     if url:
         # Hosted environments (e.g. Railway managed PostgreSQL) provide DATABASE_URL.
-        return {'ENGINE': 'django.db.backends.postgresql', **dj_database_url.parse(
+        return {**dj_database_url.parse(
             url,
             conn_max_age=600,
             conn_health_checks=True,
-        )}
+        ), 'ENGINE': gis_engine}
 
     host = os.environ.get('DB_HOST')
     if host:
@@ -136,7 +139,7 @@ def _configure_database():
                 + ', '.join(missing)
             )
         return {
-            'ENGINE': 'django.db.backends.postgresql',
+            'ENGINE': gis_engine,
             'NAME': name,
             'USER': user,
             'PASSWORD': os.environ.get('DB_PASSWORD', ''),
@@ -150,7 +153,7 @@ def _configure_database():
     for socket_path in ('/var/run/postgresql/.s.PGSQL.5432', '/tmp/.s.PGSQL.5432'):
         if os.path.exists(socket_path):
             return {
-                'ENGINE': 'django.db.backends.postgresql',
+                'ENGINE': gis_engine,
                 'NAME': os.environ.get('DB_NAME', 'django_project'),
                 'USER': os.environ.get('DB_USER', 'leon'),
                 'PASSWORD': os.environ.get('DB_PASSWORD', ''),
@@ -219,3 +222,4 @@ MEDIA_ROOT = BASE_DIR / 'media'
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
 
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+DEFAULT_FROM_EMAIL = 'HYPAX <no-reply@hypax.local>'

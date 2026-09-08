@@ -3,15 +3,27 @@ import json
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.http import JsonResponse
+from django.http import HttpResponseForbidden, JsonResponse
 from django.urls import reverse, reverse_lazy
 from django.views.generic import CreateView, DeleteView, ListView, UpdateView
 
 from .forms import CompanyForm
 from .models import Company
+from users.models import CustomUser
 
 
-class CompanyList(LoginRequiredMixin, ListView):
+def _is_agent(user):
+    return getattr(user, 'role', None) == CustomUser.Role.AGENT
+
+
+class AgentForbiddenMixin:
+    def dispatch(self, request, *args, **kwargs):
+        if _is_agent(request.user):
+            return HttpResponseForbidden('Agents cannot register companies.')
+        return super().dispatch(request, *args, **kwargs)
+
+
+class CompanyList(AgentForbiddenMixin, LoginRequiredMixin, ListView):
     model = Company
     template_name = 'companies/company_list.html'
     context_object_name = 'companies'
@@ -20,7 +32,7 @@ class CompanyList(LoginRequiredMixin, ListView):
         return Company.objects.filter(user=self.request.user)
 
 
-class CompanyCreate(LoginRequiredMixin, CreateView):
+class CompanyCreate(AgentForbiddenMixin, LoginRequiredMixin, CreateView):
     model = Company
     form_class = CompanyForm
     template_name = 'companies/company_form.html'
@@ -32,7 +44,7 @@ class CompanyCreate(LoginRequiredMixin, CreateView):
         return super().form_valid(form)
 
 
-class CompanyUpdate(LoginRequiredMixin, UpdateView):
+class CompanyUpdate(AgentForbiddenMixin, LoginRequiredMixin, UpdateView):
     model = Company
     form_class = CompanyForm
     template_name = 'companies/company_form.html'
@@ -42,7 +54,7 @@ class CompanyUpdate(LoginRequiredMixin, UpdateView):
         return Company.objects.filter(user=self.request.user)
 
 
-class CompanyDelete(LoginRequiredMixin, DeleteView):
+class CompanyDelete(AgentForbiddenMixin, LoginRequiredMixin, DeleteView):
     model = Company
     template_name = 'companies/company_confirm_delete.html'
     success_url = reverse_lazy('companies:list')
@@ -63,6 +75,8 @@ def _company_dict(company):
         'id': company.id,
         'name': company.name,
         'registration_number': company.registration_number,
+        'tin': company.tin,
+        'vat': company.vat,
         'contact_person': company.contact_person,
         'phone': company.phone,
         'email': company.email,
@@ -76,12 +90,16 @@ def _company_dict(company):
 
 @login_required
 def api_company_list(request):
+    if _is_agent(request.user):
+        return JsonResponse({'ok': False, 'error': 'Agents cannot register companies.'}, status=403)
     companies = Company.objects.filter(user=request.user).order_by('name')
     return JsonResponse({'ok': True, 'companies': [_company_dict(c) for c in companies]})
 
 
 @login_required
 def api_company_save(request, pk=None):
+    if _is_agent(request.user):
+        return JsonResponse({'ok': False, 'error': 'Agents cannot register companies.'}, status=403)
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required.'}, status=405)
     instance = None
@@ -104,6 +122,8 @@ def api_company_save(request, pk=None):
 
 @login_required
 def api_company_delete(request, pk):
+    if _is_agent(request.user):
+        return JsonResponse({'ok': False, 'error': 'Agents cannot register companies.'}, status=403)
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required.'}, status=405)
     company = Company.objects.filter(user=request.user, pk=pk).first()
