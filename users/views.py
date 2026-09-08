@@ -15,6 +15,7 @@ from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
+from django.views.decorators.csrf import ensure_csrf_cookie
 
 from .forms import AddressForm, ProfileForm, SignUpForm
 from .models import Address, CustomUser, Profile
@@ -48,9 +49,10 @@ class EmailLoginView(LoginView):
     redirect_authenticated_user = True
 
 
-email_login = EmailLoginView.as_view()
+email_login = ensure_csrf_cookie(EmailLoginView.as_view())
 
 
+@ensure_csrf_cookie
 def signup(request):
     if request.user.is_authenticated:
         return redirect('tenders:dashboard')

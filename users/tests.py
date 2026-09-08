@@ -445,3 +445,30 @@ class AgentPortalTest(TestCase):
         self.assertNotContains(response, 'Linked transporter')
         data = self.client.get(reverse('users:api_profile')).json()
         self.assertEqual(data['linked_transporters'], [])
+
+
+class LoginCsrfCookieTest(TestCase):
+    def test_login_page_sets_csrftoken_cookie(self):
+        response = self.client.get(reverse('users:login'))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('csrftoken', response.cookies)
+
+    def test_signup_page_sets_csrftoken_cookie(self):
+        response = self.client.get(reverse('users:signup'))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('csrftoken', response.cookies)
+
+    def test_api_login_with_csrf_token(self):
+        user = CustomUser.objects.create_user(email='csrf@example.com', password='pass1234')
+        page = self.client.get(reverse('users:login'))
+        token = page.cookies['csrftoken'].value
+        response = self.client.post(
+            reverse('users:api_login'),
+            data='{"email": "csrf@example.com", "password": "pass1234"}',
+            content_type='application/json',
+            HTTP_X_CSRFTOKEN=token,
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['redirect'], '/tenders/')
