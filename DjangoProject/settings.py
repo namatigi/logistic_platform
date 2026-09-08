@@ -104,12 +104,32 @@ TEMPLATES = [
 ASGI_APPLICATION = 'DjangoProject.asgi.application'
 WSGI_APPLICATION = 'DjangoProject.wsgi.application'
 
+def _redis_url_with_options():
+    # redis-py parses these query params into socket/retry options, so both
+    # the cache and the channels layer pick them up when given a URL. They keep
+    # timeouts bounded and retry transient failures instead of bubbling up
+    # TimeoutError to the request/websocket (e.g. on Railway).
+    url = os.environ.get('REDIS_URL')
+    if not url:
+        return None
+    options = 'socket_timeout=5&socket_connect_timeout=5&retry_on_timeout=True&health_check_interval=15'
+    separator = '&' if '?' in url else '?'
+    return f'{url}{separator}{options}'
+
+
+def _redis_hosts():
+    url = _redis_url_with_options()
+    if url:
+        return [url]
+    return [('127.0.0.1', 6379)]
+
+
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
         'CONFIG': {
             # REDIS_URL overrides the default local Redis server (e.g. Railway).
-            'hosts': [os.environ.get('REDIS_URL', ('127.0.0.1', 6379))],
+            'hosts': _redis_hosts(),
         },
     },
 }
@@ -123,7 +143,7 @@ def _configure_caches():
     return {
         'default': {
             'BACKEND': 'django_redis.cache.RedisCache',
-            'LOCATION': os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/1'),
+            'LOCATION': _redis_url_with_options() or 'redis://127.0.0.1:6379/1',
             'OPTIONS': {
                 'CLIENT_CLASS': 'django_redis.client.DefaultClient',
             },
