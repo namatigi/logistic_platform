@@ -333,8 +333,56 @@ class Transporter(models.Model):
         ordering = ['company_name', 'alias']
 
 
+class TruckModel(models.Model):
+    class FuelType(models.TextChoices):
+        DIESEL = 'diesel', 'Diesel'
+        PETROL = 'petrol', 'Petrol / Gasoline'
+        ELECTRIC = 'electric', 'Electric'
+        HYBRID = 'hybrid', 'Hybrid'
+        CNG = 'cng', 'CNG / LPG'
+
+    class Transmission(models.TextChoices):
+        MANUAL = 'manual', 'Manual'
+        AUTOMATIC = 'automatic', 'Automatic'
+        AMT = 'amt', 'Automated Manual (AMT)'
+
+    class DriveType(models.TextChoices):
+        R4X2 = '4x2', '4x2'
+        R4X4 = '4x4', '4x4'
+        R6X2 = '6x2', '6x2'
+        R6X4 = '6x4', '6x4'
+        R8X4 = '8x4', '8x4'
+        AWD = 'awd', 'AWD'
+
+    name = models.CharField(max_length=150)
+    manufacturer = models.CharField(max_length=150, blank=True, default='')
+    vehicle_type = models.CharField(max_length=50, choices=Tender.TruckType.choices, blank=True, default='')
+    model_year = models.PositiveIntegerField(null=True, blank=True)
+    volume_capacity = models.FloatField(null=True, blank=True, help_text='Volume capacity for tanks (cubic metres)')
+    tonnage_capacity = models.FloatField(null=True, blank=True, help_text='Tonnage capacity (tonnes)')
+    number_of_axles = models.PositiveIntegerField(null=True, blank=True)
+    fuel_type = models.CharField(max_length=20, choices=FuelType.choices, blank=True, default='')
+    transmission = models.CharField(max_length=20, choices=Transmission.choices, blank=True, default='')
+    drive_type = models.CharField(max_length=10, choices=DriveType.choices, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return ' '.join(filter(None, [self.manufacturer, self.name])) or f'Model #{self.pk}'
+
+    class Meta:
+        ordering = ['manufacturer', 'name']
+
+
 class Truck(models.Model):
     transporter = models.ForeignKey(Transporter, on_delete=models.CASCADE, related_name='trucks')
+    truck_model = models.ForeignKey(
+        TruckModel,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='trucks',
+        help_text='Optionally links this truck to a catalog model',
+    )
     model = models.CharField(max_length=120, blank=True, default='')
     license_plate = models.CharField(max_length=40, blank=True, default='')
     tags = models.CharField(max_length=200, blank=True, default='')

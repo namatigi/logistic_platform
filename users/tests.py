@@ -10,7 +10,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from tenders.models import Invoice, Order, OrderLine, Tender, Town, Transporter, Truck
+from tenders.models import Invoice, Order, OrderLine, Tender, Town, Transporter, Truck, TruckModel
 from .models import Address, CustomUser, Profile
 
 
@@ -526,6 +526,66 @@ class AgentTransportersTest(TestCase):
         self.assertIn('model_year', data['errors'])
         self.assertIn('number_of_axles', data['errors'])
         self.assertIn('truck_type', data['errors'])
+        self.assertEqual(self.trans.trucks.count(), 1)
+
+    def test_truck_models_search_and_create(self):
+        self._login()
+        TruckModel.objects.create(name='FH16', manufacturer='Volvo', vehicle_type='truck')
+
+        response = self.client.get(reverse('users:api_agent_truck_models') + '?q=volvo')
+        data = response.json()
+        self.assertTrue(data['ok'])
+        self.assertEqual([m['manufacturer'] for m in data['models']], ['Volvo'])
+
+        create_url = reverse('users:api_agent_truck_models_create')
+        response = self.client.post(create_url, data={
+            'name': 'Actros', 'manufacturer': 'Mercedes', 'vehicle_type': 'trailer',
+            'model_year': 2020, 'tonnage_capacity': 40, 'number_of_axles': 5,
+            'fuel_type': 'diesel', 'transmission': 'automatic', 'drive_type': '6x4',
+        }, content_type='application/json')
+        data = response.json()
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['model']['name'], 'Actros')
+        self.assertEqual(data['model']['fuel_type_label'], 'Diesel')
+        self.assertEqual(TruckModel.objects.filter(manufacturer='Mercedes').count(), 1)
+
+    def test_truck_model_create_validation(self):
+        self._login()
+        url = reverse('users:api_agent_truck_models_create')
+        response = self.client.post(url, data={
+            'name': '', 'fuel_type': 'nuclear', 'transmission': 'teleport', 'drive_type': '42x99',
+        }, content_type='application/json')
+        data = response.json()
+        self.assertFalse(data['ok'])
+        for key in ('name', 'fuel_type', 'transmission', 'drive_type'):
+            self.assertIn(key, data['errors'])
+
+    def test_create_truck_links_catalog_model(self):
+        self._login()
+        model = TruckModel.objects.create(
+            name='FH16', manufacturer='Volvo', vehicle_type='truck', model_year=2021,
+            tonnage_capacity=25, number_of_axles=3,
+        )
+        url = reverse('users:api_agent_transporter_trucks', args=[self.trans.pk])
+        payload = self._payload(model_id=model.pk)
+        payload['model'] = ''
+        response = self.client.post(url, data=payload, content_type='application/json')
+        data = response.json()
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['truck']['model_id'], model.pk)
+        truck = Truck.objects.get(pk=data['truck']['id'])
+        self.assertEqual(truck.truck_model, model)
+        self.assertEqual(truck.model, 'FH16')
+
+    def test_create_truck_rejects_invalid_model_id(self):
+        self._login()
+        url = reverse('users:api_agent_transporter_trucks', args=[self.trans.pk])
+        response = self.client.post(
+            url, data=self._payload(model_id=99999), content_type='application/json',
+        )
+        data = response.json()
+        self.assertFalse(data['ok'])
+        self.assertIn('model_id', data['errors'])
         self.assertEqual(self.trans.trucks.count(), 1)
 
 

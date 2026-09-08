@@ -19,7 +19,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 
 from .forms import AddressForm, ProfileForm, SignUpForm
 from .models import Address, CustomUser, Profile
-from tenders.models import Invoice, Order, OrderLine, Tender, Town, Transporter, Truck
+from tenders.models import Invoice, Order, OrderLine, Tender, Town, Transporter, Truck, TruckModel
 from tenders.views import (
     SIM_ACCELERATION,
     SIM_SPEED_KMH,
@@ -383,9 +383,60 @@ def agent_transporters(request):
     return render(request, 'users/agent_transporters.html', {'active_tab': 'agent_transporters'})
 
 
+def _whole_value(data, name, errors):
+    value = data.get(name)
+    if value in (None, ''):
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        errors[name] = [f'{name.replace("_", " ").title()} must be a whole number.']
+        return None
+    if number < 0:
+        errors[name] = [f'{name.replace("_", " ").title()} must be a positive number.']
+        return None
+    return number
+
+
+def _decimal_value(data, name, errors):
+    value = data.get(name)
+    if value in (None, ''):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        errors[name] = [f'{name.replace("_", " ").title()} must be a number.']
+        return None
+    if number < 0:
+        errors[name] = [f'{name.replace("_", " ").title()} must be a positive number.']
+        return None
+    return number
+
+
+def _truck_model_dict(model):
+    return {
+        'id': model.pk,
+        'name': model.name,
+        'manufacturer': model.manufacturer,
+        'vehicle_type': model.vehicle_type,
+        'vehicle_type_label': model.get_vehicle_type_display(),
+        'model_year': model.model_year,
+        'volume_capacity': model.volume_capacity,
+        'tonnage_capacity': model.tonnage_capacity,
+        'number_of_axles': model.number_of_axles,
+        'fuel_type': model.fuel_type,
+        'fuel_type_label': model.get_fuel_type_display(),
+        'transmission': model.transmission,
+        'transmission_label': model.get_transmission_display(),
+        'drive_type': model.drive_type,
+        'drive_type_label': model.get_drive_type_display(),
+    }
+
+
 def _truck_dict(truck):
     return {
         'id': truck.pk,
+        'model_id': truck.truck_model_id,
         'model': truck.model,
         'license_plate': truck.license_plate,
         'tags': truck.tags,
@@ -427,38 +478,17 @@ def api_agent_transporter_trucks(request, pk):
     data = _json_body(request)
     errors = {}
 
-    def _whole(name):
-        value = data.get(name)
-        if value in (None, ''):
-            return None
-        try:
-            number = int(value)
-        except (TypeError, ValueError):
-            errors[name] = [f'{name.replace("_", " ").title()} must be a whole number.']
-            return None
-        if number < 0:
-            errors[name] = [f'{name.replace("_", " ").title()} must be a positive number.']
-            return None
-        return number
+    truck_model = None
+    model_id = data.get('model_id')
+    if model_id not in (None, ''):
+        truck_model = TruckModel.objects.filter(pk=model_id).first()
+        if truck_model is None:
+            errors['model_id'] = ['Select a valid model.']
 
-    def _decimal(name):
-        value = data.get(name)
-        if value in (None, ''):
-            return None
-        try:
-            number = float(value)
-        except (TypeError, ValueError):
-            errors[name] = [f'{name.replace("_", " ").title()} must be a number.']
-            return None
-        if number < 0:
-            errors[name] = [f'{name.replace("_", " ").title()} must be a positive number.']
-            return None
-        return number
-
-    model_year = _whole('model_year')
-    number_of_axles = _whole('number_of_axles')
-    tonnage_capacity = _decimal('tonnage_capacity')
-    volume_capacity = _decimal('volume_capacity')
+    model_year = _whole_value(data, 'model_year', errors)
+    number_of_axles = _whole_value(data, 'number_of_axles', errors)
+    tonnage_capacity = _decimal_value(data, 'tonnage_capacity', errors)
+    volume_capacity = _decimal_value(data, 'volume_capacity', errors)
 
     truck_type = (data.get('truck_type') or '').strip()
     if truck_type and truck_type not in Tender.TruckType.values:
@@ -467,9 +497,11 @@ def api_agent_transporter_trucks(request, pk):
     if errors:
         return JsonResponse({'ok': False, 'error': 'Please fix the highlighted fields.', 'errors': errors})
 
+    model_name = (data.get('model') or '').strip()[:120] or (truck_model.name if truck_model else '')
     truck = Truck.objects.create(
         transporter=transporter,
-        model=(data.get('model') or '').strip()[:120],
+        truck_model=truck_model,
+        model=model_name,
         license_plate=(data.get('license_plate') or '').strip()[:40],
         tags=(data.get('tags') or '').strip()[:200],
         chassis_number=(data.get('chassis_number') or '').strip()[:120],
@@ -480,6 +512,61 @@ def api_agent_transporter_trucks(request, pk):
         truck_type=truck_type,
     )
     return JsonResponse({'ok': True, 'message': 'Truck added successfully.', 'truck': _truck_dict(truck)})
+
+
+@login_required
+def api_agent_truck_models(request):
+    query = (request.GET.get('q') or '').strip()
+    models_qs = TruckModel.objects.all()
+    if query:
+        models_qs = models_qs.filter(Q(name__icontains=query) | Q(manufacturer__icontains=query))
+    return JsonResponse({'ok': True, 'models': [_truck_model_dict(m) for m in models_qs[:50]]})
+
+
+@login_required
+@require_POST
+def api_agent_truck_models_create(request):
+    data = _json_body(request)
+    errors = {}
+
+    name = (data.get('name') or '').strip()[:150]
+    if not name:
+        errors['name'] = ['Model name is required.']
+    manufacturer = (data.get('manufacturer') or '').strip()[:150]
+    vehicle_type = (data.get('vehicle_type') or '').strip()
+    if vehicle_type and vehicle_type not in Tender.TruckType.values:
+        errors['vehicle_type'] = ['Choose a valid vehicle type.']
+    fuel_type = (data.get('fuel_type') or '').strip()
+    if fuel_type and fuel_type not in TruckModel.FuelType.values:
+        errors['fuel_type'] = ['Choose a valid fuel type.']
+    transmission = (data.get('transmission') or '').strip()
+    if transmission and transmission not in TruckModel.Transmission.values:
+        errors['transmission'] = ['Choose a valid transmission.']
+    drive_type = (data.get('drive_type') or '').strip()
+    if drive_type and drive_type not in TruckModel.DriveType.values:
+        errors['drive_type'] = ['Choose a valid drive type.']
+
+    model_year = _whole_value(data, 'model_year', errors)
+    number_of_axles = _whole_value(data, 'number_of_axles', errors)
+    volume_capacity = _decimal_value(data, 'volume_capacity', errors)
+    tonnage_capacity = _decimal_value(data, 'tonnage_capacity', errors)
+
+    if errors:
+        return JsonResponse({'ok': False, 'error': 'Please fix the highlighted fields.', 'errors': errors})
+
+    model = TruckModel.objects.create(
+        name=name,
+        manufacturer=manufacturer,
+        vehicle_type=vehicle_type,
+        model_year=model_year,
+        volume_capacity=volume_capacity,
+        tonnage_capacity=tonnage_capacity,
+        number_of_axles=number_of_axles,
+        fuel_type=fuel_type,
+        transmission=transmission,
+        drive_type=drive_type,
+    )
+    return JsonResponse({'ok': True, 'message': 'Model created successfully.', 'model': _truck_model_dict(model)})
 
 
 @login_required

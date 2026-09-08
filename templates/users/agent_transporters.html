@@ -11,7 +11,9 @@
 
   <div id="agent-transporters-app"
        data-url="{% url 'users:api_agent_transporters' %}"
-       data-truck-url="{% url 'users:api_agent_transporter_trucks' 0 %}" v-cloak>
+       data-truck-url="{% url 'users:api_agent_transporter_trucks' 0 %}"
+       data-models-url="{% url 'users:api_agent_truck_models' %}"
+       data-model-create-url="{% url 'users:api_agent_truck_models_create' %}" v-cloak>
     {% verbatim %}
     <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
     <div class="alert alert-success" v-if="message" style="margin-bottom:16px;">{{ message }}</div>
@@ -69,9 +71,21 @@
         </p>
 
         <div class="form-grid modal-grid">
-          <div class="form-row">
+          <div class="form-row model-pick">
             <label>Model</label>
-            <input type="text" v-model.trim="form.model" placeholder="e.g. Volvo FH16">
+            <div class="model-input-wrap">
+              <input type="text" v-model="form.model" placeholder="Type to search models" @input="liveSearch" @focus="searchModels" @blur="hideSuggestionsLater" autocomplete="off">
+              <button type="button" class="btn btn-secondary btn-sm" @click="openPicker" style="flex:none;">Search for more</button>
+            </div>
+            <div class="model-suggest" v-if="suggestionsOpen && modelSuggestions.length">
+              <button type="button" v-for="m in modelSuggestions" v-bind:key="m.id" @mousedown.prevent="pickModel(m)">
+                <strong>{{ m.manufacturer ? (m.manufacturer + ' ' + m.name) : m.name }}</strong>
+                <span>{{ [m.vehicle_type_label, m.model_year].filter(Boolean).join(' &middot; ') || '' }}</span>
+              </button>
+            </div>
+            <div class="model-suggest" v-if="suggestionsOpen && !modelSuggestions.length && form.model">
+              <div class="model-suggest-empty">No models match. Use "Search for more" &rarr; New to create one.</div>
+            </div>
             <div class="field-error" v-if="errors.model"><ul><li v-for="e in errors.model">{{ e }}</li></ul></div>
           </div>
 
@@ -95,7 +109,10 @@
 
           <div class="form-row">
             <label>Model Year</label>
-            <input type="number" v-model="form.model_year" min="1960" max="2100" placeholder="e.g. 2022">
+            <select v-model="form.model_year">
+              <option value="">Select year</option>
+              <option v-for="y in years" v-bind:key="y" v-bind:value="y">{{ y }}</option>
+            </select>
             <div class="field-error" v-if="errors.model_year"><ul><li v-for="e in errors.model_year">{{ e }}</li></ul></div>
           </div>
 
@@ -144,6 +161,140 @@
         </div>
       </div>
     </div>
+
+    <div class="modal-overlay" v-if="showPicker" @click.self="closePicker">
+      <div class="modal-panel">
+        <div class="modal-header">
+          <h3>Search for a model</h3>
+          <button type="button" class="modal-close" @click="closePicker" aria-label="Close">&times;</button>
+        </div>
+        <div class="form-row" style="margin-top:12px;">
+          <input type="text" v-model.trim="pickerQuery" placeholder="Search by model name or manufacturer" @input="loadModels">
+        </div>
+        <div class="picker-list" v-if="pickerModels.length">
+          <button type="button" class="picker-item" v-for="m in pickerModels" v-bind:key="m.id" @click="pickModel(m)">
+            <strong>{{ m.manufacturer ? (m.manufacturer + ' ' + m.name) : m.name }}</strong>
+            <span>{{ [m.vehicle_type_label, m.model_year].filter(Boolean).join(' &middot; ') || '' }}</span>
+            <small>{{ [m.fuel_type_label, m.transmission_label, m.drive_type_label].filter(Boolean).join(' &middot; ') || '' }}</small>
+          </button>
+        </div>
+        <div class="empty" v-if="loadedModels && !pickerModels.length" style="margin-top:10px;">
+          <p style="padding:18px;">No models found.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-primary" @click="openCreateModel">New</button>
+          <button type="button" class="btn btn-secondary" @click="closePicker">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" v-if="showCreateModel" @click.self="closeCreateModel">
+      <div class="modal-panel">
+        <div class="modal-header">
+          <h3>Create model</h3>
+          <button type="button" class="modal-close" @click="closeCreateModel" aria-label="Close">&times;</button>
+        </div>
+        <div class="form-grid modal-grid">
+          <div class="form-row">
+            <label>Model name</label>
+            <input type="text" v-model.trim="newModel.name" placeholder="e.g. FH16">
+            <div class="field-error" v-if="modelErrors.name"><ul><li v-for="e in modelErrors.name">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-row">
+            <label>Manufacturer</label>
+            <input type="text" v-model.trim="newModel.manufacturer" placeholder="e.g. Volvo">
+            <div class="field-error" v-if="modelErrors.manufacturer"><ul><li v-for="e in modelErrors.manufacturer">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-row">
+            <label>Vehicle Type</label>
+            <select v-model="newModel.vehicle_type">
+              <option value="">Select vehicle type</option>
+              <option value="trailer">Trailer</option>
+              <option value="flatbed">Flatbed</option>
+              <option value="truck">Truck</option>
+              <option value="sideloader">Sideloader</option>
+              <option value="lowbed">Lowbed</option>
+            </select>
+            <div class="field-error" v-if="modelErrors.vehicle_type"><ul><li v-for="e in modelErrors.vehicle_type">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-row">
+            <label>Model Year</label>
+            <select v-model="newModel.model_year">
+              <option value="">Select year</option>
+              <option v-for="y in years" v-bind:key="y" v-bind:value="y">{{ y }}</option>
+            </select>
+            <div class="field-error" v-if="modelErrors.model_year"><ul><li v-for="e in modelErrors.model_year">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-row">
+            <label>Volume Capacity</label>
+            <input type="number" v-model="newModel.volume_capacity" step="0.1" min="0" placeholder="cubic metres">
+            <div class="field-error" v-if="modelErrors.volume_capacity"><ul><li v-for="e in modelErrors.volume_capacity">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-row">
+            <label>Tonnage Capacity</label>
+            <input type="number" v-model="newModel.tonnage_capacity" step="0.1" min="0" placeholder="tonnes">
+            <div class="field-error" v-if="modelErrors.tonnage_capacity"><ul><li v-for="e in modelErrors.tonnage_capacity">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-row">
+            <label>Number of Axles</label>
+            <input type="number" v-model="newModel.number_of_axles" min="0" placeholder="e.g. 3">
+            <div class="field-error" v-if="modelErrors.number_of_axles"><ul><li v-for="e in modelErrors.number_of_axles">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-row">
+            <label>Fuel Type</label>
+            <select v-model="newModel.fuel_type">
+              <option value="">Select fuel type</option>
+              <option value="diesel">Diesel</option>
+              <option value="petrol">Petrol / Gasoline</option>
+              <option value="electric">Electric</option>
+              <option value="hybrid">Hybrid</option>
+              <option value="cng">CNG / LPG</option>
+            </select>
+            <div class="field-error" v-if="modelErrors.fuel_type"><ul><li v-for="e in modelErrors.fuel_type">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-row">
+            <label>Transmission</label>
+            <select v-model="newModel.transmission">
+              <option value="">Select transmission</option>
+              <option value="manual">Manual</option>
+              <option value="automatic">Automatic</option>
+              <option value="amt">Automated Manual (AMT)</option>
+            </select>
+            <div class="field-error" v-if="modelErrors.transmission"><ul><li v-for="e in modelErrors.transmission">{{ e }}</li></ul></div>
+          </div>
+
+          <div class="form-row">
+            <label>Drive Type</label>
+            <select v-model="newModel.drive_type">
+              <option value="">Select drive type</option>
+              <option value="4x2">4x2</option>
+              <option value="4x4">4x4</option>
+              <option value="6x2">6x2</option>
+              <option value="6x4">6x4</option>
+              <option value="8x4">8x4</option>
+              <option value="awd">AWD</option>
+            </select>
+            <div class="field-error" v-if="modelErrors.drive_type"><ul><li v-for="e in modelErrors.drive_type">{{ e }}</li></ul></div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-primary" @click="createModel" :disabled="modelSaving">
+            <span v-if="modelSaving">Saving...</span>
+            <span v-else>Save</span>
+          </button>
+          <button type="button" class="btn btn-secondary" @click="closeCreateModel" :disabled="modelSaving">Close</button>
+        </div>
+      </div>
+    </div>
     {% endverbatim %}
   </div>
 </div>
@@ -163,9 +314,25 @@
   .modal-close:hover { color:#0f172a; }
   .modal-grid { margin-top:14px; }
   .modal-footer { display:flex; gap:10px; justify-content:flex-end; margin-top:20px; }
+  .model-pick { position:relative; grid-column:1/-1; }
+  .model-input-wrap { display:flex; gap:8px; align-items:center; }
+  .model-suggest { position:absolute; top:100%; left:0; right:0; z-index:50; margin-top:4px;
+    background:#fff; border:1px solid var(--border,#e2e8f0); border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,.15);
+    max-height:230px; overflow:auto; }
+  .model-suggest button { display:flex; flex-direction:column; gap:2px; text-align:left; width:100%;
+    padding:10px 12px; border:none; background:transparent; cursor:pointer; border-bottom:1px solid #f1f5f9; }
+  .model-suggest button:hover { background:#f1f5f9; }
+  .model-suggest span, .model-suggest small, .model-suggest-empty { color:#64748b; font-size:13px; }
+  .picker-list { display:flex; flex-direction:column; gap:8px; margin-top:12px; max-height:38vh; overflow:auto; }
+  .picker-item { display:flex; flex-direction:column; gap:2px; text-align:left; width:100%; padding:12px 14px;
+    border:1px solid var(--border,#e2e8f0); border-radius:10px; background:#fff; cursor:pointer; }
+  .picker-item:hover { border-color:#3b82f6; background:#f8fafc; }
+  .picker-item span { color:#334155; font-size:14px; }
+  .picker-item small { color:#94a3b8; font-size:12px; }
   @media (max-width:640px) {
     .modal-panel { padding:18px 16px; }
     .modal-footer { flex-wrap:wrap; }
+    .model-input-wrap { flex-direction:column; align-items:stretch; }
   }
 </style>
 
@@ -176,9 +343,23 @@
 
     function emptyForm() {
       return {
-        model: '', license_plate: '', tags: '', chassis_number: '',
+        model_id: '', model: '', license_plate: '', tags: '', chassis_number: '',
         model_year: '', tonnage_capacity: '', number_of_axles: '', volume_capacity: '', truck_type: ''
       };
+    }
+
+    function emptyNewModel() {
+      return {
+        name: '', manufacturer: '', vehicle_type: '', model_year: '', volume_capacity: '',
+        tonnage_capacity: '', number_of_axles: '', fuel_type: '', transmission: '', drive_type: ''
+      };
+    }
+
+    function buildYears() {
+      var year = new Date().getFullYear();
+      var years = [];
+      for (var y = year; y >= 1975; y--) { years.push(y); }
+      return years;
     }
 
     Vue.createApp({
@@ -188,11 +369,23 @@
           error: '',
           message: '',
           loaded: false,
+          years: buildYears(),
           showModal: false,
           saving: false,
           active: null,
           form: emptyForm(),
-          errors: {}
+          errors: {},
+          modelSuggestions: [],
+          suggestionsOpen: false,
+          suggestTimer: null,
+          showPicker: false,
+          pickerQuery: '',
+          pickerModels: [],
+          loadedModels: false,
+          showCreateModel: false,
+          newModel: emptyNewModel(),
+          modelErrors: {},
+          modelSaving: false
         };
       },
       created: function () { this.load(); },
@@ -234,6 +427,97 @@
           this.showModal = false;
           this.active = null;
           this.saving = false;
+          this.suggestionsOpen = false;
+        },
+        applyModel: function (m) {
+          this.form.model_id = m.id;
+          this.form.model = m.name;
+          this.form.model_year = m.model_year || '';
+          this.form.tonnage_capacity = (m.tonnage_capacity !== null && m.tonnage_capacity !== undefined) ? m.tonnage_capacity : '';
+          this.form.number_of_axles = (m.number_of_axles !== null && m.number_of_axles !== undefined) ? m.number_of_axles : '';
+          this.form.volume_capacity = (m.volume_capacity !== null && m.volume_capacity !== undefined) ? m.volume_capacity : '';
+        },
+        liveSearch: function () {
+          var self = this;
+          if (self.suggestTimer) clearTimeout(self.suggestTimer);
+          self.suggestTimer = setTimeout(function () { self.searchModels(); }, 250);
+        },
+        searchModels: async function () {
+          var self = this;
+          var q = (self.form.model || '').trim();
+          if (!q) { self.modelSuggestions = []; self.suggestionsOpen = false; return; }
+          self.suggestionsOpen = true;
+          self.suggestTimer && clearTimeout(self.suggestTimer);
+          try {
+            var res = await api.get(root.dataset.modelsUrl + '?q=' + encodeURIComponent(q));
+            self.modelSuggestions = (res && res.models) || [];
+          } catch (e) {
+            self.modelSuggestions = [];
+          }
+        },
+        hideSuggestionsLater: function () {
+          var self = this;
+          setTimeout(function () { self.suggestionsOpen = false; }, 200);
+        },
+        pickModel: function (m) {
+          this.applyModel(m);
+          this.suggestionsOpen = false;
+          this.closePicker();
+        },
+        openPicker: function () {
+          this.pickerQuery = '';
+          this.pickerModels = [];
+          this.loadedModels = false;
+          this.showPicker = true;
+          this.loadModels();
+        },
+        closePicker: function () {
+          this.showPicker = false;
+        },
+        loadModels: async function () {
+          var self = this;
+          self.loadedModels = true;
+          try {
+            var q = (self.pickerQuery || '').trim();
+            var res = await api.get(root.dataset.modelsUrl + (q ? '?q=' + encodeURIComponent(q) : ''));
+            self.pickerModels = (res && res.models) || [];
+          } catch (e) {
+            self.pickerModels = [];
+          }
+        },
+        openCreateModel: function () {
+          this.newModel = emptyNewModel();
+          this.modelErrors = {};
+          this.showCreateModel = true;
+        },
+        closeCreateModel: function () {
+          this.showCreateModel = false;
+          this.modelSaving = false;
+        },
+        createModel: async function () {
+          var self = this;
+          self.modelErrors = {};
+          self.error = '';
+          self.message = '';
+          self.modelSaving = true;
+          try {
+            var res = await api.post(root.dataset.modelCreateUrl, self.newModel);
+            if (res && res.ok === false) {
+              self.modelErrors = (res && res.errors) || {};
+              self.error = res.error || 'Could not create the model.';
+              return;
+            }
+            var m = (res && res.model) || {};
+            self.applyModel(m);
+            self.showCreateModel = false;
+            self.showPicker = false;
+            self.suggestionsOpen = false;
+            self.message = (res && res.message) || 'Model created successfully.';
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.modelSaving = false;
+          }
         },
         save: async function (keepOpen) {
           var self = this;
