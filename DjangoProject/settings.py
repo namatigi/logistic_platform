@@ -38,6 +38,9 @@ if _ALLOWED_HOSTS_ENV:
 else:
     ALLOWED_HOSTS = ['localhost', '127.0.0.1', '[::1]', '.localhost', '.ngrok-free.dev', '.ngrok.app','logisticplatform-production.up.railway.app']
 
+# Trust TLS termination done by the hosting proxy (e.g. Railway).
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 # Origins allowed to submit CSRF-protected requests (e.g. POST/PUT from a
 # browser). Override via the environment (comma-separated) for production.
 _CSRF_TRUSTED_ORIGINS_ENV = os.environ.get('CSRF_TRUSTED_ORIGINS')
@@ -50,6 +53,7 @@ else:
         'http://[::1]',
         'https://*.ngrok-free.dev',
         'https://*.ngrok.app',
+        'https://logisticplatform-production.up.railway.app',
     ]
 
 
