@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.railpack.com",
   "$comment": "Install GDAL/GEOS system libraries so the GDAL Python package can build and Django's PostGIS backend can run.",
-  "buildAptPackages": ["...", "gdal-bin", "libgdal-dev", "libgeos-dev", "libproj-dev", "binutils"],
+  "buildAptPackages": ["gdal-bin", "libgdal-dev", "libgeos-dev", "libproj-dev", "binutils"],
   "deploy": {
-    "aptPackages": ["...", "libgdal32", "libgeos-c1v5", "libproj25", "binutils"]
+    "aptPackages": ["libgdal32", "libgeos-c1v5", "libproj25", "binutils"]
   }
 }
