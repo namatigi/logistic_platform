@@ -36,7 +36,7 @@ _ALLOWED_HOSTS_ENV = os.environ.get('ALLOWED_HOSTS')
 if _ALLOWED_HOSTS_ENV:
     ALLOWED_HOSTS = [h.strip() for h in _ALLOWED_HOSTS_ENV.split(',') if h.strip()]
 else:
-    ALLOWED_HOSTS = ['localhost', '127.0.0.1', '[::1]', '.localhost', '.ngrok-free.dev', '.ngrok.app']
+    ALLOWED_HOSTS = ['localhost', '127.0.0.1', '[::1]', '.localhost', '.ngrok-free.dev', '.ngrok.app','logisticplatform-production.up.railway.app']
 
 # Origins allowed to submit CSRF-protected requests (e.g. POST/PUT from a
 # browser). Override via the environment (comma-separated) for production.

@@ -7,7 +7,9 @@
       <h1 class="page-title">Dashboard</h1>
       <p class="page-subtitle">Welcome back, {{ user.email }}</p>
     </div>
+    {% if user.role != 'agent' %}
     <a class="btn btn-primary" href="{% url 'tenders:create' %}">+ Send tender</a>
+    {% endif %}
   </div>
 
   <div id="dashboard-app"
@@ -15,6 +17,7 @@
        data-company-url="{% url 'companies:create' %}"
        data-list-url="{% url 'tenders:list' %}"
        data-create-url="{% url 'tenders:create' %}"
+       {% if user.role != 'agent' %}data-can-tender{% endif %}
        {% if user.role != 'agent' %}data-can-companies{% endif %}>
     {% verbatim %}
     <div v-cloak>
@@ -72,7 +75,7 @@
         <div class="empty">
           <div class="empty-icon">&#128666;</div>
           <p>No tenders sent yet.</p>
-          <a class="btn btn-primary" v-bind:href="createUrl">Send your first tender</a>
+          <a class="btn btn-primary" v-if="canTender" v-bind:href="createUrl">Send your first tender</a>
         </div>
       </div>
 
@@ -96,6 +99,7 @@
           recent_tenders: [],
           loaded: false,
           canCompanies: 'canCompanies' in root.dataset,
+          canTender: 'canTender' in root.dataset,
           companyUrl: root.dataset.companyUrl,
           listUrl: root.dataset.listUrl,
           createUrl: root.dataset.createUrl

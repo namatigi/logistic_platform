@@ -422,3 +422,26 @@ class AgentPortalTest(TestCase):
         for name in ('agent_awarded', 'agent_tracker', 'agent_invoices'):
             response = self.client.get(reverse('users:' + name))
             self.assertEqual(response.status_code, 200, name)
+
+    def test_agent_profile_api_lists_linked_transporter(self):
+        self._login('agent.a@example.com')
+        response = self.client.get(reverse('users:api_profile'))
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data['linked_transporters']), 1)
+        self.assertEqual(data['linked_transporters'][0]['company_name'], 'TransFleet A')
+        self.assertEqual(data['linked_transporters'][0]['alias'], 'TA')
+
+    def test_agent_profile_page_shows_linked_transporter(self):
+        self._login('agent.a@example.com')
+        response = self.client.get(reverse('users:profile'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Linked transporter')
+
+    def test_non_agent_profile_has_no_transporter_section(self):
+        self._login('owner@example.com')
+        response = self.client.get(reverse('users:profile'))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'Linked transporter')
+        data = self.client.get(reverse('users:api_profile')).json()
+        self.assertEqual(data['linked_transporters'], [])

@@ -687,3 +687,23 @@ class InvoicesPageTest(TestCase):
         response = self.client.get(reverse('tenders:invoices'))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '/api/invoices/')
+
+
+class DashboardRoleTest(TestCase):
+    def test_agent_dashboard_hides_send_tender_buttons(self):
+        agent = CustomUser.objects.create_user(
+            email='agent.dash@example.com', password='pass1234', role=CustomUser.Role.AGENT,
+        )
+        self.client.login(email='agent.dash@example.com', password='pass1234')
+        response = self.client.get(reverse('tenders:dashboard'))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, '>+ Send tender')
+        self.assertNotContains(response, 'data-can-tender')
+
+    def test_user_dashboard_shows_send_tender_button(self):
+        user = CustomUser.objects.create_user(email='user.dash@example.com', password='pass1234')
+        self.client.login(email='user.dash@example.com', password='pass1234')
+        response = self.client.get(reverse('tenders:dashboard'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '>+ Send tender')
+        self.assertContains(response, 'data-can-tender')

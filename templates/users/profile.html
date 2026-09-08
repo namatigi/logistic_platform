@@ -153,6 +153,31 @@
     </div>
     {% endverbatim %}
 
+    {% if user.role == 'agent' %}
+    {% verbatim %}
+    <div class="card" v-cloak>
+      <h2 class="card-title">Linked transporter</h2>
+      <p class="profile-hint" style="margin:-8px 0 12px;">Transport company your account is linked to.</p>
+
+      <div v-if="!linkedTransporters.length" class="empty">
+        <div class="empty-icon">&#128666;</div>
+        <p>No transporter linked yet. Contact the administrator to link your account.</p>
+      </div>
+
+      <div class="address-list">
+        <div class="address-item" v-for="t in linkedTransporters" v-bind:key="t.id">
+          <div class="address-body">
+            <strong>{{ t.company_name || t.alias || ('Transporter #' + (t.company_id || t.id)) }}</strong>
+            <div style="color:#64748b; font-size:14px;">
+              {{ [t.alias, t.company_id ? ('ID: ' + t.company_id) : ''].filter(Boolean).join(' &middot; ') || '&nbsp;' }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endverbatim %}
+    {% endif %}
+
     {% if user.role != 'agent' %}
     {% verbatim %}
     <div class="card" v-cloak>
@@ -284,7 +309,8 @@
           editingCompany: false,
           showCompanyForm: false,
           companySaving: false,
-          companyDeletingId: null
+          companyDeletingId: null,
+          linkedTransporters: []
         };
       },
       computed: {
@@ -309,6 +335,7 @@
             this.form.bio = p.bio || '';
             this.form.picture = p.picture || '';
             this.addresses = (res && res.addresses) || [];
+            this.linkedTransporters = (res && res.linked_transporters) || [];
             if ('showCompanies' in root.dataset) {
               var cres = await api.get(root.dataset.companiesUrl);
               this.companies = (cres && cres.companies) || [];

@@ -391,6 +391,15 @@ def _profile_dict(user, profile):
             'picture': profile.profile_picture.url if profile.profile_picture else '',
         },
         'addresses': [_address_dict(a) for a in user.addresses.all()],
+        'linked_transporters': [
+            {
+                'id': t.pk,
+                'company_name': t.company_name,
+                'alias': t.alias,
+                'company_id': t.company_id,
+            }
+            for t in user.linked_transporters.all()
+        ] if user.role == CustomUser.Role.AGENT else [],
     }
 
 
