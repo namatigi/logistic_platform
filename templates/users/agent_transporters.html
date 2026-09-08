@@ -74,8 +74,11 @@
           <div class="form-row model-pick">
             <label>Model</label>
             <div class="model-input-wrap">
-              <input type="text" v-model="form.model" placeholder="Type to search models" @input="liveSearch" @focus="searchModels" @blur="hideSuggestionsLater" autocomplete="off">
-              <button type="button" class="btn btn-secondary btn-sm" @click="openPicker" style="flex:none;">Search for more</button>
+              <input type="text" v-model="form.model" placeholder="Type to search models"
+                     @focus="onModelFocus" @input="liveSearch" @blur="hideSuggestionsLater" autocomplete="off">
+              <button type="button" class="field-search-more" v-if="modelFieldFocused" @click="openPicker">
+                Search for more
+              </button>
             </div>
             <div class="model-suggest" v-if="suggestionsOpen && modelSuggestions.length">
               <button type="button" v-for="m in modelSuggestions" v-bind:key="m.id" @mousedown.prevent="pickModel(m)">
@@ -315,7 +318,12 @@
   .modal-grid { margin-top:14px; }
   .modal-footer { display:flex; gap:10px; justify-content:flex-end; margin-top:20px; }
   .model-pick { position:relative; grid-column:1/-1; }
-  .model-input-wrap { display:flex; gap:8px; align-items:center; }
+  .model-input-wrap { position:relative; }
+  .model-input-wrap input { padding-right:130px; }
+  .field-search-more { position:absolute; right:4px; top:50%; transform:translateY(-50%);
+    background:#eff6ff; color:#2563eb; border:1px solid #bfdbfe; border-radius:8px; padding:5px 10px;
+    font-size:12px; font-weight:600; cursor:pointer; white-space:nowrap; }
+  .field-search-more:hover { background:#dbeafe; }
   .model-suggest { position:absolute; top:100%; left:0; right:0; z-index:50; margin-top:4px;
     background:#fff; border:1px solid var(--border,#e2e8f0); border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,.15);
     max-height:230px; overflow:auto; }
@@ -332,7 +340,8 @@
   @media (max-width:640px) {
     .modal-panel { padding:18px 16px; }
     .modal-footer { flex-wrap:wrap; }
-    .model-input-wrap { flex-direction:column; align-items:stretch; }
+    .model-input-wrap input { padding-right:108px; }
+    .field-search-more { font-size:11px; padding:4px 8px; }
   }
 </style>
 
@@ -378,6 +387,7 @@
           modelSuggestions: [],
           suggestionsOpen: false,
           suggestTimer: null,
+          modelFieldFocused: false,
           showPicker: false,
           pickerQuery: '',
           pickerModels: [],
@@ -428,6 +438,7 @@
           this.active = null;
           this.saving = false;
           this.suggestionsOpen = false;
+          this.modelFieldFocused = false;
         },
         applyModel: function (m) {
           this.form.model_id = m.id;
@@ -455,9 +466,16 @@
             self.modelSuggestions = [];
           }
         },
+        onModelFocus: function () {
+          this.modelFieldFocused = true;
+          this.searchModels();
+        },
         hideSuggestionsLater: function () {
           var self = this;
-          setTimeout(function () { self.suggestionsOpen = false; }, 200);
+          setTimeout(function () {
+            self.suggestionsOpen = false;
+            self.modelFieldFocused = false;
+          }, 200);
         },
         pickModel: function (m) {
           this.applyModel(m);
