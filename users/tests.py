@@ -560,6 +560,18 @@ class AgentTransportersTest(TestCase):
         for key in ('name', 'fuel_type', 'transmission', 'drive_type'):
             self.assertIn(key, data['errors'])
 
+    def test_create_truck_requires_fields_except_volume(self):
+        self._login()
+        url = reverse('users:api_agent_transporter_trucks', args=[self.trans.pk])
+        response = self.client.post(url, data={}, content_type='application/json')
+        data = response.json()
+        self.assertFalse(data['ok'])
+        for key in ('model', 'license_plate', 'tags', 'chassis_number',
+                    'model_year', 'tonnage_capacity', 'number_of_axles', 'truck_type'):
+            self.assertIn(key, data['errors'], key)
+        self.assertNotIn('volume_capacity', data['errors'])
+        self.assertEqual(self.trans.trucks.count(), 1)
+
     def test_create_truck_links_catalog_model(self):
         self._login()
         model = TruckModel.objects.create(

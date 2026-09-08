@@ -72,7 +72,7 @@
 
         <div class="form-grid modal-grid">
           <div class="form-row model-pick">
-            <label>Model</label>
+            <label>Model <span class="req" title="Required">*</span></label>
             <div class="model-input-wrap">
               <input type="text" v-model="form.model" placeholder="Type to search models"
                      @focus="onModelFocus" @input="liveSearch" @blur="hideSuggestionsLater" autocomplete="off">
@@ -93,25 +93,25 @@
           </div>
 
           <div class="form-row">
-            <label>Licence Plate</label>
+            <label>Licence Plate <span class="req" title="Required">*</span></label>
             <input type="text" v-model.trim="form.license_plate" placeholder="e.g. T 123 ABC">
             <div class="field-error" v-if="errors.license_plate"><ul><li v-for="e in errors.license_plate">{{ e }}</li></ul></div>
           </div>
 
           <div class="form-row">
-            <label>Tags</label>
+            <label>Tags <span class="req" title="Required">*</span></label>
             <input type="text" v-model.trim="form.tags" placeholder="e.g. fuel, fleet-A">
             <div class="field-error" v-if="errors.tags"><ul><li v-for="e in errors.tags">{{ e }}</li></ul></div>
           </div>
 
           <div class="form-row">
-            <label>Chassis Number</label>
+            <label>Chassis Number <span class="req" title="Required">*</span></label>
             <input type="text" v-model.trim="form.chassis_number" placeholder="Vehicle identification number">
             <div class="field-error" v-if="errors.chassis_number"><ul><li v-for="e in errors.chassis_number">{{ e }}</li></ul></div>
           </div>
 
           <div class="form-row">
-            <label>Model Year</label>
+            <label>Model Year <span class="req" title="Required">*</span></label>
             <select v-model="form.model_year">
               <option value="">Select year</option>
               <option v-for="y in years" v-bind:key="y" v-bind:value="y">{{ y }}</option>
@@ -120,25 +120,25 @@
           </div>
 
           <div class="form-row">
-            <label>Tonnage Capacity</label>
+            <label>Tonnage Capacity <span class="req" title="Required">*</span></label>
             <input type="number" v-model="form.tonnage_capacity" step="0.1" min="0" placeholder="tonnes">
             <div class="field-error" v-if="errors.tonnage_capacity"><ul><li v-for="e in errors.tonnage_capacity">{{ e }}</li></ul></div>
           </div>
 
           <div class="form-row">
-            <label>Number of Axles</label>
+            <label>Number of Axles <span class="req" title="Required">*</span></label>
             <input type="number" v-model="form.number_of_axles" min="0" placeholder="e.g. 3">
             <div class="field-error" v-if="errors.number_of_axles"><ul><li v-for="e in errors.number_of_axles">{{ e }}</li></ul></div>
           </div>
 
           <div class="form-row">
             <label>Volume Capacity (Tanks)</label>
-            <input type="number" v-model="form.volume_capacity" step="0.1" min="0" placeholder="cubic metres">
+            <input type="number" v-model="form.volume_capacity" step="0.1" min="0" placeholder="cubic metres (optional)">
             <div class="field-error" v-if="errors.volume_capacity"><ul><li v-for="e in errors.volume_capacity">{{ e }}</li></ul></div>
           </div>
 
           <div class="form-row" style="grid-column: 1 / -1;">
-            <label>Truck Type</label>
+            <label>Truck Type <span class="req" title="Required">*</span></label>
             <select v-model="form.truck_type">
               <option value="">Select truck type</option>
               <option value="trailer">Trailer</option>
@@ -152,11 +152,12 @@
         </div>
 
         <div class="modal-footer">
-          <button type="button" class="btn btn-primary" @click="save(true)" :disabled="saving">
+          <span class="form-help" style="margin-right:auto; align-self:center;">Fields marked <span class="req">*</span> are required</span>
+          <button type="button" class="btn btn-primary" @click="save(true)" :disabled="saving || !requiredFilled">
             <span v-if="saving">Saving...</span>
             <span v-else>Save and New</span>
           </button>
-          <button type="button" class="btn btn-secondary" @click="save(false)" :disabled="saving">
+          <button type="button" class="btn btn-secondary" @click="save(false)" :disabled="saving || !requiredFilled">
             <span v-if="saving">Saving...</span>
             <span v-else>Save and Close</span>
           </button>
@@ -318,6 +319,8 @@
   .modal-grid { margin-top:14px; }
   .modal-footer { display:flex; gap:10px; justify-content:flex-end; margin-top:20px; }
   .model-pick { position:relative; grid-column:1/-1; }
+  .req { color:#dc2626; font-weight:700; }
+  .form-row label .req { margin-left:2px; }
   .model-input-wrap { position:relative; }
   .model-input-wrap input { padding-right:130px; }
   .field-search-more { position:absolute; right:4px; top:50%; transform:translateY(-50%);
@@ -399,6 +402,19 @@
         };
       },
       created: function () { this.load(); },
+      computed: {
+        requiredFilled: function () {
+          var f = this.form;
+          return !!(String(f.model || '').trim() &&
+            String(f.license_plate || '').trim() &&
+            String(f.tags || '').trim() &&
+            String(f.chassis_number || '').trim() &&
+            f.model_year !== '' && f.model_year !== null && f.model_year !== undefined &&
+            String(f.tonnage_capacity || '').trim() !== '' &&
+            String(f.number_of_axles || '').trim() !== '' &&
+            String(f.truck_type || '').trim());
+        }
+      },
       methods: {
         withPk: function (urlPrefix, id) {
           return String(urlPrefix).replace('/0/', '/' + id + '/');

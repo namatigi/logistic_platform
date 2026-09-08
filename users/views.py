@@ -485,6 +485,18 @@ def api_agent_transporter_trucks(request, pk):
         if truck_model is None:
             errors['model_id'] = ['Select a valid model.']
 
+    model_text = (data.get('model') or '').strip()[:120]
+    if not model_text and not truck_model:
+        errors['model'] = ['Model is required.']
+
+    required = ('license_plate', 'tags', 'chassis_number', 'model_year',
+                'tonnage_capacity', 'number_of_axles', 'truck_type')
+    for field in required:
+        raw = data.get(field)
+        empty = raw in (None, '') or (isinstance(raw, str) and not raw.strip())
+        if empty:
+            errors[field] = [f'{field.replace("_", " ").title()} is required.']
+
     model_year = _whole_value(data, 'model_year', errors)
     number_of_axles = _whole_value(data, 'number_of_axles', errors)
     tonnage_capacity = _decimal_value(data, 'tonnage_capacity', errors)
@@ -497,7 +509,7 @@ def api_agent_transporter_trucks(request, pk):
     if errors:
         return JsonResponse({'ok': False, 'error': 'Please fix the highlighted fields.', 'errors': errors})
 
-    model_name = (data.get('model') or '').strip()[:120] or (truck_model.name if truck_model else '')
+    model_name = model_text or (truck_model.name if truck_model else '')
     truck = Truck.objects.create(
         transporter=transporter,
         truck_model=truck_model,
