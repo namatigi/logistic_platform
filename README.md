@@ -77,6 +77,26 @@ Per-user configuration for the outgoing tender endpoint:
 
 The page also shows the **incoming webhook URL** (with a copy button) to share with the external system.
 
+### Configuration &gt; Selcom payment gateway
+The Setting page (administrator only) also configures **invoice payments** through [Selcom](https://selcom.net) APGW:
+
+- `selcom_enabled` — master switch for online invoice payments
+- `selcom_sandbox` — use the sandbox API (`https://apigwdev.selcommobile.com/v1`) instead of production
+- `selcom_base_url` / `selcom_paylink_base` — override the APIGW / hosted-checkout base (normally left blank)
+- `selcom_client_id` / `selcom_client_secret` — Selcom vendor credentials
+- `selcom_sales_channel` — the vendor sales channel (e.g. `PURCHASE`) issued by Selcom
+- `selcom_currency` — invoice currency, default `TZS`
+- `selcom_payment_methods` — comma-separated wallets/banks allowed on checkout, e.g. `MPESA,TIGOPESA,AIRTELMONEY,HALOPESA,CRDB,NMB`
+- `selcom_webhook_secret` — optional secret used to verify payment callbacks (HMAC-SHA256 / confirm-hash)
+
+The page shows the **Selcom payment callback URL** (with a copy button) to register as the callback/webhook URL when creating Selcom checkout orders.
+
+### Invoices &amp; Selcom checkout
+- Invoices are created automatically for awarded orders and can be paid online from the **Invoices** page (and the agent invoices page).
+- **Pay now** creates a Selcom checkout order (`POST /checkout/create-order`) and opens the hosted checkout where the customer pays by mobile money (M-Pesa, Tigo, Airtel, Halopesa) or bank transfer (CRDB, NMB, …).
+- **Refresh / Check status** queries the payment status (`POST /checkout/get-order-status`); a successful payment marks the invoice as paid.
+- Selcom calls `POST /webhook/selcom/` (CSRF-exempt) with the payment result; the callback is signature-verified when a webhook secret is configured, then the invoice is marked paid.
+
 ### Orders (webhook)
 - The external system `POST`s order data to `/webhook/orders/` (CSRF-exempt, JSON).
 - Orders are upserted by `order_id`, storing every detail and the order lines.

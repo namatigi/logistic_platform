@@ -26,6 +26,7 @@ from tenders.views import (
     _invoice_dict,
     _position_at,
     _route_arrays,
+    _shared_setting,
     get_or_create_invoice,
     get_route,
 )
@@ -360,7 +361,8 @@ def api_agent_invoices(request):
         .select_related('order__tender', 'transporter')
         .order_by('-created_at')
     )
-    return JsonResponse({'ok': True, 'invoices': [_invoice_dict(i) for i in invoices]})
+    setting = _shared_setting()
+    return JsonResponse({'ok': True, 'selcom_enabled': setting.selcom_enabled, 'invoices': [_invoice_dict(i) for i in invoices]})
 
 
 @login_required

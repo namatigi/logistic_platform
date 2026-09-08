@@ -10,7 +10,9 @@
   </div>
 
   <div id="agent-invoices-app" data-url="{% url 'users:api_agent_invoices' %}"
-       data-paid-base="{% url 'users:api_agent_invoice_paid' 0 %}" v-cloak>
+       data-paid-base="{% url 'users:api_agent_invoice_paid' 0 %}"
+       data-selcom-url="{% url 'tenders:api_invoice_selcom_initiate' 0 %}"
+       data-selcom-status-url="{% url 'tenders:api_invoice_selcom_status' 0 %}" v-cloak>
     {% verbatim %}
     <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
     <div class="alert alert-success" v-if="message" style="margin-bottom:16px;">{{ message }}</div>
@@ -44,7 +46,14 @@
               <td>{{ inv.created_at }}</td>
               <td><strong>{{ money(inv.amount_total, inv.currency) }}</strong></td>
               <td><span class="badge" v-bind:class="inv.status === 'paid' ? 'badge-success' : 'badge-warning'">{{ inv.status }}</span></td>
-              <td>
+              <td v-if="selcomEnabled && inv.status !== 'paid'" style="white-space:nowrap;">
+                <a v-if="inv.selcom_pay_link" class="btn btn-primary btn-sm" target="_blank" rel="noopener" v-bind:href="inv.selcom_pay_link">Open checkout</a>
+                <button v-else type="button" class="btn btn-primary btn-sm" :disabled="busyId === inv.id" @click="payNow(inv)">
+                  {{ busyId === inv.id ? 'Creating...' : 'Pay now' }}
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" v-if="inv.selcom_order_token" @click="checkStatus(inv)">Refresh</button>
+              </td>
+              <td v-else>
                 <button v-if="inv.status === 'pending'" type="button" class="btn btn-secondary btn-sm"
                         @click="markPaid(inv)" :disabled="payingId === inv.id">
                   {{ payingId === inv.id ? 'Saving...' : 'Mark as paid' }}
@@ -70,19 +79,59 @@
 
     Vue.createApp({
       data: function () {
-        return { invoices: [], error: '', message: '', payingId: null };
+        return { invoices: [], error: '', message: '', payingId: null, busyId: null, selcomEnabled: false };
       },
       created: function () { this.load(); },
       methods: {
         money: function (v, c) { return HY.money(v, c); },
+        withPk: function (urlPrefix, id) {
+          return String(urlPrefix).replace('/0/', '/' + id + '/');
+        },
         load: async function () {
           var self = this;
           try {
             var res = await api.get(root.dataset.url);
             if (res && res.ok === false) { self.error = res.error || 'Failed to load invoices.'; return; }
             self.invoices = (res && res.invoices) || [];
+            self.selcomEnabled = !!(res && res.selcom_enabled);
           } catch (e) {
             self.error = e.message;
+          }
+        },
+        payNow: async function (inv) {
+          var self = this;
+          self.error = '';
+          self.message = '';
+          self.busyId = inv.id;
+          try {
+            var res = await api.post(self.withPk(root.dataset.selcomUrl, inv.id), {});
+            if (res && res.ok === false) { self.error = res.error || 'Could not create the payment.'; return; }
+            if (res && res.invoice) {
+              var idx = self.invoices.findIndex(function (x) { return x.id === inv.id; });
+              if (idx !== -1) { self.invoices[idx] = res.invoice; }
+            }
+            if (res && res.pay_link) { window.open(res.pay_link, '_blank', 'noopener'); }
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.busyId = null;
+          }
+        },
+        checkStatus: async function (inv) {
+          var self = this;
+          self.error = '';
+          self.busyId = inv.id;
+          try {
+            var res = await api.post(self.withPk(root.dataset.selcomStatusUrl, inv.id), {});
+            if (res && res.ok === false) { self.error = res.error || 'Could not check the payment status.'; return; }
+            if (res && res.invoice) {
+              var idx = self.invoices.findIndex(function (x) { return x.id === inv.id; });
+              if (idx !== -1) { self.invoices[idx] = res.invoice; }
+            }
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.busyId = null;
           }
         },
         markPaid: async function (inv) {

@@ -103,7 +103,42 @@ class ApiSetting(models.Model):
     api_token = models.CharField(max_length=500, blank=True, help_text='Token used for Bearer authentication')
     username = models.CharField(max_length=200, blank=True)
     password = models.CharField(max_length=200, blank=True)
+    selcom_enabled = models.BooleanField(
+        default=False,
+        help_text='Enable Selcom payment gateway for invoice payments.',
+    )
+    selcom_sandbox = models.BooleanField(
+        default=True,
+        help_text='Use Selcom sandbox (apigwdev) endpoints. Disable for production.',
+    )
+    selcom_base_url = models.CharField(
+        max_length=500, blank=True,
+        help_text='Optional Selcom API root. Defaults to sandbox or production APIGW.',
+    )
+    selcom_client_id = models.CharField(max_length=200, blank=True)
+    selcom_client_secret = models.CharField(max_length=200, blank=True)
+    selcom_sales_channel = models.CharField(
+        max_length=100, blank=True,
+        help_text='Sales channel / vendor name, e.g. PURCHASE.',
+    )
+    selcom_currency = models.CharField(max_length=10, default='TZS', blank=True)
+    selcom_payment_methods = models.CharField(
+        max_length=500, blank=True,
+        help_text='Comma-separated wallets/banks, e.g. MPESA,TIGOPESA,AIRTELMONEY,HALOPESA,CRDB,NMB',
+    )
+    selcom_webhook_secret = models.CharField(
+        max_length=500, blank=True,
+        help_text='Shared secret used to verify Selcom payment callback signatures.',
+    )
+    selcom_paylink_base = models.CharField(
+        max_length=500, blank=True,
+        help_text='Optional hosted checkout root. Defaults to the Selcom API root.',
+    )
     updated_at = models.DateTimeField(auto_now=True)
+
+    SELCOM_SANDBOX_BASE = 'https://apigwdev.selcommobile.com/v1'
+    SELCOM_PRODUCTION_BASE = 'https://apigw.selcommobile.com/v1'
+    SELCOM_DEFAULT_METHODS = 'MPESA,TIGOPESA,AIRTELMONEY,HALOPESA'
 
     @classmethod
     def get(cls):
@@ -111,6 +146,26 @@ class ApiSetting(models.Model):
         if setting is None:
             setting = cls.objects.create()
         return setting
+
+    def selcom_api_base(self):
+        if self.selcom_base_url.strip():
+            return self.selcom_base_url.rstrip('/')
+        if self.selcom_sandbox:
+            return self.SELCOM_SANDBOX_BASE
+        return self.SELCOM_PRODUCTION_BASE
+
+    def selcom_api_url(self, path):
+        base = self.selcom_api_base()
+        path = path.lstrip('/')
+        return f'{base}/{path}'
+
+    def selcom_payment_link(self, order_token):
+        base = self.selcom_paylink_base.strip() or self.selcom_api_base()
+        return f'{base.rstrip("/")}/checkout/paylink/{order_token}'
+
+    def selcom_methods_list(self):
+        methods = [m.strip() for m in self.selcom_payment_methods.split(',') if m.strip()]
+        return methods or [m.strip() for m in self.SELCOM_DEFAULT_METHODS.split(',')]
 
     def endpoint_url(self):
         base = self.base_url.rstrip('/')
@@ -244,6 +299,11 @@ class Invoice(models.Model):
     amount_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     currency = models.CharField(max_length=10, blank=True, default='')
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    selcom_reference = models.CharField(max_length=120, blank=True, default='', help_text='Vendor reference used when creating the Selcom checkout order')
+    selcom_order_token = models.CharField(max_length=255, blank=True, default='', help_text='Order token returned by Selcom when the checkout order was created')
+    selcom_pay_link = models.CharField(max_length=600, blank=True, default='', help_text='Hosted checkout URL for the invoice payment')
+    selcom_status = models.CharField(max_length=40, blank=True, default='', help_text='Latest payment status reported by Selcom')
+    selcom_updated_at = models.DateTimeField(null=True, blank=True, help_text='When the Selcom payment status was last checked')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

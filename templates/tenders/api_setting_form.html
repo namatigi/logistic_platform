@@ -9,65 +9,132 @@
     </div>
   </div>
 
-  <div class="card">
-    <div class="card-title">Tender endpoint (outgoing)</div>
+  <div id="settings-app" data-url="{% url 'tenders:api_settings_json' %}">
+    {% verbatim %}
+    <div v-cloak>
+      <div class="alert alert-success saved-notice" v-if="savedNotice">{{ savedNotice }}</div>
+      <div class="alert alert-error" v-if="error">{{ error }}</div>
 
-    <div id="settings-app" data-url="{% url 'tenders:api_settings_json' %}">
-      {% verbatim %}
-      <div v-cloak>
-        <div class="alert alert-success saved-notice" v-if="savedNotice">{{ savedNotice }}</div>
-        <div class="alert alert-error" v-if="error">{{ error }}</div>
+      <div class="card">
+        <div class="card-title">Tender endpoint (outgoing)</div>
 
-        <form novalidate @submit.prevent="submit">
-          <div class="form-row" style="margin-bottom:18px;">
-            <label>Base URL</label>
-            <input type="url" v-model.trim="form.base_url">
-            <span class="form-help">Root URL, e.g. <code>https://api.example.com</code>. Tenders are posted to <code>/api/v1/tenders</code>.</span>
-            <div class="field-error" v-if="errors.base_url"><ul><li v-for="e in errors.base_url">{{ e }}</li></ul></div>
-          </div>
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Base URL</label>
+          <input type="url" v-model.trim="form.base_url">
+          <span class="form-help">Root URL, e.g. <code>https://api.example.com</code>. Tenders are posted to <code>/api/v1/tenders</code>.</span>
+          <div class="field-error" v-if="errors.base_url"><ul><li v-for="e in errors.base_url">{{ e }}</li></ul></div>
+        </div>
 
-          <div class="form-row" style="margin-bottom:18px;">
-            <label>Auth type</label>
-            <select v-model="form.auth_type">
-              <option value="none">None</option>
-              <option value="bearer">Bearer token</option>
-              <option value="basic">Basic auth</option>
-            </select>
-            <span class="form-help">How the endpoint authenticates requests.</span>
-            <div class="field-error" v-if="errors.auth_type"><ul><li v-for="e in errors.auth_type">{{ e }}</li></ul></div>
-          </div>
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Auth type</label>
+          <select v-model="form.auth_type">
+            <option value="none">None</option>
+            <option value="bearer">Bearer token</option>
+            <option value="basic">Basic auth</option>
+          </select>
+          <span class="form-help">How the endpoint authenticates requests.</span>
+          <div class="field-error" v-if="errors.auth_type"><ul><li v-for="e in errors.auth_type">{{ e }}</li></ul></div>
+        </div>
 
-          <div class="form-row" style="margin-bottom:18px;">
-            <label>API token</label>
-            <input type="text" v-model.trim="form.api_token">
-            <span class="form-help">Token used for <strong>Bearer token</strong> auth. Ignored for other types.</span>
-            <div class="field-error" v-if="errors.api_token"><ul><li v-for="e in errors.api_token">{{ e }}</li></ul></div>
-          </div>
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>API token</label>
+          <input type="text" v-model.trim="form.api_token">
+          <span class="form-help">Token used for <strong>Bearer token</strong> auth. Ignored for other types.</span>
+          <div class="field-error" v-if="errors.api_token"><ul><li v-for="e in errors.api_token">{{ e }}</li></ul></div>
+        </div>
 
-          <div class="form-row" style="margin-bottom:18px;">
-            <label>Username</label>
-            <input type="text" v-model.trim="form.username">
-            <span class="form-help">Required only for <strong>Basic auth</strong>.</span>
-            <div class="field-error" v-if="errors.username"><ul><li v-for="e in errors.username">{{ e }}</li></ul></div>
-          </div>
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Username</label>
+          <input type="text" v-model.trim="form.username">
+          <span class="form-help">Required only for <strong>Basic auth</strong>.</span>
+          <div class="field-error" v-if="errors.username"><ul><li v-for="e in errors.username">{{ e }}</li></ul></div>
+        </div>
 
-          <div class="form-row" style="margin-bottom:18px;">
-            <label>Password</label>
-            <input type="password" v-model="form.password">
-            <span class="form-help">Required only for <strong>Basic auth</strong>.</span>
-            <div class="field-error" v-if="errors.password"><ul><li v-for="e in errors.password">{{ e }}</li></ul></div>
-          </div>
-
-          <div class="form-actions">
-            <button type="submit" class="btn btn-primary" :disabled="loading">
-              <span v-if="loading">Saving...</span>
-              <span v-else>Save settings</span>
-            </button>
-          </div>
-        </form>
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Password</label>
+          <input type="password" v-model="form.password">
+          <span class="form-help">Required only for <strong>Basic auth</strong>.</span>
+          <div class="field-error" v-if="errors.password"><ul><li v-for="e in errors.password">{{ e }}</li></ul></div>
+        </div>
       </div>
-      {% endverbatim %}
+
+      <div class="card">
+        <div class="card-title">Selcom payment gateway</div>
+        <p class="form-help" style="margin-top:-4px; margin-bottom:16px;">
+          Accepts <strong>mobile money</strong> (M&ndash;Pesa, Tigo, Airtel, Halopesa) and
+          <strong>bank transfer</strong> (CRDB, NMB and others) invoice payments.
+        </p>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label style="flex-direction:row; align-items:center; gap:8px; display:flex;">
+            <input type="checkbox" v-model="form.selcom_enabled" style="width:auto;"> Enable Selcom payments
+          </label>
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label style="flex-direction:row; align-items:center; gap:8px; display:flex;">
+            <input type="checkbox" v-model="form.selcom_sandbox" style="width:auto;"> Sandbox mode
+          </label>
+          <span class="form-help">Uses <code>https://apigwdev.selcommobile.com/v1</code>. Uncheck for production.</span>
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>API base URL (optional)</label>
+          <input type="url" v-model.trim="form.selcom_base_url" placeholder="https://apigw.selcommobile.com/v1">
+          <span class="form-help">Defaults to the sandbox/production APIGW below.</span>
+          <div class="field-error" v-if="errors.selcom_base_url"><ul><li v-for="e in errors.selcom_base_url">{{ e }}</li></ul></div>
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Client ID</label>
+          <input type="text" v-model.trim="form.selcom_client_id">
+          <div class="field-error" v-if="errors.selcom_client_id"><ul><li v-for="e in errors.selcom_client_id">{{ e }}</li></ul></div>
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Client secret</label>
+          <input type="password" v-model="form.selcom_client_secret">
+          <div class="field-error" v-if="errors.selcom_client_secret"><ul><li v-for="e in errors.selcom_client_secret">{{ e }}</li></ul></div>
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Sales channel</label>
+          <input type="text" v-model.trim="form.selcom_sales_channel" placeholder="PURCHASE">
+          <span class="form-help">Vendor / sales channel issued by Selcom.</span>
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Currency</label>
+          <input type="text" v-model.trim="form.selcom_currency" placeholder="TZS">
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Payment methods</label>
+          <input type="text" v-model.trim="form.selcom_payment_methods" placeholder="MPESA,TIGOPESA,AIRTELMONEY,HALOPESA,CRDB,NMB">
+          <span class="form-help">Comma-separated wallets and bank accounts shown on the checkout page.</span>
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Webhook secret</label>
+          <input type="password" v-model="form.selcom_webhook_secret">
+          <span class="form-help">Shared secret Selcom uses to sign payment callbacks. Empty disables signature checks.</span>
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Hosted checkout base (optional)</label>
+          <input type="url" v-model.trim="form.selcom_paylink_base" placeholder="https://apigw.selcommobile.com/v1">
+          <span class="form-help">Defaults to the API base above. Usually unchanged.</span>
+        </div>
+      </div>
+
+      <div class="form-actions" style="margin-top:8px;">
+        <button type="button" class="btn btn-primary" @click="submit" :disabled="loading">
+          <span v-if="loading">Saving...</span>
+          <span v-else>Save settings</span>
+        </button>
+      </div>
     </div>
+    {% endverbatim %}
   </div>
 
   <div class="card" style="border-color:#bfdbfe; background:#fbfdff;">
@@ -81,7 +148,7 @@
       <label>Webhook URL</label>
       <div style="display:flex; gap:8px; align-items:stretch;">
         <input id="webhook-url" type="text" readonly value="{{ webhook_url }}" style="flex:1; background:#f8fafc; color:#334155;">
-        <button type="button" class="btn btn-secondary" onclick="copyWebhookUrl()">Copy</button>
+        <button type="button" class="btn btn-secondary" onclick="copyText('webhook-url')">Copy</button>
       </div>
     </div>
 
@@ -97,12 +164,27 @@
       the order is automatically linked to that tender.
     </p>
   </div>
+
+  <div class="card" style="border-color:#bbf7d0; background:#f7fef8;">
+    <div class="card-title">Selcom payment callback</div>
+    <p style="color:#475569; font-size:14px; margin-bottom:14px;">
+      Selcom will <code>POST</code> payment results to this URL. Configure it as the <strong>callback URL</strong>
+      when creating your Selcom checkout orders. CSRF is not required.
+    </p>
+    <div class="form-row" style="margin-bottom:10px;">
+      <label>Callback URL</label>
+      <div style="display:flex; gap:8px; align-items:stretch;">
+        <input id="selcom-webhook-url" type="text" readonly value="{{ selcom_webhook_url }}" style="flex:1; background:#f8fafc; color:#334155;">
+        <button type="button" class="btn btn-secondary" onclick="copyText('selcom-webhook-url')">Copy</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
   (function () {
-    function copyWebhookUrl() {
-      var input = document.getElementById('webhook-url');
+    function copyText(id) {
+      var input = document.getElementById(id);
       input.select();
       input.setSelectionRange(0, 99999);
       var btn = event && event.target;
@@ -117,7 +199,7 @@
         setTimeout(function () { btn.textContent = old; }, 1500);
       }
     }
-    window.copyWebhookUrl = copyWebhookUrl;
+    window.copyText = copyText;
   })();
 </script>
 <script>
@@ -128,7 +210,11 @@
     Vue.createApp({
       data: function () {
         return {
-          form: { base_url: '', auth_type: 'none', api_token: '', username: '', password: '' },
+          form: { base_url: '', auth_type: 'none', api_token: '', username: '', password: '',
+            selcom_enabled: false, selcom_sandbox: true, selcom_base_url: '',
+            selcom_client_id: '', selcom_client_secret: '', selcom_sales_channel: '',
+            selcom_currency: 'TZS', selcom_payment_methods: '', selcom_webhook_secret: '',
+            selcom_paylink_base: '' },
           errors: {},
           error: '',
           savedNotice: '',
@@ -144,7 +230,17 @@
             auth_type: s.auth_type || 'none',
             api_token: s.api_token || '',
             username: s.username || '',
-            password: s.password || ''
+            password: s.password || '',
+            selcom_enabled: !!s.selcom_enabled,
+            selcom_sandbox: s.selcom_sandbox !== false,
+            selcom_base_url: s.selcom_base_url || '',
+            selcom_client_id: s.selcom_client_id || '',
+            selcom_client_secret: s.selcom_client_secret || '',
+            selcom_sales_channel: s.selcom_sales_channel || '',
+            selcom_currency: s.selcom_currency || 'TZS',
+            selcom_payment_methods: s.selcom_payment_methods || '',
+            selcom_webhook_secret: s.selcom_webhook_secret || '',
+            selcom_paylink_base: s.selcom_paylink_base || ''
           };
           if (s.base_url && s.updated_at) {
             this.savedNotice = 'API settings saved on ' + this.formatSavedDate(s.updated_at) + '.';

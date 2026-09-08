@@ -1,4 +1,5 @@
 from datetime import timedelta
+import json
 from unittest.mock import patch
 
 from django.contrib.gis.geos import Point
@@ -9,7 +10,8 @@ from django.urls import reverse
 from django.utils import timezone
 
 from tenders import views as tenders_views
-from tenders.models import ApiSetting, Order, OrderLine, Tender, Town
+from tenders import selcom
+from tenders.models import ApiSetting, Invoice, Order, OrderLine, Tender, Town
 from companies.models import Company
 from users.models import CustomUser
 
@@ -531,16 +533,18 @@ class InvoicesPageTest(TestCase):
         ids = {i['id'] for i in data['invoices']}
         self.assertEqual(ids, {inv_a.pk, inv_b.pk})
 
-    def test_pending_invoice_hidden_for_admin(self):
+    def test_pending_invoices_now_returned_with_selcom_flag(self):
         inv_a = self._order(self.user_a, self._tender(self.user_a, 'REF-A'), 7010, 'REF-A')
         inv_b = self._order(self.user_a, self._tender(self.user_a, 'REF-B'), 7011, 'REF-B')
         inv_b.status = 'paid'
         inv_b.save(update_fields=('status',))
         self.client.login(email='invoice-admin@example.com', password='pass1234')
         response = self.client.get(reverse('tenders:api_invoices'))
-        ids = [i['id'] for i in response.json()['invoices']]
+        data = response.json()
+        ids = [i['id'] for i in data['invoices']]
         self.assertIn(inv_b.pk, ids)
-        self.assertNotIn(inv_a.pk, ids)
+        self.assertIn(inv_a.pk, ids)
+        self.assertIn('selcom_enabled', data)
 
     def test_user_sees_only_own_invoices(self):
         inv_a = self._order(self.user_a, self._tender(self.user_a, 'REF-A'), 7003, 'REF-A')
@@ -707,3 +711,144 @@ class DashboardRoleTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '>+ Send tender')
         self.assertContains(response, 'data-can-tender')
+
+
+def _order_for(user, ref, order_id):
+    tender = Tender.objects.create(
+        user=user, route_loading='Nairobi', route_delivery='Mombasa',
+        customer=f'C-{ref}', cargo_type=Tender.CargoType.DRY_VAN,
+        truck_type=Tender.TruckType.TRUCK, weight=10.0, number_of_trucks=1,
+        distance_km=480, cargo_date=timezone.localdate(), cargo_reference=ref,
+    )
+    order = Order.objects.create(
+        order_id=order_id, order_name=f'ORD-{order_id}', user=user, tender=tender,
+        company_id=1, company_name='Alpha Haulage', cargo_reference=ref, state='confirmed',
+        amount_total=0, currency='TZS',
+    )
+    OrderLine.objects.create(
+        order=order, line_id=order_id, product_name='Sand', quantity=1,
+        price_unit=100, commission=0, price_subtotal=100, price_total=100, awarded=True,
+    )
+    from tenders.views import get_or_create_invoice
+    return get_or_create_invoice(order)
+
+
+class SelcomPaymentTest(TestCase):
+    def setUp(self):
+        self.admin = CustomUser.objects.create_user(
+            email='selcom-admin@example.com', password='pass1234',
+            role=CustomUser.Role.ADMINISTRATOR,
+        )
+        self.owner = CustomUser.objects.create_user(email='selcom-owner@example.com', password='pass1234')
+        self.other = CustomUser.objects.create_user(email='selcom-other@example.com', password='pass1234')
+        self.setting = ApiSetting.objects.create(
+            selcom_enabled=True, selcom_client_id='client-1', selcom_client_secret='secret-1',
+        )
+        self.invoice = _order_for(self.owner, 'SEL-1', 8001)
+
+    def _initiate(self, email='selcom-owner@example.com'):
+        self.client.login(email=email, password='pass1234')
+        return self.client.post(reverse('tenders:api_invoice_selcom_initiate', args=[self.invoice.pk]), {})
+
+    def test_initiate_requires_selcom_enabled(self):
+        self.setting.selcom_enabled = False
+        self.setting.save(update_fields=('selcom_enabled',))
+        response = self._initiate()
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()['ok'])
+        self.assertIn('not enabled', response.json()['error'])
+
+    def test_initiate_creates_checkout_order(self):
+        with patch('tenders.views.selcom.create_checkout_order', return_value={
+            'order_token': 'tok-123', 'pay_link': 'https://checkout/paylink/tok-123',
+        }) as mocked:
+            response = self._initiate()
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['pay_link'], 'https://checkout/paylink/tok-123')
+        mocked.assert_called_once()
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.selcom_order_token, 'tok-123')
+        self.assertEqual(self.invoice.selcom_pay_link, 'https://checkout/paylink/tok-123')
+        self.assertEqual(self.invoice.selcom_reference, f'{self.invoice.number}-{self.invoice.pk}')
+
+    def test_initiate_denied_for_other_user(self):
+        response = self._initiate(email='selcom-other@example.com')
+        self.assertEqual(response.status_code, 404)
+
+    def test_status_empty_until_initiated(self):
+        self.client.login(email='selcom-owner@example.com', password='pass1234')
+        url = reverse('tenders:api_invoice_selcom_status', args=[self.invoice.pk])
+        response = self.client.post(url, {})
+        data = response.json()
+        self.assertFalse(data['ok'])
+
+    def test_status_marks_invoice_paid(self):
+        self.invoice.selcom_order_token = 'tok-999'
+        self.invoice.save(update_fields=('selcom_order_token',))
+        with patch('tenders.views.selcom.get_order_status', return_value={
+            'parsed': {'status': 'SUCCESS'}, 'paid': True, 'status': 'SUCCESS',
+        }):
+            self.client.login(email='selcom-owner@example.com', password='pass1234')
+            url = reverse('tenders:api_invoice_selcom_status', args=[self.invoice.pk])
+            response = self.client.post(url, {})
+        data = response.json()
+        self.assertTrue(data['ok'])
+        self.assertTrue(data['paid'])
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, Invoice.Status.PAID)
+
+    def test_webhook_marks_paid_without_secret(self):
+        self.invoice.selcom_reference = 'REF-1'
+        self.invoice.save(update_fields=('selcom_reference',))
+        response = self.client.post(
+            reverse('tenders:webhook_selcom'),
+            data=json.dumps({'vendor_reference_id': 'REF-1', 'status': 'paid'}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['paid'])
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, Invoice.Status.PAID)
+
+    def test_webhook_rejects_bad_signature(self):
+        self.setting.selcom_webhook_secret = 's3cret'
+        self.setting.save(update_fields=('selcom_webhook_secret',))
+        self.invoice.selcom_reference = 'REF-2'
+        self.invoice.save(update_fields=('selcom_reference',))
+        response = self.client.post(
+            reverse('tenders:webhook_selcom'),
+            data=json.dumps({'vendor_reference_id': 'REF-2', 'status': 'paid'}),
+            content_type='application/json',
+            HTTP_X_SELCOM_SIGNATURE='wrong-signature',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, Invoice.Status.PENDING)
+
+    def test_webhook_accepts_valid_signature(self):
+        self.setting.selcom_webhook_secret = 's3cret'
+        self.setting.save(update_fields=('selcom_webhook_secret',))
+        self.invoice.selcom_reference = 'REF-3'
+        self.invoice.save(update_fields=('selcom_reference',))
+        body = json.dumps({'vendor_reference_id': 'REF-3', 'status': 'paid'}).encode()
+        import hmac
+        import hashlib
+        signature = hmac.new(b's3cret', body, hashlib.sha256).hexdigest()
+        response = self.client.post(
+            reverse('tenders:webhook_selcom'),
+            data=body,
+            content_type='application/json',
+            HTTP_X_SELCOM_SIGNATURE=signature,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, Invoice.Status.PAID)
+
+    def test_settings_page_shows_selcom_card(self):
+        self.client.login(email='selcom-admin@example.com', password='pass1234')
+        response = self.client.get(reverse('tenders:api_settings'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Selcom payment gateway')
+        self.assertContains(response, 'webhook/selcom')

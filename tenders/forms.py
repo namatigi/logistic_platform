@@ -27,4 +27,10 @@ class TenderForm(forms.ModelForm):
 class ApiSettingForm(forms.ModelForm):
     class Meta:
         model = ApiSetting
-        fields = ('base_url', 'auth_type', 'api_token', 'username', 'password')
+        fields = (
+            'base_url', 'auth_type', 'api_token', 'username', 'password',
+            'selcom_enabled', 'selcom_sandbox', 'selcom_base_url',
+            'selcom_client_id', 'selcom_client_secret', 'selcom_sales_channel',
+            'selcom_currency', 'selcom_payment_methods', 'selcom_webhook_secret',
+            'selcom_paylink_base',
+        )

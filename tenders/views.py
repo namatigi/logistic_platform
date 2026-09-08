@@ -23,6 +23,7 @@ from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
 from .forms import ApiSettingForm, TenderForm
 from .models import ApiSetting, Invoice, Order, OrderLine, Tender, Town, Transporter, generate_transporter_alias
+from . import selcom as selcom
 from .towns import TOWN_CHOICES
 from companies.models import Company
 from users.models import CustomUser
@@ -499,6 +500,8 @@ class ApiSettingUpdate(AdminRequiredMixin, LoginRequiredMixin, UpdateView):
         path = reverse('tenders:webhook_orders')
         context['webhook_url'] = self.request.build_absolute_uri(path)
         context['webhook_path'] = path
+        selcom_path = reverse('tenders:webhook_selcom')
+        context['selcom_webhook_url'] = self.request.build_absolute_uri(selcom_path)
         return context
 
     def form_valid(self, form):
@@ -615,6 +618,7 @@ def _order_dict(order, include_lines=False):
 
 def _setting_dict(setting, request):
     webhook_path = reverse('tenders:webhook_orders')
+    selcom_webhook_path = reverse('tenders:webhook_selcom')
     return {
         'id': setting.id,
         'base_url': setting.base_url,
@@ -629,6 +633,20 @@ def _setting_dict(setting, request):
         'tenders_path': '/api/v1/tenders',
         'confirmation_path': '/api/v1/order-confirmation',
         'partial_confirmation_path': '/api/v1/partial-order-confirmation',
+        'selcom_enabled': setting.selcom_enabled,
+        'selcom_sandbox': setting.selcom_sandbox,
+        'selcom_base_url': setting.selcom_base_url,
+        'selcom_client_id': setting.selcom_client_id,
+        'selcom_client_secret': setting.selcom_client_secret,
+        'selcom_sales_channel': setting.selcom_sales_channel,
+        'selcom_currency': setting.selcom_currency,
+        'selcom_payment_methods': setting.selcom_payment_methods,
+        'selcom_webhook_secret': setting.selcom_webhook_secret,
+        'selcom_paylink_base': setting.selcom_paylink_base,
+        'selcom_api_base': setting.selcom_api_base(),
+        'selcom_payment_methods_list': setting.selcom_methods_list(),
+        'selcom_webhook_path': selcom_webhook_path,
+        'selcom_webhook_url': request.build_absolute_uri(selcom_webhook_path),
     }
 
 
@@ -1220,6 +1238,11 @@ def _invoice_dict(invoice):
         'tender_delivery': tender.route_delivery if tender else '',
         'tender_id': tender.pk if tender else None,
         'order_user': order.user.email if order.user else '',
+        'selcom_reference': invoice.selcom_reference,
+        'selcom_order_token': invoice.selcom_order_token,
+        'selcom_pay_link': invoice.selcom_pay_link,
+        'selcom_status': invoice.selcom_status,
+        'selcom_updated_at': invoice.selcom_updated_at.isoformat() if invoice.selcom_updated_at else None,
         'lines': [
             {
                 'line_id': line.line_id,
@@ -1270,12 +1293,15 @@ def api_invoices(request):
     invoices = (
         Invoice.objects.filter(
             order__in=Order.objects.filter(order_q),
-            status=Invoice.Status.PAID,
         )
         .select_related('order__tender', 'transporter')
         .order_by('-created_at')
     )
-    return JsonResponse({'ok': True, 'invoices': [_invoice_dict(i) for i in invoices]})
+    return JsonResponse({
+        'ok': True,
+        'selcom_enabled': _shared_setting().selcom_enabled,
+        'invoices': [_invoice_dict(i) for i in invoices],
+    })
 
 
 def _external_invoice_number(parsed):
@@ -1339,3 +1365,161 @@ def api_invoice_paid(request, pk):
         'invoice': _invoice_dict(invoice),
         'submitted': payload,
     })
+
+
+# ---------------------------------------------------------------------------
+# Selcom payment gateway
+# ---------------------------------------------------------------------------
+
+def _invoice_in_scope(request, invoice):
+    if invoice is None:
+        return False
+    if request.user.role == CustomUser.Role.ADMINISTRATOR:
+        return True
+    order = invoice.order
+    if order.user_id and order.user_id == request.user.pk:
+        return True
+    if invoice.transporter_id and request.user.role == CustomUser.Role.AGENT:
+        return invoice.transporter.agents.filter(pk=request.user.pk).exists()
+    return False
+
+
+def _set_invoice_paid(invoice):
+    if invoice.status == Invoice.Status.PAID:
+        return
+    invoice.status = Invoice.Status.PAID
+    fields = ['status', 'selcom_status']
+    selcom_status = invoice.selcom_status or 'paid'
+    invoice.selcom_status = selcom_status
+    invoice.save(update_fields=fields)
+    _flush_derived_caches()
+
+
+def _selcom_reference(invoice):
+    reference = invoice.selcom_reference
+    if not reference:
+        reference = f'{invoice.number}-{invoice.pk}'
+        invoice.selcom_reference = reference
+        invoice.save(update_fields=('selcom_reference',))
+    return reference
+
+
+@login_required
+@require_POST
+def api_invoice_selcom_initiate(request, pk):
+    invoice = Invoice.objects.select_related('order__tender', 'transporter', 'order__user').filter(pk=pk).first()
+    if not _invoice_in_scope(request, invoice):
+        return JsonResponse({'ok': False, 'error': 'Invoice not found.'}, status=404)
+    if invoice.status == Invoice.Status.PAID:
+        return JsonResponse({'ok': False, 'error': 'This invoice is already paid.'})
+    setting = _shared_setting()
+    if not setting.selcom_enabled:
+        return JsonResponse({'ok': False, 'error': 'Selcom payments are not enabled. Ask the administrator to configure them in the Setting page.'})
+
+    if invoice.selcom_order_token and invoice.selcom_status not in ('created', 'pending', ''):
+        if invoice.selcom_pay_link:
+            return JsonResponse({
+                'ok': True,
+                'pay_link': invoice.selcom_pay_link,
+                'order_token': invoice.selcom_order_token,
+                'reference': invoice.selcom_reference,
+            })
+
+    reference = _selcom_reference(invoice)
+    callback_url = request.build_absolute_uri(reverse('tenders:webhook_selcom'))
+    redirect_url = request.build_absolute_uri(reverse('tenders:invoices'))
+    try:
+        result = selcom.create_checkout_order(setting, invoice, callback_url=callback_url, redirect_url=redirect_url)
+    except selcom.SelcomError as exc:
+        return JsonResponse({'ok': False, 'error': str(exc)})
+
+    invoice.selcom_order_token = result['order_token']
+    invoice.selcom_pay_link = result['pay_link']
+    invoice.selcom_status = 'created'
+    invoice.selcom_updated_at = timezone.now()
+    invoice.save(update_fields=('selcom_order_token', 'selcom_pay_link', 'selcom_status', 'selcom_updated_at'))
+    _flush_derived_caches()
+    return JsonResponse({
+        'ok': True,
+        'message': 'Selcom checkout order created.',
+        'pay_link': result['pay_link'],
+        'order_token': result['order_token'],
+        'reference': reference,
+        'invoice': _invoice_dict(invoice),
+    })
+
+
+@login_required
+@require_POST
+def api_invoice_selcom_status(request, pk):
+    invoice = Invoice.objects.select_related('order__tender', 'transporter', 'order__user').filter(pk=pk).first()
+    if not _invoice_in_scope(request, invoice):
+        return JsonResponse({'ok': False, 'error': 'Invoice not found.'}, status=404)
+    if not invoice.selcom_order_token:
+        return JsonResponse({'ok': False, 'error': 'No Selcom payment has been started for this invoice.'})
+    setting = _shared_setting()
+    if not setting.selcom_enabled:
+        return JsonResponse({'ok': False, 'error': 'Selcom payments are not enabled.'})
+    try:
+        result = selcom.get_order_status(setting, invoice.selcom_order_token)
+    except selcom.SelcomError as exc:
+        return JsonResponse({'ok': False, 'error': str(exc)})
+
+    invoice.selcom_status = result['status'] or invoice.selcom_status
+    invoice.selcom_updated_at = timezone.now()
+    if result['paid']:
+        _set_invoice_paid(invoice)
+    else:
+        invoice.save(update_fields=('selcom_status', 'selcom_updated_at'))
+    _flush_derived_caches()
+    return JsonResponse({
+        'ok': True,
+        'paid': invoice.status == Invoice.Status.PAID,
+        'status': invoice.selcom_status,
+        'invoice': _invoice_dict(invoice),
+    })
+
+
+@csrf_exempt
+def webhook_selcom(request):
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required.'}, status=405)
+    raw_body = request.body
+    try:
+        payload = json.loads(raw_body)
+    except (ValueError, TypeError):
+        return JsonResponse({'ok': False, 'error': 'Invalid JSON body.'}, status=400)
+    if not isinstance(payload, dict):
+        return JsonResponse({'ok': False, 'error': 'Invalid payload.'}, status=400)
+
+    setting = _shared_setting()
+    valid, reason = selcom.verify_callback(
+        setting,
+        raw_body,
+        header_signature=request.META.get('HTTP_X_SELCOM_SIGNATURE', ''),
+    )
+    if not valid:
+        return JsonResponse({'ok': False, 'error': 'Invalid callback signature.', 'reason': reason}, status=400)
+
+    reference = (
+        payload.get('vendor_reference_id')
+        or (payload.get('reference') or '')
+    )
+    if not reference:
+        return JsonResponse({'ok': False, 'error': 'Missing vendor_reference_id.'}, status=400)
+
+    invoice = Invoice.objects.select_related('order').filter(selcom_reference=str(reference)).first()
+    if invoice is None:
+        return JsonResponse({'ok': False, 'error': 'Invoice not found for reference.'}, status=404)
+
+    if not selcom.is_paid(payload):
+        status = selcom.current_status(payload)
+        invoice.selcom_status = status or invoice.selcom_status
+        invoice.selcom_updated_at = timezone.now()
+        invoice.save(update_fields=('selcom_status', 'selcom_updated_at'))
+        return JsonResponse({'ok': True, 'paid': False, 'status': invoice.selcom_status})
+
+    invoice.selcom_status = 'paid'
+    invoice.selcom_updated_at = timezone.now()
+    _set_invoice_paid(invoice)
+    return JsonResponse({'ok': True, 'paid': True, 'invoice': _invoice_dict(invoice)})
