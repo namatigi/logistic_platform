@@ -35,28 +35,65 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="tr in trucks" v-bind:key="tr.id">
-            <td>
-              <strong>{{ plate(tr) }}</strong>
-              <div class="cell-sub">{{ tr.model || '-' }} &middot; {{ tr.model_year || '-' }}</div>
-            </td>
-            <td>{{ tr.transporter }}</td>
-            <td>
-              <span class="badge badge-info">{{ tr.truck_type_label || 'Unspecified' }}</span>
-              <div class="cell-sub">{{ spec(tr) }}</div>
-            </td>
-            <td style="white-space:nowrap;">
-              <span class="badge" v-bind:class="statusBadge(tr)">{{ tr.tracking.status }}</span>
-              <div class="cell-sub" v-if="tr.tracking.route_text">{{ tr.tracking.route_text }}</div>
-              <div class="cell-sub" v-else>No active route</div>
-            </td>
-            <td class="th-right">
-              <div class="row-actions">
-                <a class="btn btn-primary btn-sm" v-bind:href="trackHref(tr)">Track</a>
-                <button type="button" class="btn btn-danger btn-sm" @click="removeTruck(tr)">Delete</button>
-              </div>
-            </td>
-          </tr>
+          <template v-for="tr in trucks" v-bind:key="tr.id">
+            <tr class="truck-main-row" @click="toggle(tr.id)">
+              <td>
+                <span class="row-caret" v-bind:class="{ open: expanded[tr.id] }">&#9656;</span>
+                <strong>{{ plate(tr) }}</strong>
+                <div class="cell-sub">{{ tr.model || '-' }} &middot; {{ tr.model_year || '-' }}</div>
+              </td>
+              <td>{{ tr.transporter }}</td>
+              <td>
+                <span class="badge badge-info">{{ tr.truck_type_label || 'Unspecified' }}</span>
+                <div class="cell-sub">{{ spec(tr) }}</div>
+              </td>
+              <td style="white-space:nowrap;">
+                <span class="badge" v-bind:class="statusBadge(tr)">{{ tr.tracking.status }}</span>
+                <div class="cell-sub" v-if="tr.tracking.route_text">{{ tr.tracking.route_text }}</div>
+                <div class="cell-sub" v-else>No active route</div>
+              </td>
+              <td class="th-right">
+                <div class="row-actions">
+                  <a class="btn btn-primary btn-sm" v-bind:href="trackHref(tr)" @click.stop>Track</a>
+                  <button type="button" class="btn btn-danger btn-sm" @click.stop="removeTruck(tr)">Delete</button>
+                </div>
+              </td>
+            </tr>
+            <tr class="truck-detail-row" v-if="expanded[tr.id]">
+              <td colspan="5" class="td-details">
+                <div class="detail-grid">
+                  <div class="detail-column">
+                    <div class="detail-title">Truck details</div>
+                    <div class="fleet-row"><span>Model</span><strong>{{ tr.model || '-' }}</strong></div>
+                    <div class="fleet-row"><span>Model year</span><strong>{{ tr.model_year || '-' }}</strong></div>
+                    <div class="fleet-row"><span>Truck type</span><strong>{{ tr.truck_type_label || '-' }}</strong></div>
+                    <div class="fleet-row"><span>Tonnage</span><strong>{{ valueOr(tr.tonnage_capacity, ' t') }}</strong></div>
+                    <div class="fleet-row"><span>Axles</span><strong>{{ valueOr(tr.number_of_axles) }}</strong></div>
+                    <div class="fleet-row"><span>Volume capacity</span><strong>{{ valueOr(tr.volume_capacity, ' m\u00b3') }}</strong></div>
+                    <div class="fleet-row"><span>Chassis number</span><strong style="text-align:right; word-break:break-word;">{{ tr.chassis_number || '-' }}</strong></div>
+                    <div class="fleet-row"><span>Tags</span><strong style="text-align:right; word-break:break-word;">{{ tr.tags || '-' }}</strong></div>
+                    <div class="fleet-row"><span>Registered</span><strong>{{ HY.fmtDate(tr.created_at) }}</strong></div>
+                  </div>
+                  <div class="detail-column">
+                    <div class="detail-title">Tracking</div>
+                    <template v-if="tr.tracking.active">
+                      <div class="fleet-row"><span>Status</span><strong><span class="badge" v-bind:class="statusBadge(tr)">{{ tr.tracking.status }}</span></strong></div>
+                      <div class="fleet-row"><span>Route</span><strong>{{ tr.tracking.route_text }}</strong></div>
+                      <div class="fleet-row"><span>Order</span><strong>{{ tr.tracking.order_name || ('#' + tr.tracking.order_id) }}</strong></div>
+                      <div class="fleet-row"><span>Reference</span><strong>{{ tr.tracking.cargo_reference || '-' }}</strong></div>
+                      <div class="tracker-progress" style="margin:10px 0 4px;">
+                        <div class="tracker-progress-bar" v-bind:style="{ width: pct(tr.tracking.progress) }"></div>
+                      </div>
+                      <div class="cell-sub">{{ pct(tr.tracking.progress) }} of route completed</div>
+                    </template>
+                    <div class="cell-sub" v-else style="padding-top:4px;">
+                      This truck is idle and is not assigned to any active route.
+                    </div>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </template>
         </tbody>
       </table>
     </div>
@@ -74,11 +111,23 @@
   .cell-sub { color:#64748b; font-size:12px; margin-top:3px; }
   .trucks-table td { vertical-align:middle; }
   .row-actions { display:flex; gap:8px; justify-content:flex-end; align-items:center; }
+  .truck-main-row { cursor:pointer; }
+  .row-caret { display:inline-block; color:#94a3b8; margin-right:6px; transition: transform .12s ease; }
+  .row-caret.open { transform: rotate(90deg); color:#2563eb; }
+  .truck-detail-row td { background:#f8fafc; }
+  .td-details { padding:16px 24px !important; }
+  .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:28px; }
+  .detail-title { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#64748b; font-weight:700; margin-bottom:10px; }
+  .detail-column { min-width:0; }
+  .fleet-row { display:flex; justify-content:space-between; gap:14px; font-size:14px; border-bottom:1px solid var(--border,#e2e8f0); padding:6px 0; }
+  .fleet-row span { color:#64748b; font-size:13px; flex-shrink:0; }
   @media (max-width:720px) {
     .trucks-table thead { display:none; }
     .trucks-table, .trucks-table tbody, .trucks-table tr, .trucks-table td { display:block; width:100%; }
     .trucks-table tr { padding:6px 0; border-bottom:1px solid var(--border,#e2e8f0); }
     .trucks-table td { border:none; }
+    .detail-grid { grid-template-columns:1fr; gap:16px; }
+    .td-details { padding:12px 16px !important; }
   }
 </style>
 
@@ -90,7 +139,7 @@
 
     Vue.createApp({
       data: function () {
-        return { trucks: [], loaded: false, error: '', message: '', transportersUrl: root.dataset.transportersUrl };
+        return { trucks: [], loaded: false, error: '', message: '', expanded: {}, transportersUrl: root.dataset.transportersUrl };
       },
       created: function () {
         this.load();
@@ -110,6 +159,16 @@
           if (tr.volume_capacity !== null && tr.volume_capacity !== undefined) parts.push(Number(tr.volume_capacity) + ' m\u00b3');
           if (tr.tags) parts.push(tr.tags);
           return parts.join(' &middot; ') || '-';
+        },
+        toggle: function (id) {
+          this.expanded[id] = !this.expanded[id];
+        },
+        pct: function (p) {
+          return Math.round((Number(p) || 0) * 100) + '%';
+        },
+        valueOr: function (v, suffix) {
+          if (v === null || v === undefined || v === '') return '-';
+          return Number(v) + (suffix || '');
         },
         statusBadge: function (tr) {
           var s = tr.tracking.status;
