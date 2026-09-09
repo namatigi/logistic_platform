@@ -712,6 +712,16 @@ class DashboardRoleTest(TestCase):
         self.assertContains(response, '>+ Send tender')
         self.assertContains(response, 'data-can-tender')
 
+    def test_dashboard_welcomes_user_by_full_name(self):
+        CustomUser.objects.create_user(
+            email='dash.name@example.com', password='pass1234',
+            first_name='Alice', last_name='Mangu',
+        )
+        self.client.login(email='dash.name@example.com', password='pass1234')
+        response = self.client.get(reverse('tenders:dashboard'))
+        self.assertContains(response, 'Welcome back, Alice Mangu')
+        self.assertNotContains(response, 'Welcome back, dash.name@example.com')
+
 
 class AgentTenderAccessTest(TestCase):
     def setUp(self):
@@ -737,6 +747,38 @@ class AgentTenderAccessTest(TestCase):
     def test_regular_user_can_access_new_tender_page(self):
         self.client.login(email='user.tender@example.com', password='pass1234')
         response = self.client.get(reverse('tenders:create'))
+        self.assertEqual(response.status_code, 200)
+
+
+class AdminTenderVisibilityTest(TestCase):
+    def setUp(self):
+        self.admin = CustomUser.objects.create_user(
+            email='admin.all@example.com', password='pass1234', role=CustomUser.Role.ADMINISTRATOR,
+        )
+        self.user = CustomUser.objects.create_user(email='other.owner@example.com', password='pass1234')
+        self.tender = Tender.objects.create(
+            user=self.user, route_loading='Nairobi', route_delivery='Mombasa',
+            customer='OtherC', cargo_type=Tender.CargoType.DRY_VAN,
+            truck_type=Tender.TruckType.TRUCK, weight=10.0, number_of_trucks=1,
+            distance_km=480, cargo_date=timezone.localdate(),
+        )
+
+    def test_admin_api_tender_list_shows_tenders_from_other_users(self):
+        self.client.login(email='admin.all@example.com', password='pass1234')
+        data = self.client.get(reverse('tenders:api_tender_list')).json()
+        row = next(t for t in data['tenders'] if t['id'] == self.tender.id)
+        self.assertIn('Nairobi -> Mombasa', row['route'])
+
+    def test_regular_user_api_tender_list_hides_other_users_tenders(self):
+        CustomUser.objects.create_user(email='third.owner@example.com', password='pass1234')
+        self.client.login(email='third.owner@example.com', password='pass1234')
+        data = self.client.get(reverse('tenders:api_tender_list')).json()
+        ids = [t['id'] for t in data['tenders']]
+        self.assertNotIn(self.tender.id, ids)
+
+    def test_admin_can_open_tenders_page(self):
+        self.client.login(email='admin.all@example.com', password='pass1234')
+        response = self.client.get(reverse('tenders:list'))
         self.assertEqual(response.status_code, 200)
 
 

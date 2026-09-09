@@ -388,6 +388,12 @@ class Dashboard(LoginRequiredMixin, ListView):
         return context
 
 
+def _all_tenders_for(user):
+    if getattr(user, 'role', None) == CustomUser.Role.ADMINISTRATOR:
+        return Tender.objects.all()
+    return Tender.objects.filter(user=user)
+
+
 class TenderList(AgentRedirectMixin, LoginRequiredMixin, ListView):
     model = Tender
     template_name = 'tenders/tender_list.html'
@@ -395,7 +401,7 @@ class TenderList(AgentRedirectMixin, LoginRequiredMixin, ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        return Tender.objects.filter(user=self.request.user)
+        return _all_tenders_for(self.request.user)
 
 
 class TenderCreate(TenderCreatorRequiredMixin, LoginRequiredMixin, CreateView):
@@ -763,7 +769,7 @@ def api_tender_list(request):
 
     def loader():
         per_page = 15
-        qs = Tender.objects.filter(user=request.user)
+        qs = _all_tenders_for(request.user)
         total = qs.count()
         pages = max((total + per_page - 1) // per_page, 1)
         p = min(page, pages)
