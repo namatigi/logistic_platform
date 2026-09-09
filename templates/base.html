@@ -38,6 +38,9 @@
         <li class="{% if request.resolver_match.url_name == 'agent_transporters' %}active{% endif %}">
           <a href="{% url 'users:agent_transporters' %}">My Transporters</a>
         </li>
+        <li class="{% if request.resolver_match.url_name in 'agent_trucks agent_truck_track' %}active{% endif %}">
+          <a href="{% url 'users:agent_trucks' %}">My Trucks</a>
+        </li>
       </ul>
       {% else %}
       <ul class="nav-links">

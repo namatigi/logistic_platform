@@ -1,0 +1,133 @@
+{% extends 'base.html' %}
+{% block title %}My Trucks &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">My Trucks</h1>
+      <p class="page-subtitle">All trucks from your linked transporters, with live tracking</p>
+    </div>
+    <a class="btn btn-secondary" href="{% url 'users:agent_transporters' %}">Manage transporters</a>
+  </div>
+
+  <div id="agent-trucks-app"
+       data-url="{% url 'users:api_agent_trucks' %}"
+       data-track-url="{% url 'users:agent_truck_track' 0 %}"
+       data-transporters-url="{% url 'users:agent_transporters' %}" v-cloak>
+    {% verbatim %}
+    <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
+    <div class="alert alert-warning" v-if="!error && loaded && trucks.length === 0" style="margin-bottom:16px;">
+      No trucks have been registered for your linked transporters yet.
+      Add one from the <a v-bind:href="transportersUrl">My Transporters</a> page.
+    </div>
+
+    <div class="table-wrap" v-if="trucks.length">
+      <table class="trucks-table">
+        <thead>
+          <tr>
+            <th>Truck</th>
+            <th>Transporter</th>
+            <th>Specifications</th>
+            <th>Status</th>
+            <th class="th-right">Track</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="tr in trucks" v-bind:key="tr.id">
+            <td>
+              <strong>{{ plate(tr) }}</strong>
+              <div class="cell-sub">{{ tr.model || '-' }} &middot; {{ tr.model_year || '-' }}</div>
+            </td>
+            <td>{{ tr.transporter }}</td>
+            <td>
+              <span class="badge badge-info">{{ tr.truck_type_label || 'Unspecified' }}</span>
+              <div class="cell-sub">{{ spec(tr) }}</div>
+            </td>
+            <td style="white-space:nowrap;">
+              <span class="badge" v-bind:class="statusBadge(tr)">{{ tr.tracking.status }}</span>
+              <div class="cell-sub" v-if="tr.tracking.route_text">{{ tr.tracking.route_text }}</div>
+              <div class="cell-sub" v-else>No active route</div>
+            </td>
+            <td class="th-right">
+              <a class="btn btn-primary btn-sm" v-bind:href="trackHref(tr)">Track</a>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="empty" v-if="!loaded">
+      <p style="padding:24px;">Loading trucks...</p>
+    </div>
+    {% endverbatim %}
+  </div>
+</div>
+
+<style>
+  .th-right { text-align:right; }
+  td.th-right { text-align:right; white-space:nowrap; }
+  .cell-sub { color:#64748b; font-size:12px; margin-top:3px; }
+  .trucks-table td { vertical-align:middle; }
+  @media (max-width:720px) {
+    .trucks-table thead { display:none; }
+    .trucks-table, .trucks-table tbody, .trucks-table tr, .trucks-table td { display:block; width:100%; }
+    .trucks-table tr { padding:6px 0; border-bottom:1px solid var(--border,#e2e8f0); }
+    .trucks-table td { border:none; }
+  }
+</style>
+
+<script>
+  (function () {
+    var root = document.getElementById('agent-trucks-app');
+    var api = window.HYPAX.api;
+    var HY = window.HYPAX;
+
+    Vue.createApp({
+      data: function () {
+        return { trucks: [], loaded: false, error: '', transportersUrl: root.dataset.transportersUrl };
+      },
+      created: function () {
+        this.load();
+        this.timer = setInterval(this.load.bind(this), 10000);
+      },
+      methods: {
+        withPk: function (urlPrefix, id) {
+          return String(urlPrefix).replace('/0/', '/' + id + '/');
+        },
+        plate: function (tr) {
+          return tr.license_plate || tr.model || ('Truck #' + tr.id);
+        },
+        spec: function (tr) {
+          var parts = [];
+          if (tr.tonnage_capacity !== null && tr.tonnage_capacity !== undefined) parts.push(Number(tr.tonnage_capacity) + ' t');
+          if (tr.number_of_axles !== null && tr.number_of_axles !== undefined) parts.push(tr.number_of_axles + ' axles');
+          if (tr.volume_capacity !== null && tr.volume_capacity !== undefined) parts.push(Number(tr.volume_capacity) + ' m\u00b3');
+          if (tr.tags) parts.push(tr.tags);
+          return parts.join(' &middot; ') || '-';
+        },
+        statusBadge: function (tr) {
+          var s = tr.tracking.status;
+          if (s === 'En route') return 'badge-success';
+          if (s === 'Delivered') return 'badge-info';
+          return 'badge-warning';
+        },
+        trackHref: function (tr) {
+          return this.withPk(root.dataset.trackUrl, tr.id);
+        },
+        load: async function () {
+          var self = this;
+          try {
+            var res = await api.get(root.dataset.url);
+            if (res && res.ok === false) { self.error = res.error || 'Failed to load trucks.'; return; }
+            self.trucks = (res && res.trucks) || [];
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.loaded = true;
+          }
+        }
+      }
+    }).mount('#agent-trucks-app');
+  })();
+</script>
+{% endblock %}

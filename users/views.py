@@ -11,7 +11,7 @@ from django.contrib.auth.views import LoginView
 from django.core.files.base import ContentFile
 from django.core.mail import send_mail
 from django.db.models import Count, Q, Sum
-from django.http import JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -451,6 +451,82 @@ def _truck_dict(truck):
     }
 
 
+def _truck_matches_type(truck, truck_type):
+    if not truck_type:
+        return True
+    return not truck.truck_type or truck.truck_type == truck_type
+
+
+def _agent_truck_assignments(user, now):
+    transporters = list(user.linked_transporters.all())
+    if not transporters:
+        return {}
+    towns_by_name = {t.name: t for t in Town.objects.all()}
+    resolved_routes = {}
+    assignments = {}
+    for transporter in transporters:
+        trucks = sorted(transporter.trucks.all(), key=lambda t: (t.created_at, t.pk))
+        if not trucks:
+            continue
+        per = Q()
+        if transporter.company_id:
+            per |= Q(company_id=transporter.company_id)
+        if transporter.company_name:
+            per |= Q(company_name__iexact=transporter.company_name)
+        if not per:
+            continue
+        orders = (
+            Order.objects.filter(per, lines__awarded=True)
+            .select_related('tender')
+            .distinct()
+            .order_by('created_at', 'pk')
+        )
+        busy = set()
+        for order in orders:
+            tender = order.tender
+            if tender is None:
+                continue
+            origin = towns_by_name.get(tender.route_loading)
+            dest = towns_by_name.get(tender.route_delivery)
+            if origin is None or dest is None:
+                continue
+            route_key = (origin.name, dest.name)
+            if route_key not in resolved_routes:
+                resolved_routes[route_key] = get_route(origin, dest)
+            route_points, route_m = resolved_routes[route_key]
+            route_km = route_m / 1000.0
+            if not route_km:
+                route_km = float(tender.distance_km or 0)
+            sim_duration = max((route_km / SIM_SPEED_KMH) * 3600 / SIM_ACCELERATION, 3.0)
+            route_distances = _route_arrays(route_points)
+            eligible = [t for t in trucks if _truck_matches_type(t, tender.truck_type)]
+            chosen = [t for t in eligible if t.pk not in busy][:max(tender.number_of_trucks or 1, 1)]
+            for slot, truck in enumerate(chosen):
+                busy.add(truck.pk)
+                stagger = slot * 120
+                elapsed = max(0.0, (now - tender.created_at).total_seconds() - stagger)
+                progress = min(1.0, elapsed / sim_duration)
+                lat, lng = _position_at(route_points, route_distances, progress)
+                assignments[truck.pk] = {
+                    'active': True,
+                    'order_id': order.order_id,
+                    'order_name': order.order_name or '',
+                    'cargo_reference': order.cargo_reference or '',
+                    'tender_ref': tender.cargo_reference or '',
+                    'state': order.state or '',
+                    'origin': {'name': origin.name, 'lat': origin.lat, 'lng': origin.lng},
+                    'destination': {'name': dest.name, 'lat': dest.lat, 'lng': dest.lng},
+                    'route': route_points,
+                    'distance_km': round(route_km, 1),
+                    'progress': round(progress, 4),
+                    'status': 'Delivered' if progress >= 1.0 else 'En route',
+                    'lat': lat,
+                    'lng': lng,
+                    'slot': slot + 1,
+                }
+    return assignments
+
+
 @login_required
 def api_agent_transporters(request):
     transporters = request.user.linked_transporters.all()
@@ -579,6 +655,78 @@ def api_agent_truck_models_create(request):
         drive_type=drive_type,
     )
     return JsonResponse({'ok': True, 'message': 'Model created successfully.', 'model': _truck_model_dict(model)})
+
+
+def _truck_transporter_label(transporter):
+    return transporter.company_name or transporter.alias or f'#{transporter.company_id or transporter.pk}'
+
+
+@login_required
+def agent_trucks(request):
+    if request.user.role != CustomUser.Role.AGENT:
+        return redirect('users:profile')
+    return render(request, 'users/agent_trucks.html', {'active_tab': 'agent_trucks'})
+
+
+@login_required
+def agent_truck_track(request, pk):
+    if request.user.role != CustomUser.Role.AGENT:
+        return redirect('users:profile')
+    if not Truck.objects.filter(pk=pk, transporter__agents=request.user).exists():
+        raise Http404()
+    return render(request, 'users/agent_truck_track.html', {'active_tab': 'agent_trucks'})
+
+
+@login_required
+def api_agent_trucks(request):
+    now = timezone.now()
+    assignments = _agent_truck_assignments(request.user, now)
+    trucks = (
+        Truck.objects.filter(transporter__agents=request.user)
+        .select_related('transporter', 'truck_model')
+        .order_by('-created_at')
+    )
+    out = []
+    for truck in trucks:
+        row = _truck_dict(truck)
+        transporter = truck.transporter
+        row['transporter_id'] = transporter.pk
+        row['transporter'] = _truck_transporter_label(transporter)
+        a = assignments.get(truck.pk)
+        row['tracking'] = {
+            'active': a is not None,
+            'status': a['status'] if a else 'Idle',
+            'progress': a['progress'] if a else None,
+            'order_id': a['order_id'] if a else '',
+            'order_name': a['order_name'] if a else '',
+            'cargo_reference': a['cargo_reference'] if a else '',
+            'route_text': f"{a['origin']['name']} \u2192 {a['destination']['name']}" if a else '',
+        }
+        out.append(row)
+    return JsonResponse({'ok': True, 'trucks': out, 'now': now.isoformat()})
+
+
+@login_required
+def api_agent_truck_track(request, pk):
+    truck = (
+        Truck.objects.filter(pk=pk, transporter__agents=request.user)
+        .select_related('transporter', 'truck_model')
+        .first()
+    )
+    if truck is None:
+        return JsonResponse({'ok': False, 'error': 'Truck not found.'}, status=404)
+    now = timezone.now()
+    row = _truck_dict(truck)
+    transporter = truck.transporter
+    row['transporter_id'] = transporter.pk
+    row['transporter'] = _truck_transporter_label(transporter)
+    assignment = _agent_truck_assignments(request.user, now).get(pk)
+    return JsonResponse({
+        'ok': True,
+        'now': now.isoformat(),
+        'truck': row,
+        'tracking': assignment if assignment else {'active': False, 'status': 'Idle'},
+    })
 
 
 @login_required

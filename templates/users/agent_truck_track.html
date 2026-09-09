@@ -1,0 +1,205 @@
+{% extends 'base.html' %}
+{% block title %}Track Truck &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <div class="page-header">
+    <div>
+      <h1 class="page-title" id="track-heading">Track Truck</h1>
+      <p class="page-subtitle" id="track-subtitle">Live position for a truck from your linked transporters</p>
+    </div>
+    <a class="btn btn-secondary" href="{% url 'users:agent_trucks' %}">All trucks</a>
+  </div>
+
+  <div id="agent-truck-track-app"
+       data-url="{% url 'users:api_agent_truck_track' 0 %}"
+       data-pk="{{ request.resolver_match.kwargs.pk }}" v-cloak>
+    {% verbatim %}
+    <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
+
+    <div class="tracker-layout">
+      <div class="card tracker-sidebar">
+        <div class="card-title">Truck details</div>
+        <div class="fleet-list" v-if="truck">
+          <div class="fleet-row"><span>Plate</span><strong>{{ plate(truck) }}</strong></div>
+          <div class="fleet-row"><span>Model</span><strong>{{ truck.model || '-' }}</strong></div>
+          <div class="fleet-row"><span>Model year</span><strong>{{ truck.model_year || '-' }}</strong></div>
+          <div class="fleet-row"><span>Type</span><strong>{{ truck.truck_type_label || '-' }}</strong></div>
+          <div class="fleet-row"><span>Tonnage</span><strong>{{ truck.tonnage_capacity !== null && truck.tonnage_capacity !== undefined ? (Number(truck.tonnage_capacity) + ' t') : '-' }}</strong></div>
+          <div class="fleet-row"><span>Axles</span><strong>{{ truck.number_of_axles || '-' }}</strong></div>
+          <div class="fleet-row"><span>Transporter</span><strong>{{ truck.transporter || '-' }}</strong></div>
+          <div class="fleet-row"><span>Tags</span><strong style="text-align:right; word-break:break-word;">{{ truck.tags || '-' }}</strong></div>
+        </div>
+
+        <div style="margin-top:16px;">
+          <div class="card-title">Current assignment</div>
+          <div class="alert alert-warning" v-if="loaded && !tracking.active" style="margin-bottom:0;">
+            This truck is idle and has no active route to track.
+          </div>
+          <div v-if="tracking.active && tracking.route">
+            <div class="tracker-item" style="cursor:default;">
+              <div class="tracker-item-head">
+                <strong>{{ tracking.order_name || ('#' + tracking.order_id) }}</strong>
+                <span class="badge" v-bind:class="HY.stateBadgeClass(tracking.state)">{{ tracking.state || '-' }}</span>
+              </div>
+              <div class="tracker-item-sub">{{ tracking.cargo_reference || tracking.tender_ref || 'no reference' }} &middot; truck {{ tracking.slot }}</div>
+              <div class="tracker-item-sub tracker-item-route">
+                {{ tracking.origin.name }} &rarr; {{ tracking.destination.name }}
+              </div>
+              <div class="tracker-item-sub">
+                {{ tracking.distance_km }} km &middot;
+                <span class="badge" v-bind:class="statusClass(tracking.status)">{{ tracking.status }}</span>
+              </div>
+              <div class="tracker-progress" style="margin-top:10px;">
+                <div class="tracker-progress-bar" v-bind:style="{ width: progressPct(tracking.progress) }"></div>
+              </div>
+              <div class="tracker-item-sub" style="margin-top:4px;">
+                {{ Math.round(tracking.progress * 100) }}% of route completed
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="padding:0; overflow:hidden; position:relative;">
+        <div id="truck-map" style="height: 620px; width: 100%;"></div>
+        <div class="tracker-map-hint" v-if="tracking.active && tracking.route">
+          <strong>{{ plate(truck) }}</strong> &mdash;
+          {{ tracking.origin.name }} &rarr; {{ tracking.destination.name }}
+          &middot; <span v-bind:class="statusClass(tracking.status)">{{ tracking.status }}</span>
+        </div>
+        <div class="tracker-map-hint" v-if="loaded && !tracking.active">
+          <strong>{{ plate(truck) }}</strong> &mdash; idle, no active route
+        </div>
+      </div>
+    </div>
+    {% endverbatim %}
+  </div>
+</div>
+
+<style>
+  .fleet-list { display:flex; flex-direction:column; gap:8px; margin-top:4px; }
+  .fleet-row { display:flex; justify-content:space-between; gap:12px; font-size:14px; border-bottom:1px solid var(--border,#e2e8f0); padding-bottom:6px; }
+  .fleet-row span { color:#64748b; font-size:13px; }
+</style>
+
+<script>
+  (function () {
+    var root = document.getElementById('agent-truck-track-app');
+    var api = window.HYPAX.api;
+    var HY = window.HYPAX;
+
+    var map = null;
+    var routeLine = null;
+    var originMarker = null;
+    var destMarker = null;
+    var truckMarker = null;
+    var fitted = false;
+
+    var truckIcon = L.divIcon({
+      className: 'custom-marker',
+      html: '<div style="width:22px;height:22px;border-radius:50%;background:#9333ea;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.45);"></div>',
+      iconSize: [28, 28],
+      iconAnchor: [14, 14]
+    });
+
+    function baseIcon(color) {
+      return L.divIcon({
+        className: 'custom-marker',
+        html: '<div style="width:14px;height:14px;border-radius:50%;background:' + color + ';border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35);"></div>',
+        iconSize: [20, 20],
+        iconAnchor: [10, 10]
+      });
+    }
+
+    function initMap() {
+      map = L.map('truck-map').setView([-2, 32], 5);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 18
+      }).addTo(map);
+    }
+
+    function clearRoute() {
+      if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+      if (originMarker) { map.removeLayer(originMarker); originMarker = null; }
+      if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
+    }
+
+    Vue.createApp({
+      data: function () {
+        return { truck: null, tracking: {}, loaded: false, error: '' };
+      },
+      computed: {
+        HY: function () { return HY; }
+      },
+      created: function () {
+        this.load();
+        this.timer = setInterval(this.load.bind(this), 5000);
+      },
+      methods: {
+        plate: function (t) {
+          return t.license_plate || t.model || ('Truck #' + t.id);
+        },
+        statusClass: function (s) {
+          if (s === 'En route') return 'badge-success';
+          if (s === 'Delivered') return 'badge-info';
+          return 'badge-warning';
+        },
+        progressPct: function (p) {
+          return Math.round((Number(p) || 0) * 100) + '%';
+        },
+        load: async function () {
+          var self = this;
+          try {
+            var truckId = self.truck ? self.truck.id : root.dataset.pk;
+            var url = String(root.dataset.url).replace('/0/', '/' + truckId + '/');
+            var res = await api.get(url);
+            if (res && res.ok === false) { self.error = res.error || 'Failed to load tracking.'; return; }
+            self.truck = res.truck;
+            self.tracking = res.tracking || { active: false, status: 'Idle' };
+            self.draw();
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.loaded = true;
+          }
+        },
+        draw: function () {
+          var t = this.tracking;
+          if (!map) initMap();
+          clearRoute();
+          if (t.active && t.route) {
+            if (routeLine) routeLine.setLatLngs(t.route);
+            else routeLine = L.polyline(t.route, { color: '#1d4ed8', weight: 4, opacity: 0.75 }).addTo(map);
+            routeLine.bindPopup('<b>' + t.origin.name + ' &rarr; ' + t.destination.name + '</b>');
+
+            if (originMarker) originMarker.setLatLng([t.origin.lat, t.origin.lng]);
+            else originMarker = L.marker([t.origin.lat, t.origin.lng], { icon: baseIcon('#16a34a') }).addTo(map).bindPopup('<b>' + t.origin.name + '</b>');
+
+            if (destMarker) destMarker.setLatLng([t.destination.lat, t.destination.lng]);
+            else destMarker = L.marker([t.destination.lat, t.destination.lng], { icon: baseIcon('#dc2626') }).addTo(map).bindPopup('<b>' + t.destination.name + '</b>');
+
+            if (truckMarker) truckMarker.setLatLng([t.lat, t.lng]);
+            else truckMarker = L.marker([t.lat, t.lng], { icon: truckIcon }).addTo(map).bindPopup('<b>' + this.plate(this.truck) + '</b> &middot; ' + t.status);
+
+            if (!fitted) {
+              var bounds = L.latLngBounds(t.route);
+              if (bounds.isValid()) {
+                map.fitBounds(bounds.pad(0.15));
+                fitted = true;
+              }
+            } else {
+              map.setView([t.lat, t.lng], Math.max(map.getZoom(), 8));
+            }
+          } else {
+            if (truckMarker) { map.removeLayer(truckMarker); truckMarker = null; }
+          }
+        }
+      }
+    }).mount('#agent-truck-track-app');
+  })();
+</script>
+{% endblock %}

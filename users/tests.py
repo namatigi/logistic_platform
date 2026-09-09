@@ -601,6 +601,125 @@ class AgentTransportersTest(TestCase):
         self.assertEqual(self.trans.trucks.count(), 1)
 
 
+class AgentTrucksTest(TestCase):
+    def setUp(self):
+        self.osrm_patcher = patch('tenders.views._osrm_fetch', side_effect=OSError('no network'))
+        self.addCleanup(self.osrm_patcher.stop)
+        self.osrm_patcher.start()
+        import tenders.views as tviews
+        tviews._route_cache.clear()
+        Town.objects.get_or_create(name='Nairobi', defaults={'country': 'Kenya', 'point': Point(36.8219, -1.2921, srid=4326)})
+        Town.objects.get_or_create(name='Mombasa', defaults={'country': 'Kenya', 'point': Point(39.6682, -4.0435, srid=4326)})
+        self.owner = CustomUser.objects.create_user(email='owner.f@example.com', password='pass1234')
+        self.agent = CustomUser.objects.create_user(
+            email='agent.f@example.com', password='pass1234', role=CustomUser.Role.AGENT,
+        )
+        self.other_agent = CustomUser.objects.create_user(
+            email='agent.other@example.com', password='pass1234', role=CustomUser.Role.AGENT,
+        )
+        self.trans = Transporter.objects.create(company_id=55, company_name='FastFleet', alias='FF')
+        self.other_trans = Transporter.objects.create(company_id=56, company_name='SlowFleet', alias='SF')
+        self.trans.agents.add(self.agent)
+        self.other_trans.agents.add(self.other_agent)
+        self.truck = Truck.objects.create(
+            transporter=self.trans, model='Volvo FH16', license_plate='T 100 FF',
+            truck_type='truck', model_year=2021, tonnage_capacity=22,
+        )
+        self.truck_flatbed = Truck.objects.create(
+            transporter=self.trans, model='Scania R450', license_plate='T 200 FF',
+            truck_type='flatbed', model_year=2020, tonnage_capacity=34,
+        )
+        self.other_agent_truck = Truck.objects.create(
+            transporter=self.other_trans, model='MAN TGX', license_plate='T 100 SF',
+            truck_type='truck',
+        )
+        self.tender = Tender.objects.create(
+            user=self.owner, route_loading='Nairobi', route_delivery='Mombasa',
+            customer='FastFleet', cargo_type=Tender.CargoType.DRY_VAN,
+            truck_type=Tender.TruckType.TRUCK, weight=20.0, number_of_trucks=1,
+            distance_km=480, cargo_date=timezone.localdate(), status=Tender.Status.SUCCESS,
+        )
+        self.awarded_order = Order.objects.create(
+            order_id=4401, order_name='ORD-4401', customer='FastFleet',
+            company_name='FastFleet', company_id=55, tender=self.tender,
+        )
+        OrderLine.objects.create(
+            order=self.awarded_order, line_id=1, product_name='Sand', quantity=1,
+            price_unit=100, commission=0, price_subtotal=100, price_total=100, awarded=True,
+        )
+
+    def _login(self, email='agent.f@example.com'):
+        self.client.login(email=email, password='pass1234')
+
+    def test_trucks_pages_render(self):
+        self._login()
+        self.assertEqual(self.client.get(reverse('users:agent_trucks')).status_code, 200)
+        self.assertEqual(self.client.get(reverse('users:agent_truck_track', args=[self.truck.pk])).status_code, 200)
+
+    def test_truck_track_page_404_for_foreign_truck(self):
+        self._login()
+        self.assertEqual(self.client.get(reverse('users:agent_truck_track', args=[self.other_agent_truck.pk])).status_code, 404)
+
+    def test_truck_track_page_redirects_for_non_agent(self):
+        self._login('owner.f@example.com')
+        self.assertEqual(self.client.get(reverse('users:agent_trucks')).status_code, 302)
+
+    def test_api_agent_trucks_lists_linked_with_tracking(self):
+        self._login()
+        response = self.client.get(reverse('users:api_agent_trucks'))
+        data = response.json()
+        self.assertTrue(data['ok'])
+        plates = [t['license_plate'] for t in data['trucks']]
+        self.assertEqual(plates, ['T 200 FF', 'T 100 FF'])
+        active = [t['license_plate'] for t in data['trucks'] if t['tracking']['active']]
+        self.assertEqual(active, ['T 100 FF'])
+        truck = next(t for t in data['trucks'] if t['tracking']['active'])
+        self.assertEqual(truck['tracking']['status'], 'En route')
+        self.assertEqual(truck['tracking']['route_text'], 'Nairobi \u2192 Mombasa')
+        self.assertEqual(truck['transporter'], 'FastFleet')
+        idle = next(t for t in data['trucks'] if not t['tracking']['active'])
+        self.assertEqual(idle['tracking']['status'], 'Idle')
+        self.assertEqual(idle['license_plate'], 'T 200 FF')
+
+    def test_api_agent_truck_track_position_along_route(self):
+        self._login()
+        response = self.client.get(reverse('users:api_agent_truck_track', args=[self.truck.pk]))
+        data = response.json()
+        self.assertTrue(data['ok'])
+        tracking = data['tracking']
+        self.assertTrue(tracking['active'])
+        self.assertEqual(tracking['order_id'], 4401)
+        self.assertEqual(tracking['origin']['name'], 'Nairobi')
+        self.assertEqual(tracking['destination']['name'], 'Mombasa')
+        self.assertGreaterEqual(tracking['progress'], 0.0)
+        self.assertLessEqual(tracking['progress'], 1.0)
+        self.assertIsInstance(tracking['lat'], float)
+        self.assertIsInstance(tracking['lng'], float)
+        self.assertEqual(data['truck']['transporter'], 'FastFleet')
+
+    def test_api_agent_truck_track_idle_when_no_awarded_order(self):
+        self._login()
+        response = self.client.get(reverse('users:api_agent_truck_track', args=[self.truck_flatbed.pk]))
+        data = response.json()
+        self.assertTrue(data['ok'])
+        self.assertFalse(data['tracking']['active'])
+        self.assertEqual(data['tracking']['status'], 'Idle')
+
+    def test_api_agent_truck_track_denied_for_foreign_truck(self):
+        self._login()
+        response = self.client.get(reverse('users:api_agent_truck_track', args=[self.other_agent_truck.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_api_agent_trucks_scoped_to_own_transporters(self):
+        self._login('agent.other@example.com')
+        response = self.client.get(reverse('users:api_agent_trucks'))
+        data = response.json()
+        self.assertTrue(data['ok'])
+        plates = [t['license_plate'] for t in data['trucks']]
+        self.assertEqual(plates, ['T 100 SF'])
+        self.assertEqual(data['trucks'][0]['tracking']['status'], 'Idle')
+
+
 class LoginCsrfCookieTest(TestCase):
     def test_login_page_sets_csrftoken_cookie(self):
         response = self.client.get(reverse('users:login'))
