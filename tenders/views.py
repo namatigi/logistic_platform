@@ -40,6 +40,11 @@ class AdminRequiredMixin(UserPassesTestMixin):
         return getattr(self.request.user, 'role', None) == CustomUser.Role.ADMINISTRATOR
 
 
+class TenderCreatorRequiredMixin(UserPassesTestMixin):
+    def test_func(self):
+        return getattr(self.request.user, 'role', None) != CustomUser.Role.AGENT
+
+
 def get_or_create_transporter(order):
     company_id = order.company_id
     company_name = (order.company_name or '').strip()
@@ -383,7 +388,7 @@ class TenderList(LoginRequiredMixin, ListView):
         return Tender.objects.filter(user=self.request.user)
 
 
-class TenderCreate(LoginRequiredMixin, CreateView):
+class TenderCreate(TenderCreatorRequiredMixin, LoginRequiredMixin, CreateView):
     model = Tender
     form_class = TenderForm
     template_name = 'tenders/tender_form.html'
