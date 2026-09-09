@@ -92,11 +92,12 @@
           pages: 1,
           hasNext: false,
           hasPrev: false,
-total: 0,
+          total: 0,
           createUrl: root.dataset.createUrl,
           routeUrl: root.dataset.routeUrl,
           canTender: 'canTender' in root.dataset,
-        },
+        };
+      },
       computed: {
         pageList: function () {
           var pages = this.pages, page = this.page;
