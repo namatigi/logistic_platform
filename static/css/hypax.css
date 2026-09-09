@@ -726,6 +726,46 @@ tr:hover td {
   margin-top: 18px;
 }
 
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
+  margin: 18px 0;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.btn-google {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: #fff;
+  color: #1f2937;
+  border: 1px solid var(--border);
+  font-weight: 600;
+}
+
+.btn-google:hover {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.auth-inline-links {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+  font-size: 14px;
+}
+
 /* ---------- Auth themed background ---------- */
 .auth-theme {
   position: relative;

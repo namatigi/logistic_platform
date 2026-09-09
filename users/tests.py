@@ -800,6 +800,50 @@ class LandingRedirectTest(TestCase):
         self.assertTrue(address.is_primary)
 
 
+class SocialAuthAndResetTest(TestCase):
+    def test_google_login_redirects_when_not_configured(self):
+        response = self.client.get(reverse('users:google_login'))
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse('users:login'))
+
+    def test_google_callback_rejects_bad_state(self):
+        response = self.client.get(reverse('users:google_callback'), {'state': 'bad', 'code': 'abc'})
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse('users:login'))
+
+    def test_password_reset_page_renders(self):
+        response = self.client.get(reverse('users:password_reset'))
+        self.assertEqual(response.status_code, 200)
+
+    def test_password_reset_flow_updates_password(self):
+        CustomUser.objects.create_user(email='reset.flow@example.com', password='oldpass1234')
+        response = self.client.post(reverse('users:password_reset'), {'email': 'reset.flow@example.com'})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(mail.outbox), 1)
+        from urllib.parse import urlparse
+        path = None
+        for line in mail.outbox[0].body.splitlines():
+            line = line.strip()
+            if line.startswith('http://'):
+                path = urlparse(line).path
+                break
+        self.assertIsNotNone(path)
+        confirm = self.client.get(path)
+        self.assertEqual(confirm.status_code, 302)
+        self.assertIsNotNone(confirm.url)
+        post = self.client.post(confirm.url, {
+            'new_password1': 'newpass1234',
+            'new_password2': 'newpass1234',
+        })
+        self.assertEqual(post.status_code, 302)
+        login_resp = self.client.post(
+            reverse('users:api_login'),
+            data='{"email": "reset.flow@example.com", "password": "newpass1234"}',
+            content_type='application/json',
+        )
+        self.assertTrue(login_resp.json()['ok'])
+
+
 class LoginCsrfCookieTest(TestCase):
     def test_login_page_sets_csrftoken_cookie(self):
         response = self.client.get(reverse('users:login'))

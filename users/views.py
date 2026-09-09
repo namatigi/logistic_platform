@@ -1,7 +1,9 @@
 import json
 import secrets
 from io import BytesIO
+from urllib.parse import urlencode
 
+import requests
 from PIL import Image, ImageOps
 from django.conf import settings
 from django.contrib import messages
@@ -14,6 +16,7 @@ from django.db.models import Count, Q, Sum
 from django.http import Http404, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
+from django.utils.crypto import get_random_string
 from django.views.decorators.http import require_POST
 from django.views.decorators.csrf import ensure_csrf_cookie
 
@@ -62,6 +65,82 @@ class EmailLoginView(LoginView):
 
 
 email_login = ensure_csrf_cookie(EmailLoginView.as_view())
+
+
+GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
+GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
+GOOGLE_TOKENINFO_URL = 'https://oauth2.googleapis.com/tokeninfo'
+
+
+def google_login(request):
+    client_id = getattr(settings, 'GOOGLE_CLIENT_ID', '')
+    if not client_id:
+        messages.error(request, 'Sign in with Google is not configured yet. Please use your email instead.')
+        return redirect('users:login')
+    state = get_random_string(32)
+    request.session['google_oauth_state'] = state
+    redirect_uri = request.build_absolute_uri(reverse('users:google_callback'))
+    params = {
+        'client_id': client_id,
+        'redirect_uri': redirect_uri,
+        'response_type': 'code',
+        'scope': 'openid email profile',
+        'access_type': 'online',
+        'state': state,
+        'prompt': 'select_account',
+    }
+    return redirect(GOOGLE_AUTH_URL + '?' + urlencode(params))
+
+
+def google_callback(request):
+    state = request.GET.get('state')
+    session_state = request.session.pop('google_oauth_state', None)
+    if not state or state != session_state:
+        messages.error(request, 'Google sign-in failed: the request could not be verified. Please try again.')
+        return redirect('users:login')
+    if request.GET.get('error') or not request.GET.get('code'):
+        messages.error(request, 'Google sign-in was cancelled or failed. Please try again.')
+        return redirect('users:login')
+    redirect_uri = request.build_absolute_uri(reverse('users:google_callback'))
+    data = {
+        'code': request.GET['code'],
+        'client_id': getattr(settings, 'GOOGLE_CLIENT_ID', ''),
+        'client_secret': getattr(settings, 'GOOGLE_CLIENT_SECRET', ''),
+        'redirect_uri': redirect_uri,
+        'grant_type': 'authorization_code',
+    }
+    try:
+        token = requests.post(GOOGLE_TOKEN_URL, data=data, timeout=15).json()
+    except requests.RequestException:
+        messages.error(request, 'Google sign-in failed: could not reach Google. Please try again.')
+        return redirect('users:login')
+    id_token = token.get('id_token')
+    if not id_token:
+        messages.error(request, 'Google sign-in failed. Please try again.')
+        return redirect('users:login')
+    try:
+        info = requests.get(GOOGLE_TOKENINFO_URL, params={'id_token': id_token}, timeout=15).json()
+    except requests.RequestException:
+        messages.error(request, 'Google sign-in failed: could not verify your identity. Please try again.')
+        return redirect('users:login')
+    email = (info.get('email') or '').strip().lower()
+    if not email:
+        messages.error(request, 'Google sign-in failed: your Google account has no email address.')
+        return redirect('users:login')
+    user = CustomUser.objects.filter(email__iexact=email).first()
+    if user is None:
+        user = CustomUser.objects.create_user(
+            email=email,
+            password=None,
+            first_name=(info.get('given_name') or '').strip()[:150],
+            last_name=(info.get('family_name') or '').strip()[:150],
+        )
+    if not user.is_active:
+        messages.error(request, 'This account is disabled.')
+        return redirect('users:login')
+    user.backend = 'django.contrib.auth.backends.ModelBackend'
+    login(request, user)
+    return redirect(_default_landing_url(user))
 
 
 @ensure_csrf_cookie
