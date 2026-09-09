@@ -772,6 +772,33 @@ class LandingRedirectTest(TestCase):
         self.assertTrue(data['ok'])
         self.assertEqual(data['redirect'], reverse('tenders:dashboard'))
 
+    def test_signup_saves_names_phone_and_address(self):
+        response = self.client.post(
+            reverse('users:api_signup'),
+            data=json.dumps({
+                'email': 'sign.detail@example.com',
+                'first_name': 'Alice',
+                'last_name': 'Mangu',
+                'city': 'Dar es Salaam',
+                'country': 'Tanzania',
+                'phone': '+255700000000',
+                'street': 'Samora Ave 12',
+                'password1': 'pass1234',
+                'password2': 'pass1234',
+            }),
+            content_type='application/json',
+        )
+        self.assertTrue(response.json()['ok'])
+        user = CustomUser.objects.get(email='sign.detail@example.com')
+        self.assertEqual(user.first_name, 'Alice')
+        self.assertEqual(user.last_name, 'Mangu')
+        self.assertEqual(user.profile.phone, '+255700000000')
+        address = user.addresses.first()
+        self.assertEqual(address.city, 'Dar es Salaam')
+        self.assertEqual(address.country, 'Tanzania')
+        self.assertEqual(address.street, 'Samora Ave 12')
+        self.assertTrue(address.is_primary)
+
 
 class LoginCsrfCookieTest(TestCase):
     def test_login_page_sets_csrftoken_cookie(self):

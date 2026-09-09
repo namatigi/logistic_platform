@@ -18,7 +18,7 @@
       <span>HYPAX<small>Cargo Logistic &amp; Transportation</small></span>
     </a>
     <h1 class="auth-heading">Create your account</h1>
-    <p class="auth-sub">Register with your email address</p>
+    <p class="auth-sub">Create your account</p>
 
     <div id="auth-app" data-url="{% url 'users:api_signup' %}">
       {% verbatim %}
@@ -29,6 +29,30 @@
           <div class="form-row">
             <label for="signup-email">Email address</label>
             <input id="signup-email" type="email" v-model.trim="email" autocomplete="email" required>
+          </div>
+          <div class="form-row">
+            <label for="signup-first-name">First name</label>
+            <input id="signup-first-name" type="text" v-model.trim="firstName" autocomplete="given-name">
+          </div>
+          <div class="form-row">
+            <label for="signup-last-name">Last name</label>
+            <input id="signup-last-name" type="text" v-model.trim="lastName" autocomplete="family-name">
+          </div>
+          <div class="form-row">
+            <label for="signup-city">City</label>
+            <input id="signup-city" type="text" v-model.trim="city" autocomplete="address-level2">
+          </div>
+          <div class="form-row">
+            <label for="signup-country">Country</label>
+            <input id="signup-country" type="text" v-model.trim="country" autocomplete="country-name">
+          </div>
+          <div class="form-row">
+            <label for="signup-phone">Phone number</label>
+            <input id="signup-phone" type="tel" v-model.trim="phone" autocomplete="tel">
+          </div>
+          <div class="form-row">
+            <label for="signup-street">Street</label>
+            <input id="signup-street" type="text" v-model.trim="street" autocomplete="street-address">
           </div>
           <div class="form-row">
             <label for="signup-password1">Password</label>
@@ -75,7 +99,11 @@
     var api = window.HYPAX.api;
     Vue.createApp({
       data: function () {
-        return { email: '', password1: '', password2: '', error: '', loading: false };
+        return {
+          email: '', firstName: '', lastName: '', city: '', country: '',
+          phone: '', street: '', password1: '', password2: '',
+          error: '', loading: false,
+        };
       },
       methods: {
         submit: async function () {
@@ -89,6 +117,12 @@
           try {
             var res = await api.post(root.dataset.url, {
               email: self.email,
+              first_name: self.firstName,
+              last_name: self.lastName,
+              city: self.city,
+              country: self.country,
+              phone: self.phone,
+              street: self.street,
               password1: self.password1,
               password2: self.password2
             });
