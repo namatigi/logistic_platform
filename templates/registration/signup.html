@@ -40,49 +40,58 @@
         <form novalidate @submit.prevent="submit">
           <div class="form-row">
             <label for="signup-email">Email address</label>
-            <input id="signup-email" type="email" v-model.trim="email" autocomplete="email" required>
+            <input id="signup-email" type="email" v-model.trim="email" autocomplete="email" required :class="{ 'field-invalid': fieldErrors.email }">
+            <div class="field-error" v-if="fieldErrors.email"><ul><li v-for="e in fieldErrors.email">{{ e }}</li></ul></div>
           </div>
           <div class="form-row">
             <label for="signup-first-name">First name</label>
-            <input id="signup-first-name" type="text" v-model.trim="firstName" autocomplete="given-name">
+            <input id="signup-first-name" type="text" v-model.trim="firstName" autocomplete="given-name" :class="{ 'field-invalid': fieldErrors.first_name }">
+            <div class="field-error" v-if="fieldErrors.first_name"><ul><li v-for="e in fieldErrors.first_name">{{ e }}</li></ul></div>
           </div>
           <div class="form-row">
             <label for="signup-last-name">Last name</label>
-            <input id="signup-last-name" type="text" v-model.trim="lastName" autocomplete="family-name">
+            <input id="signup-last-name" type="text" v-model.trim="lastName" autocomplete="family-name" :class="{ 'field-invalid': fieldErrors.last_name }">
+            <div class="field-error" v-if="fieldErrors.last_name"><ul><li v-for="e in fieldErrors.last_name">{{ e }}</li></ul></div>
           </div>
           <div class="form-row">
             <label for="signup-country">Country</label>
-            <input id="signup-country" list="country-list" v-model.trim="country" autocomplete="country-name" @blur="matchCountry">
+            <input id="signup-country" list="country-list" v-model.trim="country" autocomplete="country-name" @blur="matchCountry" :class="{ 'field-invalid': fieldErrors.country }">
             <datalist id="country-list">
               <option v-for="c in countryList" :key="c.c" :value="c.n">{{ c.n }}<span v-if="c.d"> (+{{ c.d }})</span></option>
             </datalist>
+            <div class="field-error" v-if="fieldErrors.country"><ul><li v-for="e in fieldErrors.country">{{ e }}</li></ul></div>
           </div>
           <div class="form-row">
             <label for="signup-city">City</label>
-            <input id="signup-city" list="city-list" v-model.trim="city" autocomplete="address-level2" @blur="matchCity">
+            <input id="signup-city" list="city-list" v-model.trim="city" autocomplete="address-level2" @blur="matchCity" :class="{ 'field-invalid': fieldErrors.city }">
             <datalist id="city-list">
               <option v-for="c in cityList" :key="c.n+c.c" :value="c.n"></option>
             </datalist>
+            <div class="field-error" v-if="fieldErrors.city"><ul><li v-for="e in fieldErrors.city">{{ e }}</li></ul></div>
           </div>
           <div class="form-row">
             <label for="signup-phone">Phone number</label>
             <div class="phone-group">
               <span class="phone-prefix" v-if="dial">+{{ dial }}</span>
-              <input id="signup-phone" type="tel" v-model.trim="phoneNumber" autocomplete="tel" :class="{ 'with-prefix': dial }">
+              <input id="signup-phone" type="tel" v-model.trim="phoneNumber" autocomplete="tel" :class="{ 'with-prefix': dial, 'field-invalid': fieldErrors.phone }">
             </div>
+            <div class="field-error" v-if="fieldErrors.phone"><ul><li v-for="e in fieldErrors.phone">{{ e }}</li></ul></div>
           </div>
           <div class="form-row">
             <label for="signup-street">Street</label>
-            <input id="signup-street" type="text" v-model.trim="street" autocomplete="street-address">
+            <input id="signup-street" type="text" v-model.trim="street" autocomplete="street-address" :class="{ 'field-invalid': fieldErrors.street }">
+            <div class="field-error" v-if="fieldErrors.street"><ul><li v-for="e in fieldErrors.street">{{ e }}</li></ul></div>
           </div>
           <div class="form-row">
             <label for="signup-password1">Password</label>
-            <input id="signup-password1" type="password" v-model="password1" autocomplete="new-password" required>
+            <input id="signup-password1" type="password" v-model="password1" autocomplete="new-password" required :class="{ 'field-invalid': fieldErrors.password1 }">
+            <div class="field-error" v-if="fieldErrors.password1"><ul><li v-for="e in fieldErrors.password1">{{ e }}</li></ul></div>
           </div>
           <div class="form-row">
             <label for="signup-password2">Confirm password</label>
-            <input id="signup-password2" type="password" v-model="password2" autocomplete="new-password" required>
+            <input id="signup-password2" type="password" v-model="password2" autocomplete="new-password" required :class="{ 'field-invalid': fieldErrors.password2 }">
             <div class="field-error" v-if="password2 && password1 !== password2"><ul><li>Passwords do not match.</li></ul></div>
+            <div class="field-error" v-if="fieldErrors.password2"><ul><li v-for="e in fieldErrors.password2">{{ e }}</li></ul></div>
           </div>
           <button type="submit" class="btn btn-primary btn-block" :disabled="loading">
             <span v-if="loading">Signing up...</span>
@@ -126,7 +135,7 @@
           email: '', firstName: '', lastName: '', city: '', country: '',
           countryIso: '', dial: '', phoneNumber: '', street: '',
           password1: '', password2: '',
-          error: '', loading: false,
+          error: '', fieldErrors: {}, loading: false,
         };
       },
       computed: {
@@ -169,6 +178,7 @@
         submit: async function () {
           var self = this;
           self.error = '';
+          self.fieldErrors = {};
           if (self.password1 !== self.password2) {
             self.error = 'Passwords do not match.';
             return;
@@ -190,6 +200,7 @@
             });
             if (res && res.ok === false) {
               self.error = res.error || 'Signup failed.';
+              if (res.errors) self.fieldErrors = res.errors || {};
               return;
             }
             window.location.href = (res && res.redirect) || '/tenders/';

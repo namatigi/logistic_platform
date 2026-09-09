@@ -544,6 +544,13 @@ a:hover {
   margin-top: 4px;
 }
 
+.form-row input.field-invalid,
+.form-row select.field-invalid,
+.form-row textarea.field-invalid {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.12);
+}
+
 .searchable-select {
   position: relative;
 }
