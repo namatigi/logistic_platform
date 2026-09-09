@@ -45,7 +45,7 @@
               </td>
               <td><span class="badge" v-bind:class="'badge-' + o.state">{{ o.state || '-' }}</span></td>
               <td><strong>{{ money(o.awarded_amount, 'TZS') }}</strong></td>
-              <td>{{ o.created_at }}</td>
+              <td>{{ fmtDate(o.created_at) }}</td>
             </tr>
           </tbody>
         </table>
@@ -74,6 +74,7 @@
       },
       methods: {
         money: function (v, c) { return HY.money(v, c); },
+        fmtDate: function (v) { return HY.fmtDate(v); },
         load: async function () {
           var self = this;
           try {
