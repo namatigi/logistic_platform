@@ -721,15 +721,18 @@ class AgentTenderAccessTest(TestCase):
         self.user = CustomUser.objects.create_user(email='user.tender@example.com', password='pass1234')
         self.client.login(email='agent.tender@example.com', password='pass1234')
 
+    def test_agent_cannot_access_tenders_list(self):
+        response = self.client.get(reverse('tenders:list'))
+        self.assertRedirects(response, reverse('users:agent_awarded'))
+
     def test_agent_cannot_access_new_tender_page(self):
         response = self.client.get(reverse('tenders:create'))
         self.assertEqual(response.status_code, 403)
 
-    def test_agent_tender_list_hides_new_tender_button(self):
+    def test_regular_user_can_access_tenders_list(self):
+        self.client.login(email='user.tender@example.com', password='pass1234')
         response = self.client.get(reverse('tenders:list'))
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, '+ New tender')
-        self.assertNotContains(response, 'data-can-tender')
 
     def test_regular_user_can_access_new_tender_page(self):
         self.client.login(email='user.tender@example.com', password='pass1234')

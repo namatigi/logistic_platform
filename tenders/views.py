@@ -45,6 +45,16 @@ class TenderCreatorRequiredMixin(UserPassesTestMixin):
         return getattr(self.request.user, 'role', None) != CustomUser.Role.AGENT
 
 
+class AgentRedirectMixin(UserPassesTestMixin):
+    def test_func(self):
+        return getattr(self.request.user, 'role', None) != CustomUser.Role.AGENT
+
+    def handle_no_permission(self):
+        if getattr(self.request.user, 'role', None) == CustomUser.Role.AGENT:
+            return redirect('users:agent_awarded')
+        return super().handle_no_permission()
+
+
 def get_or_create_transporter(order):
     company_id = order.company_id
     company_name = (order.company_name or '').strip()
@@ -378,7 +388,7 @@ class Dashboard(LoginRequiredMixin, ListView):
         return context
 
 
-class TenderList(LoginRequiredMixin, ListView):
+class TenderList(AgentRedirectMixin, LoginRequiredMixin, ListView):
     model = Tender
     template_name = 'tenders/tender_list.html'
     context_object_name = 'tenders'
