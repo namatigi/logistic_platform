@@ -707,6 +707,22 @@ def api_agent_trucks(request):
 
 
 @login_required
+@require_POST
+def api_agent_truck_delete(request, pk):
+    truck = (
+        Truck.objects.filter(pk=pk, transporter__agents=request.user)
+        .select_related('transporter')
+        .first()
+    )
+    if truck is None:
+        return JsonResponse({'ok': False, 'error': 'Truck not found.'}, status=404)
+    plate = truck.license_plate or truck.model or f'Truck #{truck.pk}'
+    plate = f'{plate} ({truck.transporter.company_name or truck.transporter.alias or "unknown transporter"})'
+    truck.delete()
+    return JsonResponse({'ok': True, 'message': f'Truck {plate} deleted.', 'id': pk})
+
+
+@login_required
 def api_agent_truck_track(request, pk):
     truck = (
         Truck.objects.filter(pk=pk, transporter__agents=request.user)

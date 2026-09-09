@@ -710,6 +710,25 @@ class AgentTrucksTest(TestCase):
         response = self.client.get(reverse('users:api_agent_truck_track', args=[self.other_agent_truck.pk]))
         self.assertEqual(response.status_code, 404)
 
+    def test_api_agent_truck_delete_linked_truck(self):
+        self._login()
+        response = self.client.post(reverse('users:api_agent_truck_delete', args=[self.truck.pk]), {})
+        data = response.json()
+        self.assertTrue(data['ok'])
+        self.assertFalse(Truck.objects.filter(pk=self.truck.pk).exists())
+
+    def test_api_agent_truck_delete_denied_for_foreign_truck(self):
+        self._login()
+        response = self.client.post(reverse('users:api_agent_truck_delete', args=[self.other_agent_truck.pk]), {})
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(Truck.objects.filter(pk=self.other_agent_truck.pk).exists())
+
+    def test_api_agent_truck_delete_requires_post(self):
+        self._login()
+        response = self.client.get(reverse('users:api_agent_truck_delete', args=[self.truck.pk]))
+        self.assertEqual(response.status_code, 405)
+        self.assertTrue(Truck.objects.filter(pk=self.truck.pk).exists())
+
     def test_api_agent_trucks_scoped_to_own_transporters(self):
         self._login('agent.other@example.com')
         response = self.client.get(reverse('users:api_agent_trucks'))

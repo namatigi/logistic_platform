@@ -28,6 +28,7 @@ urlpatterns = [
     path('api/agents/transporters/<int:pk>/trucks/', views.api_agent_transporter_trucks, name='api_agent_transporter_trucks'),
     path('api/agents/trucks/', views.api_agent_trucks, name='api_agent_trucks'),
     path('api/agents/trucks/<int:pk>/track/', views.api_agent_truck_track, name='api_agent_truck_track'),
+    path('api/agents/trucks/<int:pk>/delete/', views.api_agent_truck_delete, name='api_agent_truck_delete'),
     path('api/agents/truck-models/', views.api_agent_truck_models, name='api_agent_truck_models'),
     path('api/agents/truck-models/create/', views.api_agent_truck_models_create, name='api_agent_truck_models_create'),
     path('api/login/', views.api_login, name='api_login'),

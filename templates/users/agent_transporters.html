@@ -12,6 +12,7 @@
   <div id="agent-transporters-app"
        data-url="{% url 'users:api_agent_transporters' %}"
        data-truck-url="{% url 'users:api_agent_transporter_trucks' 0 %}"
+       data-truck-delete-url="{% url 'users:api_agent_truck_delete' 0 %}"
        data-models-url="{% url 'users:api_agent_truck_models' %}"
        data-model-create-url="{% url 'users:api_agent_truck_models_create' %}" v-cloak>
     {% verbatim %}
@@ -42,6 +43,7 @@
                 {{ detail(tr) }}
               </div>
             </div>
+            <button type="button" class="btn btn-danger btn-sm truck-del" @click="removeTruck(t, tr)">Delete</button>
           </div>
         </div>
         <div class="empty truck-empty" v-else>
@@ -306,7 +308,9 @@
 <style>
   .transporters-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(340px,1fr)); gap:18px; }
   .truck-list { display:flex; flex-direction:column; gap:10px; }
-  .truck-item { border:1px solid var(--border,#e2e8f0); border-radius:10px; padding:10px 12px; background:#f8fafc; }
+  .truck-item { border:1px solid var(--border,#e2e8f0); border-radius:10px; padding:10px 12px; background:#f8fafc;
+    display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .truck-item .btn { flex-shrink:0; }
   .truck-empty { border:1px dashed var(--border,#e2e8f0); border-radius:10px; }
   .truck-empty p { padding:14px; margin:0; color:#94a3b8; }
   .modal-overlay { position:fixed; inset:0; background:rgba(15,23,42,.55); display:flex;
@@ -551,6 +555,22 @@
             self.error = e.message;
           } finally {
             self.modelSaving = false;
+          }
+        },
+        removeTruck: async function (transporter, truck) {
+          var self = this;
+          if (!truck.id) return;
+          if (!window.confirm('Delete truck ' + self.plate(truck) + '?')) return;
+          self.error = '';
+          self.message = '';
+          try {
+            var url = self.withPk(root.dataset.truckDeleteUrl, truck.id);
+            var res = await api.post(url, {});
+            if (res && res.ok === false) { self.error = res.error || 'Could not delete the truck.'; return; }
+            transporter.trucks = transporter.trucks.filter(function (t) { return t.id !== truck.id; });
+            self.message = (res && res.message) || 'Truck deleted.';
+          } catch (e) {
+            self.error = e.message;
           }
         },
         save: async function (keepOpen) {

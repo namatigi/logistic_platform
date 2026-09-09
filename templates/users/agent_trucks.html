@@ -13,9 +13,11 @@
   <div id="agent-trucks-app"
        data-url="{% url 'users:api_agent_trucks' %}"
        data-track-url="{% url 'users:agent_truck_track' 0 %}"
+       data-delete-url="{% url 'users:api_agent_truck_delete' 0 %}"
        data-transporters-url="{% url 'users:agent_transporters' %}" v-cloak>
     {% verbatim %}
     <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
+    <div class="alert alert-success" v-if="message" style="margin-bottom:16px;">{{ message }}</div>
     <div class="alert alert-warning" v-if="!error && loaded && trucks.length === 0" style="margin-bottom:16px;">
       No trucks have been registered for your linked transporters yet.
       Add one from the <a v-bind:href="transportersUrl">My Transporters</a> page.
@@ -49,7 +51,10 @@
               <div class="cell-sub" v-else>No active route</div>
             </td>
             <td class="th-right">
-              <a class="btn btn-primary btn-sm" v-bind:href="trackHref(tr)">Track</a>
+              <div class="row-actions">
+                <a class="btn btn-primary btn-sm" v-bind:href="trackHref(tr)">Track</a>
+                <button type="button" class="btn btn-danger btn-sm" @click="removeTruck(tr)">Delete</button>
+              </div>
             </td>
           </tr>
         </tbody>
@@ -68,6 +73,7 @@
   td.th-right { text-align:right; white-space:nowrap; }
   .cell-sub { color:#64748b; font-size:12px; margin-top:3px; }
   .trucks-table td { vertical-align:middle; }
+  .row-actions { display:flex; gap:8px; justify-content:flex-end; align-items:center; }
   @media (max-width:720px) {
     .trucks-table thead { display:none; }
     .trucks-table, .trucks-table tbody, .trucks-table tr, .trucks-table td { display:block; width:100%; }
@@ -84,7 +90,7 @@
 
     Vue.createApp({
       data: function () {
-        return { trucks: [], loaded: false, error: '', transportersUrl: root.dataset.transportersUrl };
+        return { trucks: [], loaded: false, error: '', message: '', transportersUrl: root.dataset.transportersUrl };
       },
       created: function () {
         this.load();
@@ -113,6 +119,22 @@
         },
         trackHref: function (tr) {
           return this.withPk(root.dataset.trackUrl, tr.id);
+        },
+        removeTruck: async function (tr) {
+          var self = this;
+          if (!tr.id) return;
+          if (!window.confirm('Delete truck ' + self.plate(tr) + '?')) return;
+          self.error = '';
+          self.message = '';
+          try {
+            var url = self.withPk(root.dataset.deleteUrl, tr.id);
+            var res = await api.post(url, {});
+            if (res && res.ok === false) { self.error = res.error || 'Could not delete the truck.'; return; }
+            self.trucks = self.trucks.filter(function (t) { return t.id !== tr.id; });
+            self.message = (res && res.message) || 'Truck deleted.';
+          } catch (e) {
+            self.error = e.message;
+          }
         },
         load: async function () {
           var self = this;
