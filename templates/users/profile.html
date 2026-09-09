@@ -66,18 +66,15 @@
             </div>
             <div class="form-row">
               <label>Country</label>
-              <input type="text" v-model.trim="form.country">
-              <div class="field-error" v-if="errors.country"><ul><li v-for="e in errors.country">{{ e }}</li></ul></div>
+              <input type="text" readonly :placeholder="addressCountry || 'Not set'">
             </div>
             <div class="form-row">
               <label>City</label>
-              <input type="text" v-model.trim="form.city">
-              <div class="field-error" v-if="errors.city"><ul><li v-for="e in errors.city">{{ e }}</li></ul></div>
+              <input type="text" readonly :placeholder="addressCity || 'Not set'">
             </div>
             <div class="form-row">
               <label>Street</label>
-              <input type="text" v-model.trim="form.street">
-              <div class="field-error" v-if="errors.street"><ul><li v-for="e in errors.street">{{ e }}</li></ul></div>
+              <input type="text" readonly :placeholder="addressStreet || 'Not set'">
             </div>
             <div class="form-row" style="grid-column: 1 / -1;">
               <label>Bio</label>
@@ -307,7 +304,7 @@
     Vue.createApp({
       data: function () {
         return {
-          form: { first_name: '', last_name: '', email: '', phone: '', bio: '', street: '', city: '', country: '', picture: '', newPicture: null },
+          form: { first_name: '', last_name: '', email: '', phone: '', bio: '', picture: '', newPicture: null },
           errors: {},
           error: '',
           message: '',
@@ -334,7 +331,14 @@
             return ((this.form.first_name || '').charAt(0) || '') + ((this.form.last_name || '').charAt(0) || '');
           }
           return (this.form.email || '?').charAt(0).toUpperCase();
-        }
+        },
+        primaryAddress: function () {
+          var primary = this.addresses.filter(function (a) { return a.is_primary; });
+          return (primary.length ? primary[0] : this.addresses[0]) || null;
+        },
+        addressStreet: function () { return (this.primaryAddress && this.primaryAddress.street) || ''; },
+        addressCity: function () { return (this.primaryAddress && this.primaryAddress.city) || ''; },
+        addressCountry: function () { return (this.primaryAddress && this.primaryAddress.country) || ''; }
       },
       created: function () { this.load(); },
       methods: {
@@ -347,9 +351,6 @@
             this.form.last_name = p.last_name || '';
             this.form.email = p.email || '';
             this.form.phone = p.phone || '';
-            this.form.street = p.street || '';
-            this.form.city = p.city || '';
-            this.form.country = p.country || '';
             this.form.bio = p.bio || '';
             this.form.picture = p.picture || '';
             this.addresses = (res && res.addresses) || [];
@@ -385,9 +386,6 @@
             fd.append('last_name', self.form.last_name || '');
             fd.append('email', self.form.email || '');
             fd.append('phone', self.form.phone || '');
-            fd.append('street', self.form.street || '');
-            fd.append('city', self.form.city || '');
-            fd.append('country', self.form.country || '');
             fd.append('bio', self.form.bio || '');
             if (self.form.newPicture) fd.append('profile_picture', self.form.newPicture, self.form.newPicture.name);
 

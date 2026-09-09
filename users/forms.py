@@ -49,7 +49,7 @@ class ProfileForm(forms.ModelForm):
 
     class Meta:
         model = Profile
-        fields = ('bio', 'profile_picture', 'phone', 'street', 'city', 'country')
+        fields = ('bio', 'profile_picture', 'phone')
 
 
 class AddressForm(forms.ModelForm):

@@ -843,7 +843,12 @@ def profile_view(request):
     return render(request, 'users/profile.html', context)
 
 
+def _primary_address(user):
+    return user.addresses.filter(is_primary=True).first() or user.addresses.first()
+
+
 def _profile_dict(user, profile):
+    addr = _primary_address(user)
     return {
         'ok': True,
         'profile': {
@@ -852,9 +857,9 @@ def _profile_dict(user, profile):
             'last_name': user.last_name,
             'bio': profile.bio,
             'phone': profile.phone,
-            'street': profile.street,
-            'city': profile.city,
-            'country': profile.country,
+            'street': addr.street if addr else '',
+            'city': addr.city if addr else '',
+            'country': addr.country if addr else '',
             'picture': profile.profile_picture.url if profile.profile_picture else '',
         },
         'addresses': [_address_dict(a) for a in user.addresses.all()],

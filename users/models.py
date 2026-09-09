@@ -101,9 +101,6 @@ class Profile(models.Model):
     bio = models.TextField(blank=True, default='', help_text='Short personal or company bio')
     profile_picture = models.ImageField(upload_to='profiles/', null=True, blank=True)
     phone = models.CharField(max_length=50, blank=True, default='')
-    street = models.CharField(max_length=255, blank=True, default='')
-    city = models.CharField(max_length=100, blank=True, default='')
-    country = models.CharField(max_length=100, blank=True, default='')
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):

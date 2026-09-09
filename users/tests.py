@@ -56,6 +56,34 @@ class ProfileViewsTest(TestCase):
         self.assertTrue(data['ok'])
         self.assertEqual(data['profile']['email'], 'alice@example.com')
         self.assertEqual(data['addresses'], [])
+        self.assertEqual(data['profile']['street'], '')
+        self.assertEqual(data['profile']['city'], '')
+        self.assertEqual(data['profile']['country'], '')
+
+    def test_profile_location_comes_from_physical_address(self):
+        Address.objects.create(
+            user=self.user, label='Office', street='1 Market St',
+            city='Nairobi', postal_code='00100', country='Kenya', is_primary=True,
+        )
+        data = self.client.get(reverse('users:api_profile')).json()
+        self.assertEqual(data['profile']['street'], '1 Market St')
+        self.assertEqual(data['profile']['city'], 'Nairobi')
+        self.assertEqual(data['profile']['country'], 'Kenya')
+
+    def test_profile_save_keeps_address_location(self):
+        Address.objects.create(
+            user=self.user, label='Office', street='1 Market St',
+            city='Nairobi', country='Kenya', is_primary=True,
+        )
+        response = self.client.post(reverse('users:api_profile_save'), {
+            'email': 'alice@example.com', 'phone': '+1 555', 'bio': 'Updated',
+        })
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['profile']['street'], '1 Market St')
+        self.assertEqual(data['profile']['city'], 'Nairobi')
+        self.assertEqual(data['profile']['country'], 'Kenya')
 
     def test_profile_picture_is_resized(self):
         response = self.client.post(reverse('users:api_profile_save'), {
