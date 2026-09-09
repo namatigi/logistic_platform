@@ -1,4 +1,5 @@
 from io import BytesIO
+import json
 from unittest.mock import patch
 
 from PIL import Image
@@ -739,6 +740,39 @@ class AgentTrucksTest(TestCase):
         self.assertEqual(data['trucks'][0]['tracking']['status'], 'Idle')
 
 
+class LandingRedirectTest(TestCase):
+    def _post(self, email, password='pass1234'):
+        return self.client.post(
+            reverse('users:api_login'),
+            data='{"email": "%s", "password": "%s"}' % (email, password),
+            content_type='application/json',
+        ).json()
+
+    def test_agent_login_redirects_to_awarded_orders(self):
+        agent = CustomUser.objects.create_user(
+            email='landag@example.com', password='pass1234', role=CustomUser.Role.AGENT,
+        )
+        data = self._post('landag@example.com')
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['redirect'], reverse('users:agent_awarded'))
+
+    def test_regular_user_login_redirects_to_dashboard(self):
+        CustomUser.objects.create_user(email='landusr@example.com', password='pass1234')
+        data = self._post('landusr@example.com')
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['redirect'], reverse('tenders:dashboard'))
+
+    def test_signup_redirects_to_dashboard(self):
+        response = self.client.post(
+            reverse('users:api_signup'),
+            data=json.dumps({'email': 'landnew@example.com', 'password1': 'pass1234', 'password2': 'pass1234'}),
+            content_type='application/json',
+        )
+        data = response.json()
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['redirect'], reverse('tenders:dashboard'))
+
+
 class LoginCsrfCookieTest(TestCase):
     def test_login_page_sets_csrftoken_cookie(self):
         response = self.client.get(reverse('users:login'))
@@ -763,4 +797,4 @@ class LoginCsrfCookieTest(TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertTrue(data['ok'])
-        self.assertEqual(data['redirect'], '/tenders/')
+        self.assertEqual(data['redirect'], reverse('tenders:dashboard'))

@@ -31,7 +31,15 @@ from tenders.views import (
     get_route,
 )
 
+from django.urls import reverse
+
 MAX_PROFILE_SIZE = (512, 512)
+
+
+def _default_landing_url(user):
+    if getattr(user, 'role', None) == CustomUser.Role.AGENT:
+        return reverse('users:agent_awarded')
+    return reverse('tenders:dashboard')
 
 
 def _resize_profile_picture(uploaded):
@@ -49,6 +57,9 @@ class EmailLoginView(LoginView):
     template_name = 'registration/login.html'
     redirect_authenticated_user = True
 
+    def get_success_url(self):
+        return _default_landing_url(self.request.user)
+
 
 email_login = ensure_csrf_cookie(EmailLoginView.as_view())
 
@@ -56,13 +67,13 @@ email_login = ensure_csrf_cookie(EmailLoginView.as_view())
 @ensure_csrf_cookie
 def signup(request):
     if request.user.is_authenticated:
-        return redirect('tenders:dashboard')
+        return redirect(_default_landing_url(request.user))
     if request.method == 'POST':
         form = SignUpForm(request.POST)
         if form.is_valid():
             user = form.save()
             login(request, user)
-            return redirect('tenders:dashboard')
+            return redirect(_default_landing_url(user))
     else:
         form = SignUpForm()
     return render(request, 'registration/signup.html', {'form': form})
@@ -874,7 +885,7 @@ def api_address_delete(request, pk):
 @require_POST
 def api_login(request):
     if request.user.is_authenticated:
-        return JsonResponse({'ok': True, 'redirect': '/tenders/'})
+        return JsonResponse({'ok': True, 'redirect': _default_landing_url(request.user)})
     data = _json_body(request)
     user = authenticate(
         request,
@@ -884,13 +895,13 @@ def api_login(request):
     if user is None:
         return JsonResponse({'ok': False, 'error': 'Invalid email or password.'})
     login(request, user)
-    return JsonResponse({'ok': True, 'redirect': '/tenders/'})
+    return JsonResponse({'ok': True, 'redirect': _default_landing_url(user)})
 
 
 @require_POST
 def api_signup(request):
     if request.user.is_authenticated:
-        return JsonResponse({'ok': True, 'redirect': '/tenders/'})
+        return JsonResponse({'ok': True, 'redirect': _default_landing_url(request.user)})
     data = _json_body(request)
     form = SignUpForm(data)
     if not form.is_valid():
@@ -901,4 +912,4 @@ def api_signup(request):
         })
     user = form.save()
     login(request, user)
-    return JsonResponse({'ok': True, 'redirect': '/tenders/'})
+    return JsonResponse({'ok': True, 'redirect': _default_landing_url(user)})
