@@ -1,7 +1,11 @@
 {% extends 'base.html' %}
 {% block title %}Sign Up &middot; HYPAX{% endblock %}
 {% block content %}
-<div class="auth-wrap">
+<div class="auth-theme" id="auth-theme" style="overflow-y:auto;">
+  <div class="auth-themed-bg" aria-hidden="true">
+    <div class="bg-depot-label">Inland Container Depot</div>
+  </div>
+
   <div class="auth-card">
     <a href="{% url 'users:signup' %}" class="auth-brand" style="text-decoration:none; color:inherit;">
       <span class="brand-mark" aria-hidden="true">
@@ -49,6 +53,22 @@
     </p>
   </div>
 </div>
+<script>
+  (function () {
+    var theme = document.getElementById('auth-theme');
+    if (theme && !theme.dataset.themeSet) {
+      var h = new Date().getHours();
+      if (h >= 6 && h < 18) {
+        theme.classList.add('theme-day');
+      } else if (h >= 18 && h < 22) {
+        theme.classList.add('theme-earlynight');
+      } else {
+        theme.classList.add('theme-midnight');
+      }
+      theme.dataset.themeSet = '1';
+    }
+  })();
+</script>
 <script>
   (function () {
     var root = document.getElementById('auth-app');
