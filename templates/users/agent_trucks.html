@@ -35,32 +35,35 @@
           </tr>
         </thead>
         <tbody>
-          <template v-for="tr in trucks" v-bind:key="tr.id">
-            <tr class="truck-main-row" @click="toggle(tr.id)">
-              <td>
-                <span class="row-caret" v-bind:class="{ open: expanded[tr.id] }">&#9656;</span>
-                <strong>{{ plate(tr) }}</strong>
-                <div class="cell-sub">{{ tr.model || '-' }} &middot; {{ tr.model_year || '-' }}</div>
-              </td>
-              <td>{{ tr.transporter }}</td>
-              <td>
-                <span class="badge badge-info">{{ tr.truck_type_label || 'Unspecified' }}</span>
-                <div class="cell-sub">{{ spec(tr) }}</div>
-              </td>
-              <td style="white-space:nowrap;">
-                <span class="badge" v-bind:class="statusBadge(tr)">{{ tr.tracking.status }}</span>
-                <div class="cell-sub" v-if="tr.tracking.route_text">{{ tr.tracking.route_text }}</div>
-                <div class="cell-sub" v-else>No active route</div>
-              </td>
-              <td class="th-right">
-                <div class="row-actions">
-                  <a class="btn btn-primary btn-sm" v-bind:href="trackHref(tr)" @click.stop>Track</a>
-                  <button type="button" class="btn btn-danger btn-sm" @click.stop="removeTruck(tr)">Delete</button>
+          <tr class="truck-main-row" v-for="tr in trucks" v-bind:key="tr.id" @click="toggle(tr.id)">
+            <td colspan="5" class="td-main">
+              <div class="truck-row-header">
+                <div class="hcol">
+                  <span class="row-caret" v-bind:class="{ open: expanded[tr.id] }">&#9656;</span>
+                  <div class="hcol-inner">
+                    <strong>{{ plate(tr) }}</strong>
+                    <div class="cell-sub">{{ tr.model || '-' }} &middot; {{ tr.model_year || '-' }}</div>
+                  </div>
                 </div>
-              </td>
-            </tr>
-            <tr class="truck-detail-row" v-if="expanded[tr.id]">
-              <td colspan="5" class="td-details">
+                <div class="hcol">{{ tr.transporter }}</div>
+                <div class="hcol">
+                  <span class="badge badge-info">{{ tr.truck_type_label || 'Unspecified' }}</span>
+                  <div class="cell-sub">{{ spec(tr) }}</div>
+                </div>
+                <div class="hcol">
+                  <span class="badge" v-bind:class="statusBadge(tr)">{{ tr.tracking.status }}</span>
+                  <div class="cell-sub" v-if="tr.tracking.route_text">{{ tr.tracking.route_text }}</div>
+                  <div class="cell-sub" v-else>No active route</div>
+                </div>
+                <div class="hcol hcol-actions">
+                  <div class="row-actions">
+                    <a class="btn btn-primary btn-sm" v-bind:href="trackHref(tr)" @click.stop>Track</a>
+                    <button type="button" class="btn btn-danger btn-sm" @click.stop="removeTruck(tr)">Delete</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="truck-row-details" v-if="expanded[tr.id]">
                 <div class="detail-grid">
                   <div class="detail-column">
                     <div class="detail-title">Truck details</div>
@@ -91,9 +94,9 @@
                     </div>
                   </div>
                 </div>
-              </td>
-            </tr>
-          </template>
+              </div>
+            </td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -109,13 +112,16 @@
   .th-right { text-align:right; }
   td.th-right { text-align:right; white-space:nowrap; }
   .cell-sub { color:#64748b; font-size:12px; margin-top:3px; }
-  .trucks-table td { vertical-align:middle; }
-  .row-actions { display:flex; gap:8px; justify-content:flex-end; align-items:center; }
   .truck-main-row { cursor:pointer; }
-  .row-caret { display:inline-block; color:#94a3b8; margin-right:6px; transition: transform .12s ease; }
+  .td-main { padding:12px 16px !important; }
+  .truck-row-header { display:grid; grid-template-columns:1.3fr .8fr 1.1fr .95fr auto; gap:12px; align-items:center; }
+  .hcol { display:flex; flex-direction:column; min-width:0; }
+  .hcol-inner { min-width:0; }
+  .row-caret { display:inline-block; color:#94a3b8; margin-right:8px; transition: transform .12s ease; vertical-align:top; }
   .row-caret.open { transform: rotate(90deg); color:#2563eb; }
-  .truck-detail-row td { background:#f8fafc; }
-  .td-details { padding:16px 24px !important; }
+  .hcol-actions { justify-content:flex-end; }
+  .row-actions { display:flex; gap:8px; justify-content:flex-end; align-items:center; }
+  .truck-row-details { margin-top:14px; padding-top:14px; border-top:1px solid var(--border,#e2e8f0); }
   .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:28px; }
   .detail-title { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#64748b; font-weight:700; margin-bottom:10px; }
   .detail-column { min-width:0; }
@@ -123,11 +129,9 @@
   .fleet-row span { color:#64748b; font-size:13px; flex-shrink:0; }
   @media (max-width:720px) {
     .trucks-table thead { display:none; }
-    .trucks-table, .trucks-table tbody, .trucks-table tr, .trucks-table td { display:block; width:100%; }
-    .trucks-table tr { padding:6px 0; border-bottom:1px solid var(--border,#e2e8f0); }
-    .trucks-table td { border:none; }
+    .truck-row-header { grid-template-columns:1fr; gap:6px; }
+    .td-main { padding:12px 16px !important; }
     .detail-grid { grid-template-columns:1fr; gap:16px; }
-    .td-details { padding:12px 16px !important; }
   }
 </style>
 
