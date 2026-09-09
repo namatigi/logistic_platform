@@ -975,13 +975,18 @@ def api_login(request):
     if request.user.is_authenticated:
         return JsonResponse({'ok': True, 'redirect': _default_landing_url(request.user)})
     data = _json_body(request)
+    identifier = (data.get('identifier') or data.get('email') or '').strip()
+    password = data.get('password') or ''
+    if not identifier or not password:
+        return JsonResponse({'ok': False, 'error': 'Please enter your email/phone and password.'})
     user = authenticate(
         request,
-        email=data.get('email'),
-        password=data.get('password'),
+        email=identifier,
+        phone=identifier,
+        password=password,
     )
     if user is None:
-        return JsonResponse({'ok': False, 'error': 'Invalid email or password.'})
+        return JsonResponse({'ok': False, 'error': 'Invalid email/phone or password.'})
     login(request, user)
     return JsonResponse({'ok': True, 'redirect': _default_landing_url(user)})
 

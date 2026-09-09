@@ -155,6 +155,10 @@ CACHES = _configure_caches()
 
 AUTH_USER_MODEL = 'users.CustomUser'
 
+AUTHENTICATION_BACKENDS = [
+    'users.backends.EmailOrPhoneBackend',
+]
+
 LOGIN_URL = 'users:login'
 LOGIN_REDIRECT_URL = 'tenders:dashboard'
 LOGOUT_REDIRECT_URL = 'users:login'
