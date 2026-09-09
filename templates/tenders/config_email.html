@@ -21,45 +21,115 @@
 
     <form method="post" novalidate>
       {% csrf_token %}
+      <input type="hidden" name="section" value="incoming">
 
       <div class="form-row" style="margin-bottom:18px;">
         <label>IMAP host</label>
-        <input type="text" name="email_host" value="{{ form.email_host.value|default_if_none:'imap.gmail.com' }}">
+        <input type="text" name="email_host" value="{{ incoming_form.email_host.value|default_if_none:'imap.gmail.com' }}">
         <span class="form-help">Google/Gmail IMAP is <code>imap.gmail.com</code>.</span>
-        {% if form.email_host.errors %}<div class="field-error"><ul><li>{{ form.email_host.errors.0 }}</li></ul></div>{% endif %}
+        {% if incoming_form.email_host.errors %}<div class="field-error"><ul><li>{{ incoming_form.email_host.errors.0 }}</li></ul></div>{% endif %}
       </div>
 
       <div class="form-row" style="margin-bottom:18px;">
         <label>Port</label>
-        <input type="number" name="email_port" value="{{ form.email_port.value|default_if_none:'993' }}">
+        <input type="number" name="email_port" value="{{ incoming_form.email_port.value|default_if_none:'993' }}">
         <span class="form-help">993 for IMAP over SSL/TLS (Gmail default).</span>
-        {% if form.email_port.errors %}<div class="field-error"><ul><li>{{ form.email_port.errors.0 }}</li></ul></div>{% endif %}
+        {% if incoming_form.email_port.errors %}<div class="field-error"><ul><li>{{ incoming_form.email_port.errors.0 }}</li></ul></div>{% endif %}
       </div>
 
       <div class="form-row" style="margin-bottom:18px;">
         <label style="flex-direction:row; align-items:center; gap:8px; display:flex;">
           <input type="checkbox" name="email_use_ssl" style="width:auto;"
-            {% if form.email_use_ssl.value %}checked{% endif %}> Use SSL/TLS
+            {% if incoming_form.email_use_ssl.value %}checked{% endif %}> Use SSL/TLS
         </label>
         <span class="form-help">Leave checked for Gmail IMAP.</span>
       </div>
 
       <div class="form-row" style="margin-bottom:18px;">
         <label>Email address</label>
-        <input type="email" name="email_username" value="{{ form.email_username.value|default_if_none:'' }}">
+        <input type="email" name="email_username" value="{{ incoming_form.email_username.value|default_if_none:'' }}">
         <span class="form-help">The mailbox HYPAX watches for incoming order emails, e.g. <code>orders@yourcompany.com</code>.</span>
-        {% if form.email_username.errors %}<div class="field-error"><ul><li>{{ form.email_username.errors.0 }}</li></ul></div>{% endif %}
+        {% if incoming_form.email_username.errors %}<div class="field-error"><ul><li>{{ incoming_form.email_username.errors.0 }}</li></ul></div>{% endif %}
       </div>
 
       <div class="form-row" style="margin-bottom:18px;">
         <label>Password / app password</label>
-        <input type="password" name="email_password" value="{{ form.email_password.value|default_if_none:'' }}">
+        <input type="password" name="email_password" value="{{ incoming_form.email_password.value|default_if_none:'' }}">
         <span class="form-help">Use a <strong>Gmail app password</strong>, not your regular Gmail password.</span>
-        {% if form.email_password.errors %}<div class="field-error"><ul><li>{{ form.email_password.errors.0 }}</li></ul></div>{% endif %}
+        {% if incoming_form.email_password.errors %}<div class="field-error"><ul><li>{{ incoming_form.email_password.errors.0 }}</li></ul></div>{% endif %}
       </div>
 
       <div class="form-actions" style="margin-top:8px;">
-        <button type="submit" class="btn btn-primary">Save configuration</button>
+        <button type="submit" class="btn btn-primary">Save incoming server</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Outgoing email server</div>
+    <p class="form-help" style="margin-top:-4px; margin-bottom:16px;">
+      HYPAX sends system emails through this <strong>SMTP</strong> server. For <strong>Google / Gmail</strong>
+      use the SMTP relay at <code>smtp.gmail.com</code> with port <code>587</code> and STARTTLS, plus a Gmail app password.
+      Leave the host empty to keep sending to the console (development).
+    </p>
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+      <input type="hidden" name="section" value="outgoing">
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>SMTP host</label>
+        <input type="text" name="smtp_host" value="{{ outgoing_form.smtp_host.value|default_if_none:'smtp.gmail.com' }}">
+        <span class="form-help">Google/Gmail SMTP is <code>smtp.gmail.com</code>.</span>
+        {% if outgoing_form.smtp_host.errors %}<div class="field-error"><ul><li>{{ outgoing_form.smtp_host.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Port</label>
+        <input type="number" name="smtp_port" value="{{ outgoing_form.smtp_port.value|default_if_none:'587' }}">
+        <span class="form-help">587 with STARTTLS (Gmail default) or 465 with SSL.</span>
+        {% if outgoing_form.smtp_port.errors %}<div class="field-error"><ul><li>{{ outgoing_form.smtp_port.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label style="flex-direction:row; align-items:center; gap:8px; display:flex;">
+          <input type="checkbox" name="smtp_use_tls" style="width:auto;"
+            {% if outgoing_form.smtp_use_tls.value %}checked{% endif %}> Use STARTTLS
+        </label>
+        <span class="form-help">Leave checked for Gmail SMTP on port 587.</span>
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label style="flex-direction:row; align-items:center; gap:8px; display:flex;">
+          <input type="checkbox" name="smtp_use_ssl" style="width:auto;"
+            {% if outgoing_form.smtp_use_ssl.value %}checked{% endif %}> Use SSL
+        </label>
+        <span class="form-help">Use instead of STARTTLS when connecting on port 465.</span>
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Username</label>
+        <input type="text" name="smtp_username" value="{{ outgoing_form.smtp_username.value|default_if_none:'' }}">
+        <span class="form-help">The mailbox used as the connection identity, e.g. <code>no-reply@yourcompany.com</code>.</span>
+        {% if outgoing_form.smtp_username.errors %}<div class="field-error"><ul><li>{{ outgoing_form.smtp_username.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Password / app password</label>
+        <input type="password" name="smtp_password" value="{{ outgoing_form.smtp_password.value|default_if_none:'' }}">
+        <span class="form-help">Use a <strong>Gmail app password</strong>, not your regular Gmail password.</span>
+        {% if outgoing_form.smtp_password.errors %}<div class="field-error"><ul><li>{{ outgoing_form.smtp_password.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>From address</label>
+        <input type="email" name="email_from" value="{{ outgoing_form.email_from.value|default_if_none:'' }}">
+        <span class="form-help">Shown as the sender of HYPAX emails. Falls back to the platform default when empty.</span>
+        {% if outgoing_form.email_from.errors %}<div class="field-error"><ul><li>{{ outgoing_form.email_from.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-actions" style="margin-top:8px;">
+        <button type="submit" class="btn btn-primary">Save outgoing server</button>
       </div>
     </form>
   </div>

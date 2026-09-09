@@ -22,7 +22,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 
 from .forms import AddressForm, ProfileForm, SignUpForm
 from .models import Address, CustomUser, Profile
-from tenders.models import Invoice, Order, OrderLine, Tender, Town, Transporter, Truck, TruckModel
+from tenders.models import ApiSetting, Invoice, Order, OrderLine, Tender, Town, Transporter, Truck, TruckModel
 from tenders.views import (
     SIM_ACCELERATION,
     SIM_SPEED_KMH,
@@ -274,7 +274,8 @@ def _send_agent_credentials(email, password):
         'You can sign in at the HYPAX login page with these credentials.'
     )
     try:
-        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+        from_email = ApiSetting.get().email_from or settings.DEFAULT_FROM_EMAIL
+        send_mail(subject, message, from_email, [email], fail_silently=False)
     except Exception:
         pass
 

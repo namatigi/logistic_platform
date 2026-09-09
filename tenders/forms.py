@@ -53,7 +53,7 @@ class SelcomConfigForm(forms.ModelForm):
         )
 
 
-class EmailConfigForm(forms.ModelForm):
+class IncomingEmailConfigForm(forms.ModelForm):
     class Meta:
         model = ApiSetting
         fields = (
@@ -63,4 +63,19 @@ class EmailConfigForm(forms.ModelForm):
         widgets = {
             'email_port': forms.NumberInput(),
             'email_password': forms.PasswordInput(render_value=True),
+        }
+
+
+class OutgoingEmailConfigForm(forms.ModelForm):
+    class Meta:
+        model = ApiSetting
+        fields = (
+            'smtp_host', 'smtp_port', 'smtp_use_tls', 'smtp_use_ssl',
+            'smtp_username', 'smtp_password', 'email_from',
+        )
+        widgets = {
+            'smtp_port': forms.NumberInput(),
+            'smtp_use_tls': forms.CheckboxInput(),
+            'smtp_use_ssl': forms.CheckboxInput(),
+            'smtp_password': forms.PasswordInput(render_value=True),
         }

@@ -139,6 +139,13 @@ class ApiSetting(models.Model):
     email_use_ssl = models.BooleanField(default=True)
     email_username = models.CharField(max_length=255, blank=True)
     email_password = models.CharField(max_length=255, blank=True)
+    smtp_host = models.CharField(max_length=255, blank=True, default='')
+    smtp_port = models.IntegerField(default=587)
+    smtp_use_tls = models.BooleanField(default=True)
+    smtp_use_ssl = models.BooleanField(default=False)
+    smtp_username = models.CharField(max_length=255, blank=True)
+    smtp_password = models.CharField(max_length=255, blank=True)
+    email_from = models.CharField(max_length=255, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     SELCOM_SANDBOX_BASE = 'https://apigwdev.selcommobile.com/v1'

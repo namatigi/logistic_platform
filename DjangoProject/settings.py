@@ -280,5 +280,5 @@ GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
 
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+EMAIL_BACKEND = 'DjangoProject.mail_backend.ApiSettingEmailBackend'
 DEFAULT_FROM_EMAIL = 'HYPAX <no-reply@hypax.local>'

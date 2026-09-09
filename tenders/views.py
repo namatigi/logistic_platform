@@ -21,7 +21,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
-from .forms import ApiSettingForm, EmailConfigForm, OdooConfigForm, SelcomConfigForm, TenderForm
+from .forms import ApiSettingForm, IncomingEmailConfigForm, OdooConfigForm, OutgoingEmailConfigForm, SelcomConfigForm, TenderForm
 from .models import ApiSetting, Invoice, Order, OrderLine, Tender, Town, Transporter, generate_transporter_alias
 from . import selcom as selcom
 from .towns import TOWN_CHOICES
@@ -595,16 +595,23 @@ def config_selcom(request):
 def config_email(request):
     setting = _shared_setting()
     if request.method == 'POST':
-        form = EmailConfigForm(request.POST, instance=setting)
+        section = request.POST.get('section', 'incoming') == 'outgoing'
+        incoming_form = IncomingEmailConfigForm(
+            request.POST if not section else None, instance=setting)
+        outgoing_form = OutgoingEmailConfigForm(
+            request.POST if section else None, instance=setting)
+        form = outgoing_form if section else incoming_form
         if form.is_valid():
             form.save()
             _flush_derived_caches()
             messages.success(request, 'Email configuration saved.')
             return redirect('tenders:config_email')
     else:
-        form = EmailConfigForm(instance=setting)
+        incoming_form = IncomingEmailConfigForm(instance=setting)
+        outgoing_form = OutgoingEmailConfigForm(instance=setting)
     context = _config_context(request, 'email')
-    context['form'] = form
+    context['incoming_form'] = incoming_form
+    context['outgoing_form'] = outgoing_form
     return render(request, 'tenders/config_email.html', context)
 
 

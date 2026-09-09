@@ -3,12 +3,14 @@ import json
 from unittest.mock import patch
 
 from django.contrib.gis.geos import Point
+from django.core.mail.backends.console import EmailBackend as ConsoleBackend
 from django.db import connection
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
+from DjangoProject.mail_backend import ApiSettingEmailBackend
 from tenders import views as tenders_views
 from tenders import selcom
 from tenders.models import ApiSetting, Invoice, Order, OrderLine, Tender, Town
@@ -982,10 +984,13 @@ class AdminConfigurationTest(TestCase):
         response = self.client.get(reverse('tenders:config_email'))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Incoming email server')
+        self.assertContains(response, 'Outgoing email server')
         self.assertContains(response, 'imap.gmail.com')
+        self.assertContains(response, 'smtp.gmail.com')
         response = self.client.post(
             reverse('tenders:config_email'),
             {
+                'section': 'incoming',
                 'email_host': 'imap.gmail.com', 'email_port': '993', 'email_use_ssl': 'on',
                 'email_username': 'orders@example.com', 'email_password': 'app-password',
             },
@@ -997,6 +1002,45 @@ class AdminConfigurationTest(TestCase):
         self.assertTrue(self.setting.email_use_ssl)
         self.assertEqual(self.setting.email_username, 'orders@example.com')
         self.assertEqual(self.setting.email_password, 'app-password')
+
+    def test_email_outgoing_section_saves_smtp(self):
+        self.client.login(email='admin@example.com', password='pass1234')
+        response = self.client.post(
+            reverse('tenders:config_email'),
+            {
+                'section': 'outgoing',
+                'smtp_host': 'smtp.gmail.com', 'smtp_port': '587', 'smtp_use_tls': 'on',
+                'smtp_username': 'no-reply@example.com', 'smtp_password': 'smtp-password',
+                'email_from': 'HYPAX <no-reply@example.com>',
+            },
+        )
+        self.assertRedirects(response, reverse('tenders:config_email'))
+        self.setting.refresh_from_db()
+        self.assertEqual(self.setting.smtp_host, 'smtp.gmail.com')
+        self.assertEqual(self.setting.smtp_port, 587)
+        self.assertTrue(self.setting.smtp_use_tls)
+        self.assertFalse(self.setting.smtp_use_ssl)
+        self.assertEqual(self.setting.smtp_username, 'no-reply@example.com')
+        self.assertEqual(self.setting.smtp_password, 'smtp-password')
+        self.assertEqual(self.setting.email_from, 'HYPAX <no-reply@example.com>')
+
+    def test_mail_backend_falls_back_to_console_without_smtp(self):
+        backend = ApiSettingEmailBackend(fail_silently=True)
+        self.assertIsInstance(backend._get_backend(), ConsoleBackend)
+        backend.close()
+
+    def test_mail_backend_uses_smtp_when_configured(self):
+        self.setting.smtp_host = 'smtp.gmail.com'
+        self.setting.smtp_port = 587
+        self.setting.save(update_fields=('smtp_host', 'smtp_port'))
+        with patch('DjangoProject.mail_backend.SMTPBackend') as smtp:
+            backend = ApiSettingEmailBackend(fail_silently=True)
+            backend._get_backend()
+            smtp.assert_called_once_with(
+                host='smtp.gmail.com', port=587, username='', password='',
+                use_tls=True, use_ssl=False, fail_silently=True,
+            )
+        backend.close()
 
     def test_config_tabs_have_active_item(self):
         self.client.login(email='admin@example.com', password='pass1234')
