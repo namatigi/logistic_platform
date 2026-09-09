@@ -21,14 +21,25 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
-from .forms import ApiSettingForm, TenderForm
+from .forms import ApiSettingForm, EmailConfigForm, OdooConfigForm, SelcomConfigForm, TenderForm
 from .models import ApiSetting, Invoice, Order, OrderLine, Tender, Town, Transporter, generate_transporter_alias
 from . import selcom as selcom
 from .towns import TOWN_CHOICES
 from companies.models import Company
 from users.models import CustomUser
 
+import functools
+
 logger = logging.getLogger(__name__)
+
+
+def _admin_required(view):
+    @functools.wraps(view)
+    def wrapper(request, *args, **kwargs):
+        if getattr(request.user, 'role', None) != CustomUser.Role.ADMINISTRATOR:
+            return redirect('tenders:dashboard')
+        return view(request, *args, **kwargs)
+    return wrapper
 
 
 def _shared_setting():
@@ -528,6 +539,73 @@ class ApiSettingUpdate(AdminRequiredMixin, LoginRequiredMixin, UpdateView):
     def form_valid(self, form):
         messages.success(self.request, 'API settings saved.')
         return super().form_valid(form)
+
+
+def _config_context(request, active):
+    return {
+        'active_config': active,
+        'config_items': [
+            (reverse('tenders:config_odoo'), 'Odoo', active == 'odoo'),
+            (reverse('tenders:config_selcom'), 'Selcom', active == 'selcom'),
+            (reverse('tenders:config_email'), 'Email', active == 'email'),
+        ],
+    }
+
+
+@login_required
+@_admin_required
+def config_odoo(request):
+    setting = _shared_setting()
+    if request.method == 'POST':
+        form = OdooConfigForm(request.POST, instance=setting)
+        if form.is_valid():
+            form.save()
+            _flush_derived_caches()
+            messages.success(request, 'Odoo configuration saved.')
+            return redirect('tenders:config_odoo')
+    else:
+        form = OdooConfigForm(instance=setting)
+    context = _config_context(request, 'odoo')
+    context['form'] = form
+    context['webhook_url'] = request.build_absolute_uri(reverse('tenders:webhook_orders'))
+    return render(request, 'tenders/config_odoo.html', context)
+
+
+@login_required
+@_admin_required
+def config_selcom(request):
+    setting = _shared_setting()
+    if request.method == 'POST':
+        form = SelcomConfigForm(request.POST, instance=setting)
+        if form.is_valid():
+            form.save()
+            _flush_derived_caches()
+            messages.success(request, 'Selcom configuration saved.')
+            return redirect('tenders:config_selcom')
+    else:
+        form = SelcomConfigForm(instance=setting)
+    context = _config_context(request, 'selcom')
+    context['form'] = form
+    context['selcom_webhook_url'] = request.build_absolute_uri(reverse('tenders:webhook_selcom'))
+    return render(request, 'tenders/config_selcom.html', context)
+
+
+@login_required
+@_admin_required
+def config_email(request):
+    setting = _shared_setting()
+    if request.method == 'POST':
+        form = EmailConfigForm(request.POST, instance=setting)
+        if form.is_valid():
+            form.save()
+            _flush_derived_caches()
+            messages.success(request, 'Email configuration saved.')
+            return redirect('tenders:config_email')
+    else:
+        form = EmailConfigForm(instance=setting)
+    context = _config_context(request, 'email')
+    context['form'] = form
+    return render(request, 'tenders/config_email.html', context)
 
 
 # ---------------------------------------------------------------------------

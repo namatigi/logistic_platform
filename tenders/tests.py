@@ -921,3 +921,87 @@ class SelcomPaymentTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Selcom payment gateway')
         self.assertContains(response, 'webhook/selcom')
+
+
+class AdminConfigurationTest(TestCase):
+    def setUp(self):
+        self.admin = CustomUser.objects.create_user(
+            email='admin@example.com', password='pass1234', role=CustomUser.Role.ADMINISTRATOR,
+        )
+        self.user = CustomUser.objects.create_user(email='user@example.com', password='pass1234')
+        self.setting = ApiSetting.objects.create()
+
+    def test_non_admin_redirected_from_config_pages(self):
+        self.client.login(email='user@example.com', password='pass1234')
+        for name in ('config_odoo', 'config_selcom', 'config_email'):
+            response = self.client.get(reverse(f'tenders:{name}'))
+            self.assertEqual(response.status_code, 302)
+
+    def test_non_admin_cannot_save_config(self):
+        self.client.login(email='user@example.com', password='pass1234')
+        response = self.client.post(
+            reverse('tenders:config_odoo'), {'base_url': 'https://hacked.example.com/'},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.setting.refresh_from_db()
+        self.assertEqual(self.setting.base_url, '')
+
+    def test_odoo_page_renders_and_saves(self):
+        self.client.login(email='admin@example.com', password='pass1234')
+        response = self.client.get(reverse('tenders:config_odoo'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Tender endpoint (outgoing)')
+        self.assertContains(response, 'Webhook (incoming)')
+        response = self.client.post(
+            reverse('tenders:config_odoo'),
+            {'base_url': 'https://api.example.com/', 'auth_type': 'bearer', 'api_token': 'tok123'},
+        )
+        self.assertRedirects(response, reverse('tenders:config_odoo'))
+        self.setting.refresh_from_db()
+        self.assertEqual(self.setting.base_url, 'https://api.example.com/')
+        self.assertEqual(self.setting.auth_type, 'bearer')
+        self.assertEqual(self.setting.api_token, 'tok123')
+
+    def test_selcom_page_renders_and_saves(self):
+        self.client.login(email='admin@example.com', password='pass1234')
+        response = self.client.get(reverse('tenders:config_selcom'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Payment callback')
+        self.assertContains(response, 'webhook/selcom')
+        response = self.client.post(
+            reverse('tenders:config_selcom'),
+            {'selcom_enabled': 'on', 'selcom_currency': 'TZS', 'selcom_client_id': 'cid'},
+        )
+        self.assertRedirects(response, reverse('tenders:config_selcom'))
+        self.setting.refresh_from_db()
+        self.assertTrue(self.setting.selcom_enabled)
+        self.assertEqual(self.setting.selcom_client_id, 'cid')
+
+    def test_email_page_renders_and_saves(self):
+        self.client.login(email='admin@example.com', password='pass1234')
+        response = self.client.get(reverse('tenders:config_email'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Incoming email server')
+        self.assertContains(response, 'imap.gmail.com')
+        response = self.client.post(
+            reverse('tenders:config_email'),
+            {
+                'email_host': 'imap.gmail.com', 'email_port': '993', 'email_use_ssl': 'on',
+                'email_username': 'orders@example.com', 'email_password': 'app-password',
+            },
+        )
+        self.assertRedirects(response, reverse('tenders:config_email'))
+        self.setting.refresh_from_db()
+        self.assertEqual(self.setting.email_host, 'imap.gmail.com')
+        self.assertEqual(self.setting.email_port, 993)
+        self.assertTrue(self.setting.email_use_ssl)
+        self.assertEqual(self.setting.email_username, 'orders@example.com')
+        self.assertEqual(self.setting.email_password, 'app-password')
+
+    def test_config_tabs_have_active_item(self):
+        self.client.login(email='admin@example.com', password='pass1234')
+        response = self.client.get(reverse('tenders:config_email'))
+        self.assertContains(response, 'class="config-tabs"')
+        self.assertContains(response, '>Odoo<')
+        self.assertContains(response, '>Selcom<')
+        self.assertContains(response, '>Email<')

@@ -134,6 +134,11 @@ class ApiSetting(models.Model):
         max_length=500, blank=True,
         help_text='Optional hosted checkout root. Defaults to the Selcom API root.',
     )
+    email_host = models.CharField(max_length=255, blank=True, default='imap.gmail.com')
+    email_port = models.IntegerField(default=993)
+    email_use_ssl = models.BooleanField(default=True)
+    email_username = models.CharField(max_length=255, blank=True)
+    email_password = models.CharField(max_length=255, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     SELCOM_SANDBOX_BASE = 'https://apigwdev.selcommobile.com/v1'

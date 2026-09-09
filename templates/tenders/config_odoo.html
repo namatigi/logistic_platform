@@ -1,0 +1,109 @@
+{% extends 'base.html' %}
+{% block title %}Odoo &middot; Configuration &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container" style="max-width:720px;">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Configuration</h1>
+      <p class="page-subtitle">Integrations and endpoints used by the HYPAX platform.</p>
+    </div>
+  </div>
+
+  {% include 'tenders/config_tabs.html' %}
+
+  <div class="card">
+    <div class="card-title">Odoo</div>
+    <p class="form-help" style="margin-top:-4px; margin-bottom:16px;">
+      Configure the <strong>outgoing tender endpoint</strong> that HYPAX posts tenders to, and the
+      <strong>incoming webhook</strong> Odoo uses to send order data back.
+    </p>
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Tender endpoint (outgoing)</label>
+        <input type="url" name="base_url" value="{{ form.base_url.value|default_if_none:'' }}">
+        <span class="form-help">Root URL, e.g. <code>https://api.example.com</code>. Tenders are posted to <code>/api/v1/tenders</code>.</span>
+        {% if form.base_url.errors %}<div class="field-error"><ul><li>{{ form.base_url.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Auth type</label>
+        <select name="auth_type">
+          {% for value, label in form.auth_type.field.choices %}
+            <option value="{{ value }}" {% if form.auth_type.value == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <span class="form-help">How the endpoint authenticates requests.</span>
+        {% if form.auth_type.errors %}<div class="field-error"><ul><li>{{ form.auth_type.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>API token</label>
+        <input type="text" name="api_token" value="{{ form.api_token.value|default_if_none:'' }}">
+        <span class="form-help">Token used for <strong>Bearer token</strong> auth. Ignored for other types.</span>
+        {% if form.api_token.errors %}<div class="field-error"><ul><li>{{ form.api_token.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Username</label>
+        <input type="text" name="username" value="{{ form.username.value|default_if_none:'' }}">
+        <span class="form-help">Required only for <strong>Basic auth</strong>.</span>
+        {% if form.username.errors %}<div class="field-error"><ul><li>{{ form.username.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Password</label>
+        <input type="password" name="password" value="{{ form.password.value|default_if_none:'' }}">
+        <span class="form-help">Required only for <strong>Basic auth</strong>.</span>
+        {% if form.password.errors %}<div class="field-error"><ul><li>{{ form.password.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-actions" style="margin-top:8px;">
+        <button type="submit" class="btn btn-primary">Save configuration</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" style="border-color:#bfdbfe; background:#fbfdff;">
+    <div class="card-title">Webhook (incoming)</div>
+    <p style="color:#475569; font-size:14px; margin-bottom:14px;">
+      Give this URL to Odoo. It will <code>POST</code> closing order data here, and the orders appear on the
+      <a href="{% url 'tenders:order_list' %}">Orders</a> page. Right-click &rarr; Copy the URL.
+    </p>
+    <div class="form-row" style="margin-bottom:10px;">
+      <label>Webhook URL</label>
+      <div style="display:flex; gap:8px; align-items:stretch;">
+        <input id="webhook-url" type="text" readonly value="{{ webhook_url }}" style="flex:1; background:#f8fafc; color:#334155;">
+        <button type="button" class="btn btn-secondary" onclick="copyToClipboard('webhook-url')">Copy</button>
+      </div>
+    </div>
+    <p class="form-help" style="margin-top:8px;">
+      Method: <code>POST</code> &middot; Content-Type: <code>application/json</code> &middot; no auth required.
+      Supported fields: <code>order_id</code>, <code>order_name</code>, <code>state</code>,
+      <code>company_id</code>, <code>company_name</code>, <code>date_order</code>, <code>amount_total</code>,
+      <code>customer</code>, <code>currency</code>, <code>cargo_reference</code>, <code>cargo_id</code>,
+      <code>order_lines[]</code>.
+    </p>
+  </div>
+</div>
+
+<script>
+  (function () {
+    function copyToClipboard(id) {
+      var input = document.getElementById(id);
+      input.select();
+      input.setSelectionRange(0, 99999);
+      var btn = event && event.target;
+      var old = btn ? btn.textContent : '';
+      try { navigator.clipboard.writeText(input.value); } catch (e) { document.execCommand('copy'); }
+      if (btn) {
+        btn.textContent = 'Copied!';
+        setTimeout(function () { btn.textContent = old; }, 1500);
+      }
+    }
+    window.copyToClipboard = copyToClipboard;
+  })();
+</script>
+{% endblock %}

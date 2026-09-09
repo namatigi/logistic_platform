@@ -1,0 +1,5 @@
+<nav class="config-tabs">
+  {% for url, label, active in config_items %}
+    <a href="{{ url }}" class="{% if active %}active{% endif %}">{{ label }}</a>
+  {% endfor %}
+</nav>

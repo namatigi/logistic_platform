@@ -1,0 +1,126 @@
+{% extends 'base.html' %}
+{% block title %}Selcom &middot; Configuration &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container" style="max-width:720px;">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Configuration</h1>
+      <p class="page-subtitle">Integrations and endpoints used by the HYPAX platform.</p>
+    </div>
+  </div>
+
+  {% include 'tenders/config_tabs.html' %}
+
+  <div class="card">
+    <div class="card-title">Selcom payment gateway</div>
+    <p class="form-help" style="margin-top:-4px; margin-bottom:16px;">
+      Accepts <strong>mobile money</strong> (M&ndash;Pesa, Tigo, Airtel, Halopesa) and
+      <strong>bank transfer</strong> (CRDB, NMB and others) invoice payments.
+    </p>
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label style="flex-direction:row; align-items:center; gap:8px; display:flex;">
+          <input type="checkbox" name="selcom_enabled" style="width:auto;"
+            {% if form.selcom_enabled.value %}checked{% endif %}> Enable Selcom payments
+        </label>
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label style="flex-direction:row; align-items:center; gap:8px; display:flex;">
+          <input type="checkbox" name="selcom_sandbox" style="width:auto;"
+            {% if form.selcom_sandbox.value %}checked{% endif %}> Sandbox mode
+        </label>
+        <span class="form-help">Uses <code>https://apigwdev.selcommobile.com/v1</code>. Uncheck for production.</span>
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>API base URL (optional)</label>
+        <input type="url" name="selcom_base_url" value="{{ form.selcom_base_url.value|default_if_none:'' }}" placeholder="https://apigw.selcommobile.com/v1">
+        <span class="form-help">Defaults to the sandbox/production APIGW below.</span>
+        {% if form.selcom_base_url.errors %}<div class="field-error"><ul><li>{{ form.selcom_base_url.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Client ID</label>
+        <input type="text" name="selcom_client_id" value="{{ form.selcom_client_id.value|default_if_none:'' }}">
+        {% if form.selcom_client_id.errors %}<div class="field-error"><ul><li>{{ form.selcom_client_id.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Client secret</label>
+        <input type="password" name="selcom_client_secret" value="{{ form.selcom_client_secret.value|default_if_none:'' }}">
+        {% if form.selcom_client_secret.errors %}<div class="field-error"><ul><li>{{ form.selcom_client_secret.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Sales channel</label>
+        <input type="text" name="selcom_sales_channel" value="{{ form.selcom_sales_channel.value|default_if_none:'' }}" placeholder="PURCHASE">
+        <span class="form-help">Vendor / sales channel issued by Selcom.</span>
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Currency</label>
+        <input type="text" name="selcom_currency" value="{{ form.selcom_currency.value|default_if_none:'TZS' }}">
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Payment methods</label>
+        <input type="text" name="selcom_payment_methods" value="{{ form.selcom_payment_methods.value|default_if_none:'' }}" placeholder="MPESA,TIGOPESA,AIRTELMONEY,HALOPESA,CRDB,NMB">
+        <span class="form-help">Comma-separated wallets and bank accounts shown on the checkout page.</span>
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Webhook secret</label>
+        <input type="password" name="selcom_webhook_secret" value="{{ form.selcom_webhook_secret.value|default_if_none:'' }}">
+        <span class="form-help">Shared secret Selcom uses to sign payment callbacks. Empty disables signature checks.</span>
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Hosted checkout base (optional)</label>
+        <input type="url" name="selcom_paylink_base" value="{{ form.selcom_paylink_base.value|default_if_none:'' }}" placeholder="https://apigw.selcommobile.com/v1">
+        <span class="form-help">Defaults to the API base above. Usually unchanged.</span>
+      </div>
+
+      <div class="form-actions" style="margin-top:8px;">
+        <button type="submit" class="btn btn-primary">Save configuration</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" style="border-color:#bbf7d0; background:#f7fef8;">
+    <div class="card-title">Payment callback (incoming)</div>
+    <p style="color:#475569; font-size:14px; margin-bottom:14px;">
+      Selcom will <code>POST</code> payment results to this URL. Configure it as the <strong>callback URL</strong>
+      when creating your Selcom checkout orders. CSRF is not required.
+    </p>
+    <div class="form-row" style="margin-bottom:10px;">
+      <label>Callback URL</label>
+      <div style="display:flex; gap:8px; align-items:stretch;">
+        <input id="selcom-callback-url" type="text" readonly value="{{ selcom_webhook_url }}" style="flex:1; background:#f8fafc; color:#334155;">
+        <button type="button" class="btn btn-secondary" onclick="copyToClipboard('selcom-callback-url')">Copy</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    function copyToClipboard(id) {
+      var input = document.getElementById(id);
+      input.select();
+      input.setSelectionRange(0, 99999);
+      var btn = event && event.target;
+      var old = btn ? btn.textContent : '';
+      try { navigator.clipboard.writeText(input.value); } catch (e) { document.execCommand('copy'); }
+      if (btn) {
+        btn.textContent = 'Copied!';
+        setTimeout(function () { btn.textContent = old; }, 1500);
+      }
+    }
+    window.copyToClipboard = copyToClipboard;
+  })();
+</script>
+{% endblock %}

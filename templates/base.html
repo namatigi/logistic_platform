@@ -60,8 +60,19 @@
           <a href="{% url 'tenders:tracker' %}">Tracker</a>
         </li>
         {% if user.role == 'administrator' %}
-        <li class="{% if request.resolver_match.url_name == 'api_settings' %}active{% endif %}">
-          <a href="{% url 'tenders:api_settings' %}">Setting</a>
+        <li class="nav-dropdown {% if request.resolver_match.url_name in 'config_odoo config_selcom config_email' %}active{% endif %}">
+          <a href="{% url 'tenders:config_odoo' %}" class="nav-dropdown-toggle">Configuration</a>
+          <ul class="nav-dropdown-menu">
+            <li class="{% if request.resolver_match.url_name == 'config_odoo' %}active{% endif %}">
+              <a href="{% url 'tenders:config_odoo' %}">Odoo</a>
+            </li>
+            <li class="{% if request.resolver_match.url_name == 'config_selcom' %}active{% endif %}">
+              <a href="{% url 'tenders:config_selcom' %}">Selcom</a>
+            </li>
+            <li class="{% if request.resolver_match.url_name == 'config_email' %}active{% endif %}">
+              <a href="{% url 'tenders:config_email' %}">Email</a>
+            </li>
+          </ul>
         </li>
         <li class="{% if request.resolver_match.url_name == 'admin_dashboard' %}active{% endif %}">
           <a href="{% url 'users:admin_dashboard' %}">Admin</a>

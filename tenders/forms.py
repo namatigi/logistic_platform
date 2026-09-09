@@ -34,3 +34,33 @@ class ApiSettingForm(forms.ModelForm):
             'selcom_currency', 'selcom_payment_methods', 'selcom_webhook_secret',
             'selcom_paylink_base',
         )
+
+
+class OdooConfigForm(forms.ModelForm):
+    class Meta:
+        model = ApiSetting
+        fields = ('base_url', 'auth_type', 'api_token', 'username', 'password')
+
+
+class SelcomConfigForm(forms.ModelForm):
+    class Meta:
+        model = ApiSetting
+        fields = (
+            'selcom_enabled', 'selcom_sandbox', 'selcom_base_url',
+            'selcom_client_id', 'selcom_client_secret', 'selcom_sales_channel',
+            'selcom_currency', 'selcom_payment_methods', 'selcom_webhook_secret',
+            'selcom_paylink_base',
+        )
+
+
+class EmailConfigForm(forms.ModelForm):
+    class Meta:
+        model = ApiSetting
+        fields = (
+            'email_host', 'email_port', 'email_use_ssl',
+            'email_username', 'email_password',
+        )
+        widgets = {
+            'email_port': forms.NumberInput(),
+            'email_password': forms.PasswordInput(render_value=True),
+        }

@@ -118,6 +118,70 @@ a:hover {
   color: var(--brand-dark);
 }
 
+.nav-dropdown {
+  position: relative;
+}
+
+.nav-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 180px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  padding: 6px;
+  display: none;
+  list-style: none;
+  z-index: 50;
+}
+
+.nav-dropdown:hover .nav-dropdown-menu,
+.nav-dropdown:focus-within .nav-dropdown-menu {
+  display: block;
+}
+
+.nav-dropdown-menu a {
+  display: block;
+  padding: 8px 12px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.nav-dropdown-menu .active a {
+  background: var(--brand-light);
+  color: var(--brand-dark);
+}
+
+.config-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.config-tabs a {
+  padding: 8px 16px;
+  border-radius: 20px;
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 14px;
+  border: 1px solid var(--border);
+}
+
+.config-tabs a:hover {
+  color: var(--brand-dark);
+  border-color: var(--brand);
+  text-decoration: none;
+}
+
+.config-tabs a.active {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+
 .nav-user {
   display: flex;
   align-items: center;
