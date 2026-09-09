@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load static %}
 {% block title %}Sign Up &middot; HYPAX{% endblock %}
 {% block content %}
 <div class="auth-theme" id="auth-theme" style="overflow-y:auto;">
@@ -40,15 +41,22 @@
           </div>
           <div class="form-row">
             <label for="signup-city">City</label>
-            <input id="signup-city" type="text" v-model.trim="city" autocomplete="address-level2">
+            <input id="signup-city" list="city-list" v-model.trim="city" autocomplete="address-level2" @blur="matchCity">
+            <datalist id="city-list">
+              <option v-for="c in cityList" :key="c.n+c.c" :value="c.n"></option>
+            </datalist>
           </div>
           <div class="form-row">
             <label for="signup-country">Country</label>
-            <input id="signup-country" type="text" v-model.trim="country" autocomplete="country-name">
+            <input id="signup-country" list="country-list" v-model.trim="country" autocomplete="country-name" @blur="matchCountry">
+            <datalist id="country-list">
+              <option v-for="c in countryList" :key="c.c" :value="c.n">{{ c.n }}<span v-if="c.d"> (+{{ c.d }})</span></option>
+            </datalist>
           </div>
-          <div class="form-row">
-            <label for="signup-phone">Phone number</label>
-            <input id="signup-phone" type="tel" v-model.trim="phone" autocomplete="tel">
+          <div class="form-row" style="display:flex; align-items:center; gap:8px;">
+            <label for="signup-phone" style="flex:0 0 auto;">Phone number</label>
+            <span v-if="dial" style="padding:8px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px 0 0 4px; font-weight:600; color:#475569; white-space:nowrap;">+{{ dial }}</span>
+            <input id="signup-phone" type="tel" v-model.trim="phoneNumber" autocomplete="tel" style="flex:1;" :style="dial ? 'border-radius:0 4px 4px 0;' : ''">
           </div>
           <div class="form-row">
             <label for="signup-street">Street</label>
@@ -93,19 +101,61 @@
     }
   })();
 </script>
+<script src="{% static 'js/world-data.js' %}"></script>
 <script>
   (function () {
     var root = document.getElementById('auth-app');
     var api = window.HYPAX.api;
+    var WORLD = window.HYPAX;
     Vue.createApp({
       data: function () {
         return {
           email: '', firstName: '', lastName: '', city: '', country: '',
-          phone: '', street: '', password1: '', password2: '',
+          countryIso: '', dial: '', phoneNumber: '', street: '',
+          password1: '', password2: '',
           error: '', loading: false,
         };
       },
+      computed: {
+        countryList: function () {
+          var q = (this.country || '').toLowerCase();
+          if (!q) return [];
+          return (WORLD.countries || [])
+            .filter(function (c) { return c.n.toLowerCase().indexOf(q) !== -1; })
+            .slice(0, 20);
+        },
+        cityList: function () {
+          var q = (this.city || '').toLowerCase();
+          if (!q) return [];
+          var all = WORLD.cities || [];
+          var matches = all.filter(function (c) { return c.n.toLowerCase().indexOf(q) !== -1; });
+          if (this.countryIso) {
+            var here = matches.filter(function (c) { return c.c === this.countryIso; }.bind(this));
+            var rest = matches.filter(function (c) { return c.c !== this.countryIso; }.bind(this));
+            matches = here.concat(rest);
+          }
+          return matches.slice(0, 20);
+        },
+      },
       methods: {
+        matchCountry: function () {
+          var q = (this.country || '').trim().toLowerCase();
+          var match = (WORLD.countries || []).find(function (c) { return c.n.toLowerCase() === q; });
+          this.country = match ? match.n : this.country;
+          this.countryIso = match ? match.c : '';
+          this.dial = match ? match.d : '';
+        },
+        matchCity: function () {
+          var q = (this.city || '').trim().toLowerCase();
+          if (!q) return;
+          var list = (WORLD.cities || []).filter(function (c) { return c.n.toLowerCase() === q; });
+          if (this.countryIso) {
+            var here = list.filter(function (c) { return c.c === this.countryIso; }.bind(this));
+            if (here.length) list = here;
+          }
+          var match = list[0];
+          if (match) this.city = match.n;
+        },
         submit: async function () {
           var self = this;
           self.error = '';
@@ -115,13 +165,15 @@
           }
           self.loading = true;
           try {
+            var phone = self.phoneNumber;
+            if (self.dial) phone = '+' + self.dial + (phone ? ' ' + phone : '');
             var res = await api.post(root.dataset.url, {
               email: self.email,
               first_name: self.firstName,
               last_name: self.lastName,
               city: self.city,
               country: self.country,
-              phone: self.phone,
+              phone: phone,
               street: self.street,
               password1: self.password1,
               password2: self.password2
