@@ -40,6 +40,13 @@
             <input id="signup-last-name" type="text" v-model.trim="lastName" autocomplete="family-name">
           </div>
           <div class="form-row">
+            <label for="signup-country">Country</label>
+            <input id="signup-country" list="country-list" v-model.trim="country" autocomplete="country-name" @blur="matchCountry">
+            <datalist id="country-list">
+              <option v-for="c in countryList" :key="c.c" :value="c.n">{{ c.n }}<span v-if="c.d"> (+{{ c.d }})</span></option>
+            </datalist>
+          </div>
+          <div class="form-row">
             <label for="signup-city">City</label>
             <input id="signup-city" list="city-list" v-model.trim="city" autocomplete="address-level2" @blur="matchCity">
             <datalist id="city-list">
@@ -47,16 +54,11 @@
             </datalist>
           </div>
           <div class="form-row">
-            <label for="signup-country">Country</label>
-            <input id="signup-country" list="country-list" v-model.trim="country" autocomplete="country-name" @blur="matchCountry">
-            <datalist id="country-list">
-              <option v-for="c in countryList" :key="c.c" :value="c.n">{{ c.n }}<span v-if="c.d"> (+{{ c.d }})</span></option>
-            </datalist>
-          </div>
-          <div class="form-row" style="display:flex; align-items:center; gap:8px;">
-            <label for="signup-phone" style="flex:0 0 auto;">Phone number</label>
-            <span v-if="dial" style="padding:8px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px 0 0 4px; font-weight:600; color:#475569; white-space:nowrap;">+{{ dial }}</span>
-            <input id="signup-phone" type="tel" v-model.trim="phoneNumber" autocomplete="tel" style="flex:1;" :style="dial ? 'border-radius:0 4px 4px 0;' : ''">
+            <label for="signup-phone">Phone number</label>
+            <div class="phone-group">
+              <span class="phone-prefix" v-if="dial">+{{ dial }}</span>
+              <input id="signup-phone" type="tel" v-model.trim="phoneNumber" autocomplete="tel" :class="{ 'with-prefix': dial }">
+            </div>
           </div>
           <div class="form-row">
             <label for="signup-street">Street</label>
@@ -127,13 +129,10 @@
         cityList: function () {
           var q = (this.city || '').toLowerCase();
           if (!q) return [];
-          var all = WORLD.cities || [];
-          var matches = all.filter(function (c) { return c.n.toLowerCase().indexOf(q) !== -1; });
-          if (this.countryIso) {
-            var here = matches.filter(function (c) { return c.c === this.countryIso; }.bind(this));
-            var rest = matches.filter(function (c) { return c.c !== this.countryIso; }.bind(this));
-            matches = here.concat(rest);
-          }
+          var matches = (WORLD.cities || []).filter(function (c) {
+            if (this.countryIso && c.c !== this.countryIso) return false;
+            return c.n.toLowerCase().indexOf(q) !== -1;
+          }.bind(this));
           return matches.slice(0, 20);
         },
       },

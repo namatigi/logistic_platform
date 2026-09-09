@@ -657,12 +657,12 @@ tr:hover td {
 
 .auth-card {
   width: 100%;
-  max-width: 400px;
+  max-width: 480px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 14px;
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
-  padding: 36px 32px;
+  padding: 40px 36px;
 }
 
 .auth-brand {
@@ -691,6 +691,32 @@ tr:hover td {
 
 .auth-card .form-row {
   margin-bottom: 16px;
+}
+
+.phone-group {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.phone-group .phone-prefix {
+  padding: 9px 12px;
+  background: #f1f5f9;
+  border: 1px solid var(--border);
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  font-weight: 600;
+  color: #475569;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.phone-group input {
+  flex: 1;
+}
+
+.phone-group input.with-prefix {
+  border-radius: 0 8px 8px 0;
 }
 
 .auth-footer {
