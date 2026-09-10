@@ -32,7 +32,7 @@ from tenders.views import (
     _online_user_ids,
     _position_at,
     _route_arrays,
-    _shared_setting,
+    _platform_setting,
     _synthetic_invoice_dict,
     get_or_create_invoice,
     get_route,
@@ -468,7 +468,7 @@ def api_agent_invoices(request):
         _invoice_dict(invoice_map[order.pk]) if order.pk in invoice_map else _synthetic_invoice_dict(order)
         for order in awarded_orders
     ]
-    setting = _shared_setting()
+    setting = _platform_setting()
     return JsonResponse({'ok': True, 'selcom_enabled': setting.selcom_enabled, 'invoices': rows})
 
 

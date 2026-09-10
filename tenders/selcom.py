@@ -41,7 +41,7 @@ def _http(method, url, token='', payload=None):
 
 def _require_credentials(setting):
     if not setting.selcom_client_id or not setting.selcom_client_secret:
-        raise SelcomError('Selcom client ID and secret are not configured in the Setting page.')
+        raise SelcomError('Selcom client ID and secret are not configured under Configuration > Selcom.')
     if not setting.selcom_enabled:
         raise SelcomError('Selcom payments are disabled for this platform.')
 

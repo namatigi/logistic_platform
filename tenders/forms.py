@@ -40,20 +40,6 @@ class PaymentTermForm(forms.ModelForm):
         }
 
 
-class ApiSettingForm(forms.ModelForm):
-    class Meta:
-        model = ApiSetting
-        fields = (
-            'base_url', 'auth_type', 'api_token', 'username', 'password',
-            'tenders_path', 'order_confirmation_path', 'partial_order_confirmation_path',
-            'order_invoice_path',
-            'selcom_enabled', 'selcom_sandbox', 'selcom_base_url',
-            'selcom_client_id', 'selcom_client_secret', 'selcom_sales_channel',
-            'selcom_currency', 'selcom_payment_methods', 'selcom_webhook_secret',
-            'selcom_paylink_base',
-        )
-
-
 class OdooCompanyForm(forms.ModelForm):
     class Meta:
         model = OdooCompany
@@ -75,15 +61,8 @@ class OdooCompanyForm(forms.ModelForm):
         }
 
 
-class SharedOdooConfigForm(ApiSettingForm):
-    """ApiSettingForm without the four API path fields (edited on Configuration > API Settings)."""
-
-    class Meta(ApiSettingForm.Meta):
-        fields = ('base_url', 'auth_type', 'api_token', 'username', 'password')
-
-
 class OdooCompanyConfigForm(OdooCompanyForm):
-    """OdooCompanyForm without the four API path fields (edited on Configuration > API Settings)."""
+    """OdooCompanyForm without the four API path fields (Configuration > Odoo page)."""
 
     class Meta(OdooCompanyForm.Meta):
         fields = (

@@ -26,15 +26,12 @@ from django.views.decorators.http import require_POST
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
 from .forms import (
-    ApiSettingForm,
     IncomingEmailConfigForm,
     MediaConfigForm,
     OdooCompanyConfigForm,
-    OdooCompanyForm,
     OutgoingEmailConfigForm,
     PaymentTermForm,
     SelcomConfigForm,
-    SharedOdooConfigForm,
     TenderForm,
 )
 from .models import (
@@ -90,24 +87,31 @@ def _record_diagnostic(request, api_point, message, status_code=None, path='', m
         logger.exception('Failed to record API diagnostic for %s', api_point)
 
 
-def _shared_setting():
+def _platform_setting():
+    """Return the single platform-wide setting (Selcom, email, file storage)."""
     return ApiSetting.get()
 
 
 def _order_endpoint(order):
-    """Return the Odoo company an order belongs to, falling back to the shared settings."""
+    """Return the Odoo company (transporter) an order belongs to, or None.
+
+    Orders are received through a company-specific webhook, so every order has a
+    transporter and its confirmations go back to that transporter only.
+    """
     if order is not None and order.odoo_company_id:
-        return order.odoo_company
-    return _shared_setting()
+        company = order.odoo_company
+        if company.base_url:
+            return company
+    return None
 
 
 def _tender_submission_setting(user):
-    """Return the Odoo company a user's tenders are posted to.
+    """Return the Odoo company (transporter) a user's tenders are posted to.
 
-    A registered company is a transporter, and each transporter is its own Odoo
-    company/instance. If one of the posting user's companies is linked to an
-    Odoo company, tenders are submitted to that instance; otherwise they fall
-    back to the shared API setting.
+    Each registered company is a transporter linked to its own Odoo company, so
+    tenders are always submitted to that instance. Returns None when the user's
+    company has no linked Odoo company (or it has no base URL) — there is no
+    shared fallback any more.
     """
     if user is not None and user.is_authenticated:
         company = (
@@ -118,7 +122,7 @@ def _tender_submission_setting(user):
         )
         if company is not None and company.odoo_company_id and company.odoo_company.base_url:
             return company.odoo_company
-    return _shared_setting()
+    return None
 
 
 class AdminRequiredMixin(UserPassesTestMixin):
@@ -533,9 +537,13 @@ def award_order(request, pk):
         raise Http404()
 
     setting = _order_endpoint(order)
-    if setting is None or not setting.base_url:
-        messages.warning(request, 'Configure an API base URL for this order\'s Odoo company before awarding.')
-        return redirect('tenders:api_settings')
+    if setting is None:
+        messages.warning(
+            request,
+            'This order has no Odoo company (transporter) with a base URL, so confirmations cannot be sent. '
+            'An administrator must update the transporter that posted the order.',
+        )
+        return redirect('tenders:config_odoo')
 
     line_ids_raw = request.POST.getlist('line_ids')
     line_ids = [int(v) for v in line_ids_raw if str(v).strip().isdigit()]
@@ -587,7 +595,12 @@ def to_decimal(value):
 
 
 @csrf_exempt
-def webhook_orders(request, slug=None):
+def webhook_orders(request, slug):
+    """Company-specific order webhook: orders are always attributed to their transporter.
+
+    There is no shared/legacy webhook any more — every order must be sent to its
+    transporter's own URL `.../webhook/orders/<slug>/`.
+    """
     if request.method != 'POST':
         return JsonResponse({'error': 'Only POST is allowed.'}, status=405)
     try:
@@ -597,13 +610,11 @@ def webhook_orders(request, slug=None):
     if not isinstance(payload, dict) or 'order_id' not in payload:
         return JsonResponse({'error': "Missing required field 'order_id'."}, status=400)
 
-    company = None
-    if slug:
-        company = OdooCompany.objects.filter(slug=slug).first()
-        if company is None:
-            return JsonResponse({'error': f"Unknown company webhook '{slug}'."}, status=404)
-        if not company.is_active:
-            return JsonResponse({'error': f"Company webhook '{slug}' is disabled."}, status=403)
+    company = OdooCompany.objects.filter(slug=slug).first()
+    if company is None:
+        return JsonResponse({'error': f"Unknown company webhook '{slug}'."}, status=404)
+    if not company.is_active:
+        return JsonResponse({'error': f"Company webhook '{slug}' is disabled."}, status=403)
 
     cargo_reference = (payload.get('cargo_reference') or '').strip()
     tender = Tender.objects.filter(cargo_reference=cargo_reference).first() if cargo_reference else None
@@ -653,7 +664,7 @@ def webhook_orders(request, slug=None):
         'order_id': order.order_id,
         'cargo_reference': cargo_reference,
         'linked_tender': tender.cargo_reference if tender else None,
-        'company_slug': getattr(company, 'slug', None) if company else None,
+        'company_slug': company.slug,
     })
 
 
@@ -704,24 +715,20 @@ class TenderCreate(TenderCreatorRequiredMixin, LoginRequiredMixin, CreateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['api_setting'] = _shared_setting()
+        context['transporter'] = _tender_submission_setting(self.request.user)
         return context
 
     def form_valid(self, form):
         tender = form.save(commit=False)
         tender.user = self.request.user
 
-        setting = _shared_setting()
-        if setting is None or not setting.base_url:
+        setting = _tender_submission_setting(self.request.user)
+        if setting is None:
             messages.warning(
                 self.request,
-                'No API settings found. The administrator must configure the shared base URL and auth.',
+                'Your company is not linked to an Odoo company yet. An administrator must set your '
+                'company\'s transporter (Odoo company with a base URL) before tenders can be sent.',
             )
-            tender.status = Tender.Status.PENDING
-            tender.save()
-            return redirect('tenders:create')
-        if not setting.base_url:
-            messages.warning(self.request, 'API base URL is missing.')
             tender.status = Tender.Status.PENDING
             tender.save()
             return redirect('tenders:create')
@@ -799,29 +806,6 @@ class OrderDetail(LoginRequiredMixin, DetailView):
         return context
 
 
-class ApiSettingUpdate(AdminRequiredMixin, LoginRequiredMixin, UpdateView):
-    model = ApiSetting
-    form_class = ApiSettingForm
-    template_name = 'tenders/api_setting_form.html'
-    success_url = reverse_lazy('tenders:api_settings')
-
-    def get_object(self, queryset=None):
-        return _shared_setting()
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        path = reverse('tenders:webhook_orders')
-        context['webhook_url'] = self.request.build_absolute_uri(path)
-        context['webhook_path'] = path
-        selcom_path = reverse('tenders:webhook_selcom')
-        context['selcom_webhook_url'] = self.request.build_absolute_uri(selcom_path)
-        return context
-
-    def form_valid(self, form):
-        messages.success(self.request, 'API settings saved.')
-        return super().form_valid(form)
-
-
 def _config_context(request, active):
     return {
         'active_config': active,
@@ -858,30 +842,19 @@ def config_odoo(request):
     if edit_pk:
         editing = OdooCompany.objects.filter(pk=edit_pk).first()
 
-    shared_setting = _shared_setting()
     form = OdooCompanyConfigForm(instance=editing) if editing else OdooCompanyConfigForm()
-    shared_form = SharedOdooConfigForm(instance=shared_setting)
     if request.method == 'POST':
-        if request.POST.get('shared') == '1':
-            shared_form = SharedOdooConfigForm(request.POST, instance=shared_setting)
-            if shared_form.is_valid():
-                shared_form.save()
-                _flush_derived_caches()
-                messages.success(request, 'Shared settings saved.')
-                return redirect('tenders:config_odoo')
-        else:
-            instance = editing
-            if instance is None and request.POST.get('name'):
-                instance = OdooCompany()
-            form = OdooCompanyConfigForm(request.POST, instance=instance) if instance else None
-            if form is not None and form.is_valid():
-                form.save()
-                _flush_derived_caches()
-                messages.success(request, 'Odoo company saved.')
-                return redirect('tenders:config_odoo')
+        instance = editing
+        if instance is None and request.POST.get('name'):
+            instance = OdooCompany()
+        form = OdooCompanyConfigForm(request.POST, instance=instance) if instance else None
+        if form is not None and form.is_valid():
+            form.save()
+            _flush_derived_caches()
+            messages.success(request, 'Odoo company saved.')
+            return redirect('tenders:config_odoo')
     else:
         form = OdooCompanyConfigForm(instance=editing) if editing else OdooCompanyConfigForm()
-        shared_form = SharedOdooConfigForm(instance=shared_setting)
 
     companies = OdooCompany.objects.all()
     for company in companies:
@@ -894,16 +867,13 @@ def config_odoo(request):
     context['companies'] = companies
     context['form'] = form
     context['editing'] = editing
-    context['shared_form'] = shared_form
-    context['shared_setting'] = shared_setting
-    context['shared_webhook_url'] = request.build_absolute_uri(reverse('tenders:webhook_orders'))
     return render(request, 'tenders/config_odoo.html', context)
 
 
 @login_required
 @_admin_required
 def config_selcom(request):
-    setting = _shared_setting()
+    setting = _platform_setting()
     if request.method == 'POST':
         form = SelcomConfigForm(request.POST, instance=setting)
         if form.is_valid():
@@ -922,7 +892,7 @@ def config_selcom(request):
 @login_required
 @_admin_required
 def config_email(request):
-    setting = _shared_setting()
+    setting = _platform_setting()
     if request.method == 'POST':
         section = request.POST.get('section', 'incoming') == 'outgoing'
         incoming_form = IncomingEmailConfigForm(
@@ -947,7 +917,7 @@ def config_email(request):
 @login_required
 @_admin_required
 def config_media(request):
-    setting = _shared_setting()
+    setting = _platform_setting()
     if request.method == 'POST':
         form = MediaConfigForm(request.POST, instance=setting)
         if form.is_valid():
@@ -1083,47 +1053,6 @@ def _order_dict(order, include_lines=False):
     return data
 
 
-def _setting_dict(setting, request):
-    webhook_path = reverse('tenders:webhook_orders')
-    selcom_webhook_path = reverse('tenders:webhook_selcom')
-    return {
-        'id': setting.id,
-        'base_url': setting.base_url,
-        'auth_type': setting.auth_type,
-        'api_token': setting.api_token,
-        'username': setting.username,
-        'password': setting.password,
-        'tenders_path': setting.tenders_path,
-        'order_confirmation_path': setting.order_confirmation_path,
-        'partial_order_confirmation_path': setting.partial_order_confirmation_path,
-        'order_invoice_path': setting.order_invoice_path,
-        'updated_at': setting.updated_at.isoformat() if setting.updated_at else None,
-        'endpoint': (setting.base_url.rstrip('/') if setting.base_url else '(base URL)') + '/' + (
-            setting.tenders_path.strip('/') or '/api/v1/tenders'
-        ).lstrip('/'),
-        'tenders_endpoint': setting.endpoint_url(),
-        'order_confirmation_endpoint': setting.order_confirmation_url(),
-        'partial_order_confirmation_endpoint': setting.partial_order_confirmation_url(),
-        'order_invoice_endpoint': setting.order_invoice_url(),
-        'webhook_path': webhook_path,
-        'webhook_url': request.build_absolute_uri(webhook_path),
-        'selcom_enabled': setting.selcom_enabled,
-        'selcom_sandbox': setting.selcom_sandbox,
-        'selcom_base_url': setting.selcom_base_url,
-        'selcom_client_id': setting.selcom_client_id,
-        'selcom_client_secret': setting.selcom_client_secret,
-        'selcom_sales_channel': setting.selcom_sales_channel,
-        'selcom_currency': setting.selcom_currency,
-        'selcom_payment_methods': setting.selcom_payment_methods,
-        'selcom_webhook_secret': setting.selcom_webhook_secret,
-        'selcom_paylink_base': setting.selcom_paylink_base,
-        'selcom_api_base': setting.selcom_api_base(),
-        'selcom_payment_methods_list': setting.selcom_methods_list(),
-        'selcom_webhook_path': selcom_webhook_path,
-        'selcom_webhook_url': request.build_absolute_uri(selcom_webhook_path),
-    }
-
-
 def _form_meta():
     return {
         'towns': [{'value': value, 'label': label} for value, label in TOWN_CHOICES],
@@ -1238,6 +1167,13 @@ def api_tender_list(request):
 def api_form_meta(request):
     meta = _form_meta()
     meta['payment_terms'] = [_payment_term_dict(t) for t in request.user.payment_terms.order_by('-created_at')]
+    setting = _tender_submission_setting(request.user)
+    meta['transporter'] = {
+        'name': setting.name if setting else None,
+        'slug': setting.slug if setting else None,
+        'base_url': setting.base_url if setting else None,
+        'id': setting.id if setting else None,
+    }
     return JsonResponse({'ok': True, 'meta': meta})
 
 
@@ -1255,10 +1191,13 @@ def api_tender_create(request):
     _flush_derived_caches()
 
     setting = _tender_submission_setting(request.user)
-    if setting is None or not setting.base_url:
+    if setting is None:
         result = {
             'ok': True,
-            'message': 'Tender saved locally. Configure your API base URL in Setting before sending.',
+            'message': (
+                'Tender saved locally. Your company is not linked to an Odoo company — an administrator '
+                'must set the transporter (Odoo company with a base URL) before tenders can be sent.'
+            ),
             'tender': _tender_dict(tender),
             'needs_settings': True,
         }
@@ -1360,11 +1299,14 @@ def api_order_award(request, pk):
         return JsonResponse({'ok': False, 'error': 'Order not found.'})
 
     setting = _order_endpoint(order)
-    if setting is None or not setting.base_url:
+    if setting is None:
         return JsonResponse({
             'ok': False,
-            'error': 'Configure an API base URL for this order\'s company before awarding.',
-            'redirect': reverse('tenders:api_settings'),
+            'error': (
+                'This order has no Odoo company (transporter) with a base URL, so confirmations cannot be sent. '
+                'An administrator must update the transporter that posted the order.'
+            ),
+            'redirect': reverse('tenders:config_odoo'),
         })
 
     data = _json_body(request)
@@ -1410,28 +1352,6 @@ def api_order_checkout(request, pk):
     invoice = get_or_create_invoice(order)
     return _initiate_selcom(request, invoice)
 
-
-@login_required
-def api_settings(request):
-    setting = _shared_setting()
-    if request.method == 'POST':
-        if request.user.role != CustomUser.Role.ADMINISTRATOR:
-            return JsonResponse({'ok': False, 'error': 'Administrator access required.'}, status=403)
-        form = ApiSettingForm(_json_body(request), instance=setting)
-        if not form.is_valid():
-            return JsonResponse({'ok': False, 'error': 'Please fix the highlighted fields.', 'errors': form.errors})
-        form.save()
-        return JsonResponse({
-            'ok': True,
-            'message': 'API settings saved.',
-            'setting': _setting_dict(setting, request),
-        })
-    return JsonResponse({'ok': True, 'setting': _setting_dict(setting, request)})
-
-
-# ---------------------------------------------------------------------------
-# Route map
-# ---------------------------------------------------------------------------
 
 @login_required
 def route_map(request):
@@ -1888,7 +1808,7 @@ def api_invoices(request):
         rows.append(_invoice_dict(invoice) if invoice else _synthetic_invoice_dict(order))
     return JsonResponse({
         'ok': True,
-        'selcom_enabled': _shared_setting().selcom_enabled,
+        'selcom_enabled': _platform_setting().selcom_enabled,
         'invoices': rows,
     })
 
@@ -1918,8 +1838,8 @@ def api_invoice_paid(request, pk):
 def _confirm_invoice_paid(invoice):
     order = invoice.order
     setting = _order_endpoint(order)
-    if not setting.base_url:
-        return JsonResponse({'ok': False, 'error': 'Configure an API base URL for this order\'s company before confirming an invoice.'})
+    if setting is None:
+        return JsonResponse({'ok': False, 'error': 'This order has no Odoo company (transporter) with a base URL, so the invoice cannot be confirmed.'})
 
     payload = _invoice_payload(invoice)
     url = setting.order_invoice_url()
@@ -2304,9 +2224,9 @@ def api_invoice_selcom_initiate(request, pk):
 def _initiate_selcom(request, invoice):
     if invoice.status == Invoice.Status.PAID:
         return JsonResponse({'ok': False, 'error': 'This invoice is already paid.'})
-    setting = _shared_setting()
+    setting = _platform_setting()
     if not setting.selcom_enabled:
-        return JsonResponse({'ok': False, 'error': 'Selcom payments are not enabled. Ask the administrator to configure them in the Setting page.'})
+        return JsonResponse({'ok': False, 'error': 'Selcom payments are not enabled. Ask the administrator to configure them under Configuration > Selcom.'})
 
     if invoice.selcom_order_token and invoice.selcom_status not in ('created', 'pending', ''):
         if invoice.selcom_pay_link:
@@ -2352,7 +2272,7 @@ def api_invoice_selcom_status(request, pk):
         return JsonResponse({'ok': False, 'error': 'Invoice not found.'}, status=404)
     if not invoice.selcom_order_token:
         return JsonResponse({'ok': False, 'error': 'No Selcom payment has been started for this invoice.'})
-    setting = _shared_setting()
+    setting = _platform_setting()
     if not setting.selcom_enabled:
         return JsonResponse({'ok': False, 'error': 'Selcom payments are not enabled.'})
     try:
@@ -2390,7 +2310,7 @@ def webhook_selcom(request):
     if not isinstance(payload, dict):
         return JsonResponse({'ok': False, 'error': 'Invalid payload.'}, status=400)
 
-    setting = _shared_setting()
+    setting = _platform_setting()
     valid, reason = selcom.verify_callback(
         setting,
         raw_body,

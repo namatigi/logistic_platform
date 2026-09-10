@@ -17,22 +17,23 @@
 
   <div id="tender-form-app"
        data-meta-url="{% url 'tenders:api_form_meta' %}"
-       data-settings-url="{% url 'tenders:api_settings_json' %}"
        data-submit-url="{% url 'tenders:api_tender_create' %}"
        data-list-url="{% url 'tenders:list' %}"
        data-companies-url="{% url 'companies:api_list' %}"
-       data-settings-page-url="{% url 'tenders:api_settings' %}"
+       data-config-url="{% url 'tenders:config_odoo' %}"
        data-can-edit-settings="{% if user.role == 'administrator' %}1{% else %}0{% endif %}"
        data-towns-url="{% url 'tenders:api_towns' %}">
     {% verbatim %}
 
     <div class="alert" v-if="!loaded"><p>Loading form...</p></div>
 
-    <div class="alert alert-warning" v-if="loaded && !hasBaseUrl">
-      The shared API setting is not configured yet.
-      <span v-if="canEditSettings">Configure the <strong>base URL and auth</strong> before sending tenders.
-        <a v-bind:href="settingsPageUrl">Configure API settings now &rarr;</a></span>
-      <span v-else>Your administrator must configure it before tenders can be sent.</span>
+    <div class="alert alert-warning" v-if="loaded && !transporter">
+      Your company is not linked to a transporter (Odoo company with a base URL), so tenders will be saved
+      locally and cannot be sent.
+      <span v-if="canEditSettings">
+        <a v-bind:href="configUrl">Configure Odoo companies now &rarr;</a>
+      </span>
+      <span v-else>Your administrator must link your company to a transporter before tenders can be sent.</span>
     </div>
 
     <div class="alert alert-success" v-if="success" style="margin:14px 0;">{{ message }} Redirecting...</div>
@@ -199,10 +200,10 @@
           message: '',
           loading: false,
           loaded: false,
-          hasBaseUrl: false,
+          transporter: null,
           canEditSettings: root.dataset.canEditSettings === '1',
           listUrl: root.dataset.listUrl,
-          settingsPageUrl: root.dataset.settingsPageUrl,
+          configUrl: root.dataset.configUrl,
           townsByCoord: {},
           map: null,
           routeControl: null,
@@ -218,16 +219,13 @@
           this.towns = (meta.meta && meta.meta.towns) || [];
           this.cargoTypes = (meta.meta && meta.meta.cargo_types) || [];
           this.truckTypes = (meta.meta && meta.meta.truck_types) || [];
+          this.transporter = (meta.meta && meta.meta.transporter) || null;
           this.paymentTerms = (meta.meta && meta.meta.payment_terms) || [];
 
           var towns = await api.get(root.dataset.townsUrl);
           var byName = {};
           (towns.towns || []).forEach(function (t) { byName[t.name] = t; });
           this.townsByCoord = byName;
-
-          var s = await api.get(root.dataset.settingsUrl);
-          var setting = (s && s.setting) || {};
-          this.hasBaseUrl = !!(setting.base_url || '').trim();
 
           var cs = await api.get(root.dataset.companiesUrl);
           this.companies = (cs && cs.companies) || [];

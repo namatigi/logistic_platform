@@ -9,7 +9,7 @@ from django.core.mail.backends.console import EmailBackend as ConsoleBackend
 from django.db import connection
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 
 from DjangoProject.mail_backend import ApiSettingEmailBackend
@@ -439,6 +439,12 @@ class TenderListPaginationTest(TestCase):
 
 
 class SharedSettingTest(TestCase):
+    """The shared/legacy Odoo API settings page and JSON endpoints were removed.
+
+    The ApiSetting singleton still exists for Selcom/email/media, so these tests
+    assert the removed endpoints 404 and the platform-wide paths remain on the model.
+    """
+
     def setUp(self):
         from tenders.models import ApiSetting
         self.admin = CustomUser.objects.create_user(
@@ -447,82 +453,19 @@ class SharedSettingTest(TestCase):
         self.user = CustomUser.objects.create_user(email='user@example.com', password='pass1234')
         self.setting = ApiSetting.objects.create(base_url='https://odo.example.com/')
 
-    def test_non_admin_can_read_shared_setting(self):
-        self.client.login(email='user@example.com', password='pass1234')
-        response = self.client.get(reverse('tenders:api_settings_json'))
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertTrue(data['ok'])
-        self.assertEqual(data['setting']['base_url'], 'https://odo.example.com/')
-
-    def test_non_admin_cannot_edit_shared_setting(self):
-        self.client.login(email='user@example.com', password='pass1234')
-        response = self.client.post(
-            reverse('tenders:api_settings_json'),
-            {'base_url': 'https://hacked.example.com/'},
-            content_type='application/json',
-        )
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(self.setting.base_url, 'https://odo.example.com/')
-
-    def test_admin_can_edit_shared_setting(self):
+    def test_shared_settings_page_removed(self):
         self.client.login(email='admin@example.com', password='pass1234')
-        response = self.client.post(
-            reverse('tenders:api_settings_json'),
-            {'base_url': 'https://admin.example.com/', 'auth_type': 'bearer', 'api_token': 'tok'},
-            content_type='application/json',
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json()['ok'])
-        self.setting.refresh_from_db()
-        self.assertEqual(self.setting.base_url, 'https://admin.example.com/')
-        self.assertEqual(self.setting.api_token, 'tok')
+        self.assertEqual(self.client.get('/settings/').status_code, 404)
+        with self.assertRaises(NoReverseMatch):
+            reverse('tenders:api_settings')
 
-    def test_shared_setting_is_single_row(self):
-        from tenders.models import ApiSetting
-        before = ApiSetting.objects.count()
-        self.client.login(email='user@example.com', password='pass1234')
-        response = self.client.get(reverse('tenders:api_settings_json'))
-        self.assertEqual(response.status_code, 200)
-        self.client.get(reverse('tenders:api_settings_json'))
-        self.assertEqual(ApiSetting.objects.count(), before)
-
-    def test_settings_expose_endpoint_paths(self):
-        self.client.login(email='user@example.com', password='pass1234')
-        data = self.client.get(reverse('tenders:api_settings_json')).json()
-        s = data['setting']
-        self.assertEqual(s['tenders_path'], '')
-        self.assertEqual(s['order_confirmation_path'], '')
-        self.assertEqual(s['partial_order_confirmation_path'], '')
-        self.assertEqual(s['order_invoice_path'], '')
-        self.assertEqual(s['tenders_endpoint'], 'https://odo.example.com/api/v1/tenders')
-        self.assertEqual(s['order_confirmation_endpoint'], 'https://odo.example.com/api/v1/order-confirmation')
-        self.assertEqual(s['partial_order_confirmation_endpoint'], 'https://odo.example.com/api/v1/partial-order-confirmation')
-        self.assertEqual(s['order_invoice_endpoint'], 'https://odo.example.com/api/v1/order-invoice')
-
-    def test_admin_can_save_endpoint_paths(self):
+    def test_shared_settings_json_removed(self):
         self.client.login(email='admin@example.com', password='pass1234')
-        response = self.client.post(
-            reverse('tenders:api_settings_json'),
-            {
-                'base_url': 'https://admin.example.com/',
-                'auth_type': 'bearer',
-                'tenders_path': '/tenders/v2',
-                'order_confirmation_path': 'confirm',
-                'partial_order_confirmation_path': '/partial-confirm',
-                'order_invoice_path': '/invoice/v2',
-            },
-            content_type='application/json',
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json()['ok'])
-        self.setting.refresh_from_db()
-        self.assertEqual(self.setting.tenders_path, '/tenders/v2')
-        self.assertEqual(self.setting.order_confirmation_path, 'confirm')
+        self.assertEqual(self.client.get('/api/settings/').status_code, 404)
+        with self.assertRaises(NoReverseMatch):
+            reverse('tenders:api_settings_json')
 
     def test_endpoint_paths_default_when_blank(self):
-        self.setting.base_url = 'https://odo.example.com/'
-        self.setting.save(update_fields=('base_url',))
         self.assertEqual(self.setting.endpoint_url(), 'https://odo.example.com/api/v1/tenders')
         self.assertEqual(self.setting.order_confirmation_url(), 'https://odo.example.com/api/v1/order-confirmation')
         self.assertEqual(self.setting.partial_order_confirmation_url(), 'https://odo.example.com/api/v1/partial-order-confirmation')
@@ -540,12 +483,6 @@ class SharedSettingTest(TestCase):
         self.assertEqual(self.setting.partial_order_confirmation_url(), 'https://odo.example.com/partial/v2')
         self.assertEqual(self.setting.order_invoice_url(), 'https://odo.example.com/invoice/v2')
 
-    def test_settings_page_admin_only(self):
-        self.client.login(email='user@example.com', password='pass1234')
-        self.assertEqual(self.client.get(reverse('tenders:api_settings')).status_code, 403)
-        self.client.login(email='admin@example.com', password='pass1234')
-        self.assertEqual(self.client.get(reverse('tenders:api_settings')).status_code, 200)
-
 
 class InvoicesPageTest(TestCase):
     def setUp(self):
@@ -555,6 +492,9 @@ class InvoicesPageTest(TestCase):
         )
         self.user_a = CustomUser.objects.create_user(email='invoice-a@example.com', password='pass1234')
         self.user_b = CustomUser.objects.create_user(email='invoice-b@example.com', password='pass1234')
+        self.company = OdooCompany.objects.create(
+            name='Invoices Transporter', base_url='https://odo.example.com/', auth_type='bearer',
+        )
 
     def _tender(self, user, ref):
         return Tender.objects.create(
@@ -564,11 +504,11 @@ class InvoicesPageTest(TestCase):
             distance_km=480, cargo_date=timezone.localdate(), cargo_reference=ref,
         )
 
-    def _order(self, user, tender, order_id, ref):
+    def _order(self, user, tender, order_id, ref, company=None):
         order = Order.objects.create(
             order_id=order_id, order_name=f'ORD-{order_id}', user=user, tender=tender,
             company_id=1, company_name='Alpha Haulage', cargo_reference=ref, state='confirmed',
-            amount_total=0, currency='USD',
+            amount_total=0, currency='USD', odoo_company=company if company is not None else self.company,
         )
         OrderLine.objects.create(
             order=order, line_id=order_id, product_name='Sand', quantity=1,
@@ -626,7 +566,6 @@ class InvoicesPageTest(TestCase):
         self.assertEqual(order['payment_status'], 'pending')
 
     def test_scoped_user_can_mark_paid(self):
-        ApiSetting.objects.create(base_url='https://odo.example.com/')
         invite = self._order(self.user_a, self._tender(self.user_a, 'REF-A'), 7005, 'REF-A')
         self.client.login(email='invoice-a@example.com', password='pass1234')
         with patch('tenders.views.submit_confirmation',
@@ -646,7 +585,6 @@ class InvoicesPageTest(TestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_admin_can_mark_paid(self):
-        ApiSetting.objects.create(base_url='https://odo.example.com/')
         Company.objects.create(
             user=self.user_a, name='Acme Logistics', tin='TIN-123', vat='VAT-9', country='TZ',
         )
@@ -672,7 +610,6 @@ class InvoicesPageTest(TestCase):
         self.assertEqual(invite.number, 'INV/2026/00045')
 
     def test_admin_mark_paid_dict_data_format(self):
-        ApiSetting.objects.create(base_url='https://odo.example.com/')
         invite = self._order(self.user_a, self._tender(self.user_a, 'REF-A'), 7016, 'REF-A')
         self.client.login(email='invoice-admin@example.com', password='pass1234')
         with patch('tenders.views.submit_confirmation',
@@ -683,7 +620,6 @@ class InvoicesPageTest(TestCase):
         self.assertEqual(invite.number, 'EXT-INV-7016')
 
     def test_admin_mark_paid_without_external_name_keeps_local_number(self):
-        ApiSetting.objects.create(base_url='https://odo.example.com/')
         invite = self._order(self.user_a, self._tender(self.user_a, 'REF-A'), 7015, 'REF-A')
         self.client.login(email='invoice-admin@example.com', password='pass1234')
         with patch('tenders.views.submit_confirmation', return_value=(200, '{"status":"success"}', True)):
@@ -694,7 +630,6 @@ class InvoicesPageTest(TestCase):
         self.assertEqual(invite.number, 'INV-7015')
 
     def test_admin_mark_paid_requires_external_success(self):
-        ApiSetting.objects.create(base_url='https://odo.example.com/')
         invite = self._order(self.user_a, self._tender(self.user_a, 'REF-A'), 7008, 'REF-A')
         self.client.login(email='invoice-admin@example.com', password='pass1234')
         with patch('tenders.views.submit_confirmation', return_value=(500, 'boom', False)):
@@ -704,12 +639,20 @@ class InvoicesPageTest(TestCase):
         invite.refresh_from_db()
         self.assertEqual(invite.status, 'pending')
 
-    def test_admin_mark_paid_without_setting_rejected(self):
-        invite = self._order(self.user_a, self._tender(self.user_a, 'REF-A'), 7009, 'REF-A')
+    def test_admin_mark_paid_without_company_rejected(self):
+        from tenders.views import get_or_create_invoice
+        tender = self._tender(self.user_a, 'REF-A')
+        order = Order.objects.create(
+            order_id=7009, order_name='ORD-7009', user=self.user_a, tender=tender,
+            company_id=1, company_name='Alpha Haulage', cargo_reference='REF-A', state='confirmed',
+            amount_total=0, currency='USD', odoo_company=None,
+        )
+        invite = get_or_create_invoice(order)
         self.client.login(email='invoice-admin@example.com', password='pass1234')
         response = self.client.post(reverse('tenders:api_invoice_paid', args=[invite.pk]), {})
         data = response.json()
         self.assertFalse(data['ok'])
+        self.assertIn('no Odoo company', data['error'])
         invite.refresh_from_db()
         self.assertEqual(invite.status, 'pending')
 
@@ -1031,7 +974,7 @@ class SelcomPaymentTest(TestCase):
 
     def test_settings_page_shows_selcom_card(self):
         self.client.login(email='selcom-admin@example.com', password='pass1234')
-        response = self.client.get(reverse('tenders:api_settings'))
+        response = self.client.get(reverse('tenders:config_selcom'))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Selcom payment gateway')
         self.assertContains(response, 'webhook/selcom')
@@ -1132,24 +1075,22 @@ class AdminConfigurationTest(TestCase):
         self.assertNotContains(response, 'Partial order confirmation path')
         self.assertNotContains(response, 'Order invoice path')
 
-    def test_shared_settings_save_keeps_paths(self):
+    def test_shared_settings_box_removed(self):
         self.setting.tenders_path = '/shared/tenders'
-        self.setting.order_confirmation_path = '/shared/confirmed'
         self.setting.save()
         self.client.login(email='admin@example.com', password='pass1234')
+        response = self.client.get(reverse('tenders:config_odoo'))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'Shared settings')
+        self.assertNotContains(response, 'Legacy webhook')
         response = self.client.post(
             reverse('tenders:config_odoo'),
-            {
-                'shared': '1',
-                'base_url': 'https://shared.example.com/',
-                'auth_type': 'bearer',
-            },
+            {'shared': '1', 'base_url': 'https://shared.example.com/'},
         )
-        self.assertRedirects(response, reverse('tenders:config_odoo'))
+        self.assertEqual(response.status_code, 200)
         self.setting.refresh_from_db()
-        self.assertEqual(self.setting.base_url, 'https://shared.example.com/')
+        self.assertNotEqual(self.setting.base_url, 'https://shared.example.com/')
         self.assertEqual(self.setting.tenders_path, '/shared/tenders')
-        self.assertEqual(self.setting.order_confirmation_path, '/shared/confirmed')
 
     def test_odoo_page_shows_company_webhook_url(self):
         company = OdooCompany.objects.create(name='Webhook Co', base_url='https://wh.example.com')
@@ -1288,15 +1229,16 @@ class OdooCompanyWebhookTest(TestCase):
                              'commission': 0, 'price_unit': 150, 'price_subtotal': 150, 'price_total': 150}],
         }
 
-    def test_webhook_legacy_path_leaves_company_unset(self):
+    def test_webhook_requires_slug(self):
         self._tender('REF-L')
         response = self.client.post(
-            reverse('tenders:webhook_orders'),
+            '/webhook/orders/',
             json.dumps(self._payload(90001, 'REF-L')), content_type='application/json',
         )
-        self.assertEqual(response.status_code, 200)
-        order = Order.objects.get(order_id=90001)
-        self.assertIsNone(order.odoo_company)
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(Order.objects.filter(order_id=90001).exists())
+        with self.assertRaises(NoReverseMatch):
+            reverse('tenders:webhook_orders')
 
     def test_webhook_company_path_attaches_company(self):
         self._tender('REF-A')
@@ -1382,15 +1324,15 @@ class OdooCompanyRoutingTest(TestCase):
         url = m.call_args[0][1]
         self.assertEqual(url, self.company.order_confirmation_url())
 
-    def test_award_confirmation_falls_back_to_shared_setting(self):
+    def test_award_confirmation_without_company_is_rejected(self):
         order = self._order(91002, 'REF-FALLBACK', company=None)
         self.client.login(email='route-owner@example.com', password='pass1234')
         with patch('tenders.views.submit_confirmation',
                    return_value=(200, '{"status":"success"}', True)) as m:
             response = self.client.post(reverse('tenders:api_order_award', args=[order.pk]), {})
-        self.assertTrue(response.json()['ok'])
-        url = m.call_args[0][1]
-        self.assertEqual(url, 'https://shared.example.com/api/v1/order-confirmation')
+        self.assertFalse(response.json()['ok'])
+        self.assertIn('no Odoo company', response.json()['error'])
+        m.assert_not_called()
 
     def test_invoice_confirmation_posts_to_order_company(self):
         from tenders.views import get_or_create_invoice
@@ -1404,7 +1346,7 @@ class OdooCompanyRoutingTest(TestCase):
         url = m.call_args[0][1]
         self.assertEqual(url, self.company.order_invoice_url())
 
-    def test_invoice_confirmation_falls_back_to_shared_setting(self):
+    def test_invoice_confirmation_without_company_is_rejected(self):
         from tenders.views import get_or_create_invoice
         order = self._order(91004, 'REF-INV-FALLBACK', company=None)
         invite = get_or_create_invoice(order)
@@ -1412,9 +1354,9 @@ class OdooCompanyRoutingTest(TestCase):
         with patch('tenders.views.submit_confirmation',
                    return_value=(200, ('{"status":"success","data":{"name":"EXT-INV-2"}}'), True)) as m:
             response = self.client.post(reverse('tenders:api_invoice_paid', args=[invite.pk]), {})
-        self.assertTrue(response.json()['ok'])
-        url = m.call_args[0][1]
-        self.assertEqual(url, 'https://shared.example.com/api/v1/order-invoice')
+        self.assertFalse(response.json()['ok'])
+        self.assertIn('no Odoo company', response.json()['error'])
+        m.assert_not_called()
 
 
 class ApiDiagnosticsTest(TestCase):
@@ -1428,6 +1370,10 @@ class ApiDiagnosticsTest(TestCase):
         self.user = CustomUser.objects.create_user(
             email='diag-user@example.com', password='pass1234',
         )
+        self.company = OdooCompany.objects.create(
+            name='Diag Transporter', base_url='https://diag.example.com/', auth_type='bearer', api_token='tok',
+        )
+        Company.objects.create(user=self.user, name='Diag Ltd', odoo_company=self.company)
 
     def _login(self, user):
         self.client.force_login(user)
@@ -1487,14 +1433,13 @@ class ApiDiagnosticsTest(TestCase):
         response = self.client.post(reverse('tenders:api_order_award', args=[order.pk]), {})
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.json()['ok'])
-        entries = ApiDiagnostic.objects.filter(api_point='order.award')
+        entries = ApiDiagnostic.objects.filter(api_point='order_award')
         self.assertEqual(entries.count(), 1)
         self.assertEqual(entries[0].user, self.user)
-        self.assertEqual(entries[0].message, 'This order has no cargo reference to confirm.')
+        self.assertIn('no Odoo company', entries[0].message)
 
     def test_award_confirmation_failure_logged(self):
         from tenders.models import ApiDiagnostic
-        ApiSetting.objects.create(base_url='https://diag.example.com/')
         tender = Tender.objects.create(
             user=self.user, route_loading='Nairobi', route_delivery='Mombasa',
             customer='DiagCo', cargo_type=Tender.CargoType.DRY_VAN,
@@ -1504,6 +1449,7 @@ class ApiDiagnosticsTest(TestCase):
         order = Order.objects.create(
             order_id=99002, order_name='ORD-99002', user=self.user, state='draft',
             tender=tender, cargo_reference='REF-DIAG', amount_total=0, currency='TZS',
+            odoo_company=self.company,
         )
         self._login(self.user)
         with patch('tenders.views.submit_confirmation', return_value=(500, 'server boom', False)):
@@ -1687,8 +1633,9 @@ class PerTransporterTenderTest(TestCase):
         setting = m.call_args[0][0]
         self.assertEqual(setting.endpoint_url(), 'https://transporter.example.com/dispatch/tender')
 
-    def test_tender_falls_back_to_shared_setting_without_link(self):
-        shared = ApiSetting.objects.create(base_url='https://shared.example.com/')
+    def test_tender_not_submitted_without_company_link(self):
+        # No shared fallback: a linked Odoo company is required even if an ApiSetting row exists.
+        ApiSetting.objects.create(base_url='https://shared.example.com/')
         Company.objects.create(user=self.user, name='Transporter Ltd', odoo_company=None)
         with patch('tenders.views.submit_tender',
                    return_value=(200, '{"status":"success","data":{"id":7,"name":"CAR0003"}}', True)) as m:
@@ -1697,9 +1644,8 @@ class PerTransporterTenderTest(TestCase):
                 content_type='application/json',
             )
         self.assertTrue(response.json()['ok'])
-        setting = m.call_args[0][0]
-        self.assertEqual(setting.pk, shared.pk)
-        self.assertEqual(setting.endpoint_url(), 'https://shared.example.com/api/v1/tenders')
+        self.assertTrue(response.json()['needs_settings'])
+        m.assert_not_called()
 
     def test_tender_saved_locally_when_no_target(self):
         # No shared setting and no linked company -> saved locally, not submitted.
@@ -1727,6 +1673,10 @@ class PendingPushTest(TestCase):
             role=CustomUser.Role.ADMINISTRATOR,
         )
         self.setting = ApiSetting.objects.create(base_url='https://queue.example.com/')
+        self.odoo = OdooCompany.objects.create(
+            name='Queue Transporter', base_url='https://queue.example.com/', auth_type='bearer',
+        )
+        Company.objects.create(user=self.user, name='Queue Ltd', odoo_company=self.odoo)
 
     def _payload(self):
         return {
@@ -1812,9 +1762,10 @@ class PendingPushTest(TestCase):
         push.refresh_from_db()
         self.assertEqual(push.state, self.pending_model.State.FAILED)
 
-    def test_flush_skips_when_no_base_url(self):
+    def test_flush_skips_when_transporter_has_no_base_url(self):
         push = self._enqueue()
-        ApiSetting.objects.all().delete()
+        self.odoo.base_url = ''
+        self.odoo.save(update_fields=('base_url',))
         delivered, failed, skipped = tenders_views.flush_pending_pushes()
         self.assertEqual((delivered, failed, skipped), (0, 0, 1))
         push.refresh_from_db()

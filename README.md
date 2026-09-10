@@ -113,20 +113,6 @@ An escrow account is created automatically for a tender **when its first invoice
 - **Pending tender submissions** — a **tender whose first submission failed because the Odoo instance was unreachable** (connection error or HTTP 5xx) is **queued automatically** and pushed through once the API is back. It is re-sent on the next **successful** tender submission, by the management command `manage.py flush_pending_pushes` (safe to run on a cron schedule), or via the **Retry now** button on the Diagnostics page. Queued items are shown there with the account, target and last error; submissions permanently rejected with a 4xx response are marked failed and stop retrying.
 - **Configuration** — API settings, Selcom gateway, incoming/outgoing email, and file storage (server volume vs S3).
 
-### Configuration &gt; API Settings
-Global platform setting (shared by every user, administrator-only) for the **outgoing tender endpoint**:
-- `base_url` — root URL; tenders are posted to `{base_url}{tenders_path}` (default `/api/v1/tenders`)
-- `auth_type` — `none`, `bearer` (Bearer token) or `basic`
-- `api_token` / `username` / `password`
-- `tenders_path`, `order_confirmation_path`, `partial_order_confirmation_path`, `order_invoice_path` — override the four outgoing API paths (leave blank to use the defaults below)
-
-The page also shows the **incoming webhook URL** (with a copy button) to share with the external system.
-
-The same **Odoo** configuration page includes a **Shared settings** box (administrator only) for the shared API
-`base_url` and its auth. The four outgoing API paths are configured on **Configuration > API Settings**. Tenders
-submitted by companies **not** linked to an Odoo company, and confirmations for orders received on the shared
-(legacy) webhook, use these shared settings.
-
 ### Configuration &gt; Odoo companies
 Multiple Odoo instances/companies can be registered on the **Odoo** configuration page. Each company has:
 - `name` and auto-generated `slug` (customisable)
@@ -138,10 +124,10 @@ Each company uses the default four API paths (`/api/v1/tenders`, `/api/v1/order-
 
 Every company gets its own incoming order webhook URL: `…/webhook/orders/<slug>/`. Orders posted to it are attributed to that company, and the **order/invoice confirmations are sent back to that company** (its `base_url` + configured paths).
 
-An **Odoo company is a transporter**: a registered company (see *Companies*) linked to an Odoo company submits its **tenders to that instance's `base_url` + `tenders_path`** (with that instance's auth). Unlinked companies fall back to the shared API setting. Each company's webhook URL is shown with a copy button.
+An **Odoo company is a transporter**: a registered company (see *Companies*) linked to an Odoo company submits its **tenders to that instance's `base_url` + `tenders_path`** (with that instance's auth). Each company's webhook URL is shown with a copy button.
 
 ### Configuration &gt; Selcom payment gateway
-The Setting page (administrator only) also configures **invoice payments** through [Selcom](https://selcom.net) APGW:
+The Selcom page (administrator only) configures **invoice payments** through [Selcom](https://selcom.net) APGW:
 
 - `selcom_enabled` — master switch for online invoice payments
 - `selcom_sandbox` — use the sandbox API (`https://apigwdev.selcommobile.com/v1`) instead of production
@@ -161,12 +147,11 @@ The page shows the **Selcom payment callback URL** (with a copy button) to regis
 - Selcom calls `POST /webhook/selcom/` (CSRF-exempt) with the payment result; the callback is signature-verified when a webhook secret is configured, then the invoice is marked paid.
 
 ### Orders (webhook)
-Orders are pushed by the Odoo instances to one of two (CSRF-exempt, JSON) webhook URLs:
+Orders are pushed by the Odoo instances to the (CSRF-exempt, JSON) webhook URL:
 
 | URL | Behaviour |
 |-----|-----------|
 | `POST /webhook/orders/<slug>/` | Per-instance URL. The order is attributed to the Odoo company with that `slug`. Unknown slug → **404**, inactive company → **403**. |
-| `POST /webhook/orders/` | Legacy shared URL. Orders are **not** attributed to any company; their confirmations fall back to the shared API setting. |
 
 - Orders are upserted by `order_id`, storing every detail and the order lines.
 - If `cargo_reference` matches a tender reference, the order is linked to that tender and its owner.
@@ -202,7 +187,7 @@ Orders are pushed by the Odoo instances to one of two (CSRF-exempt, JSON) webhoo
 ```
 
 ### Outgoing order confirmations
-When an order is awarded, HYPAX confirms it back to the **order's own Odoo company** (shared settings when the order has no company), using that company's `base_url` + configured paths, with the same auth type (Bearer/basic).
+When an order is awarded, HYPAX confirms it back to the **order's own Odoo company** (the transporter it was posted by), using that company's `base_url` + configured paths, with the same auth type (Bearer/basic). An order with no linked company cannot be confirmed until an administrator fixes its transporter.
 
 - **Full confirmation** → `POST {base_url}/api/v1/order-confirmation`
   ```json
@@ -242,7 +227,7 @@ When an invoice is confirmed as paid, HYPAX notifies the Odoo instance the order
 `tax_id` / `country` come from the posting user's registered company. The response's `data.name` (if present, e.g. an external invoice number) is stored as the invoice number.
 
 ### API endpoint paths (configuration-backed)
-All four outgoing paths default to `/api/v1/...` and can be overridden **per Odoo company** or **globally in the shared settings**:
+All four outgoing paths default to `/api/v1/...` and can be overridden **per Odoo company** (in the Django admin):
 
 | Purpose | Default path |
 |---------|--------------|
@@ -251,7 +236,7 @@ All four outgoing paths default to `/api/v1/...` and can be overridden **per Odo
 | Partial order confirmation | `/api/v1/partial-order-confirmation` |
 | Invoice confirmation | `/api/v1/order-invoice` |
 
-Both `ApiSetting` and `OdooCompany` store these four path fields; leaving them blank uses the defaults. The settings API (`/api/settings/`) also exposes the computed full endpoint URLs.
+`OdooCompany` stores these four path fields; leaving them blank uses the defaults.
 
 ## Getting started
 
@@ -326,7 +311,6 @@ DjangoProject/
 | `/orders/`             | Orders received via webhook      |
 | `/tracker/`            | Cargo tracker                    |
 | `/invoices/`           | Invoices + pay online (Selcom)   |
-| `/settings/`           | Shared API settings (base URL, auth, endpoint paths, webhook URL) |
 | `/payment-terms/`      | Pay Term library                 |
 | `/escrow/`             | Escrow accounts (admin)          |
 | `/users/`              | Online users overview (admin)          |
@@ -334,6 +318,5 @@ DjangoProject/
 | `/api/admin/diagnostics/` | Diagnostics data (admin, JSON)      |
 | `/configuration/*`     | Odoo companies / Selcom / Email / Files (admin) |
 | `/webhook/orders/<slug>/` | Per-instance order webhook (POST, CSRF-exempt) |
-| `/webhook/orders/`     | Shared order webhook (POST, CSRF-exempt) |
 | `/webhook/selcom/`     | Selcom payment callback (POST)   |
 | `/admin/`              | Django admin                     |
