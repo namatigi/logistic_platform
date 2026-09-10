@@ -212,7 +212,8 @@ def notify_order_update(order):
 
 
 def build_payload(tender):
-    return {
+    payment_term = tender.payment_terms if tender.payment_terms_id else None
+    payload = {
         'route_loading': tender.route_loading,
         'route_delivery': tender.route_delivery,
         'customer': 'HYPAX',
@@ -223,6 +224,15 @@ def build_payload(tender):
         'distance_km': tender.distance_km,
         'cargo_date': tender.cargo_date.isoformat(),
     }
+    if payment_term is not None:
+        payload['payment_terms'] = {
+            'name': payment_term.name,
+            'description': payment_term.description,
+            'items': [{'text': item.text} for item in payment_term.items.all()],
+        }
+    else:
+        payload['payment_terms'] = None
+    return payload
 
 
 def submit_tender(setting, tender):

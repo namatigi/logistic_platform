@@ -2,17 +2,22 @@
 
 A Django web platform for managing cargo logistics:
 
-- Email-based **user sign up / sign in**
+- Email-based **user sign up / sign in** with three roles: **Administrator**, **Agent** and **User**
 - **Company registration** with full company details
-- **Tender submission** to an external system via `POST {base_url}/api/v1/tenders`
+- **Tender submission** to an external system via `POST {base_url}/api/v1/tenders`, including **payment terms**
 - **Orders inbox** fed by a **webhook** from the external system, linked back to the originating tender
+- **Invoices paid online** through the Selcom payment gateway (mobile money &amp; bank transfer)
+- **Escrow accounts** per tender, tracking what was deposited against what was invoiced
+- **Administrator tools**: live user overview, escrow monitoring, and API/payment/file configuration pages
 
 ## Tech stack
 
 - Python 3.14
 - Django 6.0.8 (pinned: supports PostgreSQL 14; Django 6.1+ requires PG 15+)
 - PostgreSQL
+- Channels / WebSockets for live order updates
 - `requests` for outgoing API calls
+- Optional S3-compatible object storage for uploaded files (profile pictures)
 
 ## Features
 
@@ -42,9 +47,24 @@ A Django web platform for managing cargo logistics:
   "weight": 25.0,
   "number_of_trucks": 2,
   "distance_km": 850.0,
-  "cargo_date": "2026-09-10"
+  "cargo_date": "2026-09-10",
+  "payment_terms": {
+    "name": "On confirmation",
+    "description": "Pay via Selcom before loading.",
+    "items": [
+      { "text": "50% advance on confirmation" },
+      { "text": "Balance on delivery" }
+    ]
+  }
 }
 ```
+
+The optional `payment_terms` object repeats what the user picked from their **Pay Term** library on the tender form:
+- `name` — the term label (e.g. "Net 30", "On confirmation")
+- `description` — the full-term description
+- `items` — the individual term details added one at a time on the Pay Term page
+
+When no payment term is selected the field is sent as `null`.
 
 #### Tender API response (used to link webhook orders)
 ```json
@@ -68,6 +88,23 @@ A Django web platform for managing cargo logistics:
 }
 ```
 The returned `data.name` (`CAR00014`) is stored as the tender's **cargo reference** and used to match incoming webhook orders.
+
+### Payment terms (Pay Term)
+Every user has a personal **Pay Term** library (`/payment-terms/`):
+- Create a term with a name, optional description, and **multiple individual term details** added one after the other (e.g. "50% advance on confirmation", then "Balance on delivery").
+- Toggle terms on/off, edit, delete, and add/remove individual details at any time.
+- Selecting a Pay Term on the tender form includes it in the tender payload sent to the external system (see above).
+
+### Escrow accounts
+An escrow account is created automatically for each tender once its cargo is awarded (invoice issued):
+- Virtual account number `EA-00001`, customer, transporter, amount, payment terms and status (**open** → **pending** → **paid**).
+- `deposited_amount` is summed from all invoices of the tender; confirming a Selcom payment marks the invoice paid and refreshes the escrow.
+- Administrators monitor everything on the **Escrow** page (`/escrow/`).
+
+### Administrator tools
+- **Users** (`/users/`) — number of users **online now** (derived from active sessions) and the full account list with role, phone, last activity and status, auto-refreshing every 30 seconds.
+- **Escrow** — see *Escrow accounts* above.
+- **Configuration** — API settings, Selcom gateway, incoming/outgoing email, and file storage (server volume vs S3).
 
 ### Configuration &gt; API Settings
 Per-user configuration for the outgoing tender endpoint:
@@ -185,9 +222,9 @@ Emails (sign-up) use the console backend by default.
 DjangoProject/
 ├── manage.py
 ├── DjangoProject/          # Project config (settings, urls, wsgi/asgi)
-├── users/                  # CustomUser (email auth), sign up / sign in
+├── users/                  # CustomUser (email auth), roles, profiles, admin dashboard
 ├── companies/              # Company model + CRUD
-├── tenders/                # Tender, ApiSetting, Order, OrderLine, webhook
+├── tenders/                # Tender, Pay Term, Escrow, ApiSetting, Order, OrderLine, Selcom, webhook
 ├── templates/              # Shared templates (base, auth, apps)
 └── static/                 # stylesheets
 ```
@@ -203,6 +240,13 @@ DjangoProject/
 | `/tenders/`            | Tender list                      |
 | `/tenders/new/`        | New tender form                  |
 | `/orders/`             | Orders received via webhook      |
+| `/tracker/`            | Cargo tracker                    |
+| `/invoices/`           | Invoices + pay online (Selcom)   |
 | `/settings/`           | API settings (URL + auth + webhook URL) |
+| `/payment-terms/`      | Pay Term library                 |
+| `/escrow/`             | Escrow accounts (admin)          |
+| `/users/`              | Online users overview (admin)    |
+| `/configuration/*`     | Odoo / Selcom / Email / Files (admin) |
 | `/webhook/orders/`     | Incoming order webhook (POST)    |
+| `/webhook/selcom/`     | Selcom payment callback (POST)   |
 | `/admin/`              | Django admin                     |

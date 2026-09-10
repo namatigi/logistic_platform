@@ -83,6 +83,36 @@ class EscrowAccountsTest(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertIn('escrow_accounts', res.json())
 
+    def test_build_payload_includes_payment_terms(self):
+        from tenders.models import PaymentTerm, Tender
+        from tenders.views import build_payload
+        from django.utils import timezone
+        term = PaymentTerm.objects.create(user=self.user, name='On confirmation', description='Pay via Selcom before loading.')
+        term.items.create(text='50% advance on confirmation', sort_order=0)
+        term.items.create(text='Balance on delivery', sort_order=1)
+        tender = Tender.objects.create(
+            user=self.user, route_loading='Dar es Salaam', route_delivery='Mombasa',
+            customer='HYPAX', cargo_type='container_20', truck_type='trailer',
+            weight=10, number_of_trucks=1, distance_km=100, cargo_date=timezone.localdate(),
+            payment_terms=term,
+        )
+        payload = build_payload(tender)
+        self.assertEqual(payload['payment_terms']['name'], 'On confirmation')
+        self.assertEqual(payload['payment_terms']['description'], 'Pay via Selcom before loading.')
+        self.assertEqual([i['text'] for i in payload['payment_terms']['items']], ['50% advance on confirmation', 'Balance on delivery'])
+
+    def test_build_payload_payment_terms_nullable(self):
+        from tenders.models import Tender
+        from django.utils import timezone
+        from tenders.views import build_payload
+        tender = Tender.objects.create(
+            user=self.user, route_loading='Dar es Salaam', route_delivery='Mombasa',
+            customer='HYPAX', cargo_type='container_20', truck_type='trailer',
+            weight=10, number_of_trucks=1, distance_km=100, cargo_date=timezone.localdate(),
+        )
+        payload = build_payload(tender)
+        self.assertIsNone(payload['payment_terms'])
+
     def test_form_meta_includes_payment_terms(self):
         from tenders.models import PaymentTerm
         PaymentTerm.objects.create(user=self.user, name='On confirmation')
