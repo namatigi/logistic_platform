@@ -80,8 +80,13 @@
         <li class="{% if request.resolver_match.url_name == 'invoices' %}active{% endif %}">
           <a href="{% url 'tenders:invoices' %}">Invoices</a>
         </li>
+        {% if user.role == 'administrator' %}
+        <li class="{% if request.resolver_match.url_name == 'admin_escrow' %}active{% endif %}">
+          <a href="{% url 'tenders:admin_escrow' %}">Escrow</a>
+        </li>
+        {% endif %}
         <li class="{% if request.resolver_match.url_name == 'payment_terms' %}active{% endif %}">
-          <a href="{% url 'tenders:payment_terms' %}">Pay Term</a>
+          <a href="{% url 'tenders:payment_terms' %}">Pay Terms</a>
         </li>
         <li class="{% if request.resolver_match.url_name == 'tracker' %}active{% endif %}">
           <a href="{% url 'tenders:tracker' %}">Tracker</a>
@@ -106,9 +111,6 @@
         </li>
         <li class="{% if request.resolver_match.url_name == 'admin_dashboard' %}active{% endif %}">
           <a href="{% url 'users:admin_dashboard' %}">Admin</a>
-        </li>
-        <li class="{% if request.resolver_match.url_name == 'admin_escrow' %}active{% endif %}">
-          <a href="{% url 'tenders:admin_escrow' %}">Escrow</a>
         </li>
         <li class="{% if request.resolver_match.url_name == 'admin_users' %}active{% endif %}">
           <a href="{% url 'tenders:admin_users' %}">Users</a>
