@@ -26,6 +26,7 @@ from tenders.models import ApiSetting, Invoice, Order, OrderLine, Tender, Town, 
 from tenders.views import (
     SIM_ACCELERATION,
     SIM_SPEED_KMH,
+    _admin_user_dict,
     _agent_matches_order,
     _invoice_dict,
     _online_user_ids,
@@ -216,12 +217,20 @@ def api_admin_dashboard(request):
     transporters = Transporter.objects.order_by('company_name', 'alias')
     agents = CustomUser.objects.filter(role=CustomUser.Role.AGENT).select_related('profile').order_by('-date_joined')
     online_ids = _online_user_ids()
+    users = [
+        _admin_user_dict(user, online_ids, request=request)
+        for user in CustomUser.objects.select_related('profile').order_by('-last_login')
+    ]
+    online_users = [u for u in users if u['is_online']]
+    offline_users = [u for u in users if not u['is_online']]
     return JsonResponse({
         'ok': True,
         'transporters': [_transporter_dict(t) for t in transporters],
         'agents': [_agent_dict(a) for a in agents],
         'online_count': len(online_ids),
         'total_users': CustomUser.objects.count(),
+        'online_users': online_users,
+        'offline_users': offline_users,
     })
 
 

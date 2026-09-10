@@ -288,6 +288,19 @@ class AdminDashboardTest(TestCase):
         self.assertIn('online_count', data)
         self.assertIn('total_users', data)
         self.assertGreaterEqual(data['total_users'], 2)
+        self.assertIn('online_users', data)
+        self.assertIn('offline_users', data)
+        online_emails = [u['email'] for u in data['online_users']]
+        offline_emails = [u['email'] for u in data['offline_users']]
+        self.assertIn('admin@example.com', online_emails)
+        self.assertIn('agent2@example.com', offline_emails)
+        self.assertEqual(len(online_emails) + len(offline_emails), data['total_users'])
+
+    def test_admin_page_shows_users_presence(self):
+        response = self.client.get(reverse('users:admin_dashboard'))
+        self.assertContains(response, 'users-presence')
+        self.assertContains(response, 'Online')
+        self.assertContains(response, 'Offline')
 
     def test_admin_page_shows_users_summary_badge(self):
         response = self.client.get(reverse('users:admin_dashboard'))

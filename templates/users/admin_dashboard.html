@@ -64,6 +64,57 @@
     </div>
 
     <div class="card" v-cloak>
+      <h2 class="card-title">Users</h2>
+      <p class="profile-hint" style="margin:-8px 0 12px;">Online and offline users of the system.</p>
+
+      <div class="users-presence">
+        <div class="users-presence-col">
+          <h3 class="users-presence-heading">
+            <span class="user-status-dot is-online"></span> Online ({{ onlineUsers.length }})
+          </h3>
+          <div v-if="!onlineUsers.length" class="profile-hint">No users online right now.</div>
+          <div class="address-item" v-for="u in onlineUsers" v-bind:key="u.id">
+            <div class="profile-avatar" style="width:40px; height:40px; flex:none;">
+              <span>{{ userInitials(u) }}</span>
+            </div>
+            <div class="address-body">
+              <strong>{{ u.full_name }}</strong>
+              <div style="color:#64748b; font-size:14px;">{{ u.email }}</div>
+              <div style="margin-top:2px;">
+                <span class="badge badge-info" style="font-size:12px;">{{ u.role_label }}</span>
+              </div>
+            </div>
+            <div v-if="u.last_login" style="color:#94a3b8; font-size:12px; white-space:nowrap;">
+              last {{ fmtDate(u.last_login) }}
+            </div>
+          </div>
+        </div>
+
+        <div class="users-presence-col">
+          <h3 class="users-presence-heading">
+            <span class="user-status-dot"></span> Offline ({{ offlineUsers.length }})
+          </h3>
+          <div v-if="!offlineUsers.length" class="profile-hint">No users offline.</div>
+          <div class="address-item" v-for="u in offlineUsers" v-bind:key="u.id">
+            <div class="profile-avatar" style="width:40px; height:40px; flex:none;">
+              <span>{{ userInitials(u) }}</span>
+            </div>
+            <div class="address-body">
+              <strong>{{ u.full_name }}</strong>
+              <div style="color:#64748b; font-size:14px;">{{ u.email }}</div>
+              <div style="margin-top:2px;">
+                <span class="badge badge-info" style="font-size:12px;">{{ u.role_label }}</span>
+              </div>
+            </div>
+            <div v-if="u.last_login" style="color:#94a3b8; font-size:12px; white-space:nowrap;">
+              last {{ fmtDate(u.last_login) }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" v-cloak>
       <h2 class="card-title">Agents</h2>
       <p class="profile-hint" style="margin:-8px 0 12px;">Registered agents of the platform.</p>
 
@@ -188,6 +239,8 @@
           agents: [],
           onlineCount: 0,
           totalUsers: 0,
+          onlineUsers: [],
+          offlineUsers: [],
           agentForm: blankAgent(),
           showForm: false,
           saving: false,
@@ -211,6 +264,8 @@
             self.agents = (res && res.agents) || [];
             self.onlineCount = (res && res.online_count) || 0;
             self.totalUsers = (res && res.total_users) || 0;
+            self.onlineUsers = (res && res.online_users) || [];
+            self.offlineUsers = (res && res.offline_users) || [];
           } catch (e) {
             self.error = e.message;
           }
@@ -228,6 +283,10 @@
         agentInitials: function (a) {
           return ((a.first_name || '').charAt(0) || '') + ((a.last_name || '').charAt(0) || 'A');
         },
+        userInitials: function (u) {
+          return ((u.first_name || '').charAt(0) || '') + ((u.last_name || '').charAt(0) || 'U');
+        },
+        fmtDate: function (v) { return window.HYPAX.fmtDate(v); },
         onPictureChange: function (e) {
           var file = e.target.files && e.target.files[0];
           if (!file) return;
