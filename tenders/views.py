@@ -773,18 +773,30 @@ def config_odoo(request):
     if edit_pk:
         editing = OdooCompany.objects.filter(pk=edit_pk).first()
 
+    shared_setting = _shared_setting()
+    form = OdooCompanyForm(instance=editing) if editing else OdooCompanyForm()
+    shared_form = ApiSettingForm(instance=shared_setting)
     if request.method == 'POST':
-        instance = editing
-        if instance is None and request.POST.get('name'):
-            instance = OdooCompany()
-        form = OdooCompanyForm(request.POST, instance=instance) if instance else None
-        if form is not None and form.is_valid():
-            form.save()
-            _flush_derived_caches()
-            messages.success(request, 'Odoo company saved.')
-            return redirect('tenders:config_odoo')
+        if request.POST.get('shared') == '1':
+            shared_form = ApiSettingForm(request.POST, instance=shared_setting)
+            if shared_form.is_valid():
+                shared_form.save()
+                _flush_derived_caches()
+                messages.success(request, 'Shared settings saved.')
+                return redirect('tenders:config_odoo')
+        else:
+            instance = editing
+            if instance is None and request.POST.get('name'):
+                instance = OdooCompany()
+            form = OdooCompanyForm(request.POST, instance=instance) if instance else None
+            if form is not None and form.is_valid():
+                form.save()
+                _flush_derived_caches()
+                messages.success(request, 'Odoo company saved.')
+                return redirect('tenders:config_odoo')
     else:
         form = OdooCompanyForm(instance=editing) if editing else OdooCompanyForm()
+        shared_form = ApiSettingForm(instance=shared_setting)
 
     companies = OdooCompany.objects.all()
     for company in companies:
@@ -797,6 +809,8 @@ def config_odoo(request):
     context['companies'] = companies
     context['form'] = form
     context['editing'] = editing
+    context['shared_form'] = shared_form
+    context['shared_setting'] = shared_setting
     context['shared_webhook_url'] = request.build_absolute_uri(reverse('tenders:webhook_orders'))
     return render(request, 'tenders/config_odoo.html', context)
 

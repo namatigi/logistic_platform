@@ -121,6 +121,11 @@ Global platform setting (shared by every user, administrator-only) for the **out
 
 The page also shows the **incoming webhook URL** (with a copy button) to share with the external system.
 
+The same **Odoo** configuration page includes a **Shared settings** box (administrator only) for the shared API
+`base_url` (preview: `&lt;base_url&gt;{{ tenders_path|default:'/api/v1/tenders' }}`), its auth, and the four outgoing
+API paths. Tenders submitted by companies **not** linked to an Odoo company, and confirmations for orders received on
+the shared (legacy) webhook, use these shared settings.
+
 ### Configuration &gt; Odoo companies
 Multiple Odoo instances/companies can be registered on the **Odoo** configuration page. Each company has:
 - `name` and auto-generated `slug` (customisable)

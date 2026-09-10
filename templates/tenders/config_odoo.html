@@ -176,6 +176,91 @@
     </div>
 
   <div class="card" style="border-color:#bfdbfe; background:#fbfdff;">
+    <div class="card-title">Shared settings</div>
+    <p class="form-help" style="margin:-4px 0 14px;">
+      Used by companies <strong>not</strong> linked to an Odoo company above &mdash; tenders are posted to the shared
+      base URL, and unlinked order confirmations fall back here. Tenders currently go to:
+      <code>{{ shared_setting.endpoint_url }}</code>
+    </p>
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+      <input type="hidden" name="shared" value="1">
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Shared base URL</label>
+        <input type="url" name="base_url" required value="{{ shared_form.base_url.value|default_if_none:'' }}" placeholder="https://odoo.example.com">
+        <span class="form-help">Root URL of the shared Odoo instance, e.g. <code>https://namatigi-hypax1-main-37804807.dev.odoo.com</code>. Tenders are posted to <code>&lt;base_url&gt;{{ shared_setting.tenders_path|default:'/api/v1/tenders' }}</code>.</span>
+        {% if shared_form.base_url.errors %}<div class="field-error"><ul><li>{{ shared_form.base_url.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Auth type</label>
+        <select name="auth_type">
+          {% for value, label in shared_form.auth_type.field.choices %}
+            <option value="{{ value }}" {% if shared_form.auth_type.value == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <span class="form-help">How outgoing tender submissions and confirmations authenticate.</span>
+        {% if shared_form.auth_type.errors %}<div class="field-error"><ul><li>{{ shared_form.auth_type.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>API token</label>
+        <input type="text" name="api_token" value="{{ shared_form.api_token.value|default_if_none:'' }}">
+        <span class="form-help">Token used for <strong>Bearer token</strong> auth. Ignored for other types.</span>
+        {% if shared_form.api_token.errors %}<div class="field-error"><ul><li>{{ shared_form.api_token.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Username</label>
+        <input type="text" name="username" value="{{ shared_form.username.value|default_if_none:'' }}">
+        <span class="form-help">Required only for <strong>Basic auth</strong>.</span>
+        {% if shared_form.username.errors %}<div class="field-error"><ul><li>{{ shared_form.username.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Password</label>
+        <input type="password" name="password" value="{{ shared_form.password.value|default_if_none:'' }}">
+        <span class="form-help">Required only for <strong>Basic auth</strong>.</span>
+        {% if shared_form.password.errors %}<div class="field-error"><ul><li>{{ shared_form.password.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Tenders path</label>
+        <input type="text" name="tenders_path" value="{{ shared_form.tenders_path.value|default_if_none:'' }}" placeholder="/api/v1/tenders">
+        <span class="form-help">Leave blank for the default <code>/api/v1/tenders</code>.</span>
+        {% if shared_form.tenders_path.errors %}<div class="field-error"><ul><li>{{ shared_form.tenders_path.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Order confirmation path</label>
+        <input type="text" name="order_confirmation_path" value="{{ shared_form.order_confirmation_path.value|default_if_none:'' }}" placeholder="/api/v1/order-confirmation">
+        <span class="form-help">Leave blank for the default <code>/api/v1/order-confirmation</code>.</span>
+        {% if shared_form.order_confirmation_path.errors %}<div class="field-error"><ul><li>{{ shared_form.order_confirmation_path.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Partial order confirmation path</label>
+        <input type="text" name="partial_order_confirmation_path" value="{{ shared_form.partial_order_confirmation_path.value|default_if_none:'' }}" placeholder="/api/v1/partial-order-confirmation">
+        <span class="form-help">Used when only some order lines are awarded. Leave blank for the default.</span>
+        {% if shared_form.partial_order_confirmation_path.errors %}<div class="field-error"><ul><li>{{ shared_form.partial_order_confirmation_path.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Order invoice path</label>
+        <input type="text" name="order_invoice_path" value="{{ shared_form.order_invoice_path.value|default_if_none:'' }}" placeholder="/api/v1/order-invoice">
+        <span class="form-help">Used when confirming an invoice as paid. Leave blank for the default.</span>
+        {% if shared_form.order_invoice_path.errors %}<div class="field-error"><ul><li>{{ shared_form.order_invoice_path.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-actions" style="margin-top:8px;">
+        <button type="submit" class="btn btn-primary">Save shared settings</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" style="border-color:#bfdbfe; background:#fbfdff;">
     <div class="card-title">Legacy webhook (shared)</div>
     <p style="color:#475569; font-size:14px; margin-bottom:14px;">
       Orders posted to this shared URL are <strong>not</strong> attributed to any specific company; their
