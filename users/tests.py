@@ -285,6 +285,14 @@ class AdminDashboardTest(TestCase):
         names = sorted(t['company_name'] for t in data['transporters'])
         self.assertEqual(names, ['Arusha Movers', 'Safari Freight'])
         self.assertEqual(data['agents'][0]['email'], 'agent2@example.com')
+        self.assertIn('online_count', data)
+        self.assertIn('total_users', data)
+        self.assertGreaterEqual(data['total_users'], 2)
+
+    def test_admin_page_shows_users_summary_badge(self):
+        response = self.client.get(reverse('users:admin_dashboard'))
+        self.assertContains(response, 'users-summary')
+        self.assertContains(response, reverse('tenders:admin_users'))
 
     def test_api_admin_agent_create_with_picture(self):
         response = self.client.post(reverse('users:api_admin_agent_create'), {
@@ -453,24 +461,24 @@ class AgentPortalTest(TestCase):
         data = response.json()
         self.assertTrue(data['ok'])
         self.assertEqual(len(data['invoices']), 1)
-        invoice_id = data['invoices'][0]['id']
+        self.assertIsNone(data['invoices'][0]['id'])
         self.assertEqual(data['invoices'][0]['number'], 'INV-9100')
         self.assertEqual(data['invoices'][0]['status'], 'pending')
-        invoice = Invoice.objects.get(pk=invoice_id)
-        self.assertEqual(invoice.transporter, self.trans_a)
+        self.assertEqual(data['invoices'][0]['order_pk'], self.order_a.pk)
+        self.assertFalse(Invoice.objects.filter(order=self.order_a).exists())
 
-        paid_url = reverse('users:api_agent_invoice_paid', args=[invoice_id])
+        paid_url = reverse('users:api_agent_invoice_paid', args=[self.order_a.pk])
         response = self.client.post(paid_url, {})
         self.assertTrue(response.json()['ok'])
-        invoice.refresh_from_db()
+        invoice = Invoice.objects.get(order=self.order_a)
         self.assertEqual(invoice.status, Invoice.Status.PAID)
+        self.assertEqual(invoice.transporter, self.trans_a)
 
     def test_agent_cannot_mark_other_transporter_invoice_paid(self):
         self._login('agent.a@example.com')
-        from tenders.views import get_or_create_invoice
-        other_invoice = get_or_create_invoice(self.order_b)
-        response = self.client.post(reverse('users:api_agent_invoice_paid', args=[other_invoice.pk]), {})
+        response = self.client.post(reverse('users:api_agent_invoice_paid', args=[self.order_b.pk]), {})
         self.assertEqual(response.status_code, 404)
+        self.assertFalse(Invoice.objects.filter(order=self.order_b).exists())
 
     def test_agent_pages_render(self):
         self._login('agent.a@example.com')

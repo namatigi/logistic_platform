@@ -70,7 +70,7 @@
                   </td>
                   <td><span class="badge" v-bind:class="stateBadge(o.state)">{{ o.state }}</span></td>
                   <td>
-                    <span v-if="o.invoice_id" class="badge" v-bind:class="o.payment_status === 'paid' ? 'badge-success' : 'badge-warning'">
+                    <span v-if="o.fully_confirmed || o.partially_confirmed" class="badge" v-bind:class="o.payment_status === 'paid' ? 'badge-success' : 'badge-warning'">
                       {{ o.payment_status === 'paid' ? 'Paid' : 'Not paid' }}
                     </span>
                     <span v-else style="color:#94a3b8;">-</span>
@@ -83,7 +83,7 @@
                         <span v-else>Award</span>
                       </button>
                     </span>
-                    <button v-else-if="o.invoice_id && o.payment_status !== 'paid'"
+                    <button v-else-if="(o.fully_confirmed || o.partially_confirmed) && o.payment_status !== 'paid'"
                             type="button" class="btn btn-primary btn-sm btn-award"
                             @click.stop="confirmPaid(o)" :disabled="payId === o.id">
                       <span v-if="payId === o.id">Paying...</span>
@@ -438,13 +438,11 @@
         },
         confirmPaid: async function (o) {
           var self = this;
-          if (!o.invoice_id) return;
           self.error = '';
           self.notice = '';
           self.payId = o.id;
           try {
-            var url = self.invoicePaidBase.replace('0', String(o.invoice_id));
-            var res = await api.post(url, {});
+            var res = await api.post(self.payBase + o.id + '/pay/', {});
             if (res && res.ok === false) {
               self.error = res.error || 'Payment confirmation failed.';
               return;

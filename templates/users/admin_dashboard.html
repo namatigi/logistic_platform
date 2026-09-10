@@ -15,6 +15,13 @@
        data-agent-create-url="{% url 'users:api_admin_agent_create' %}"
        data-agent-transporters-base="{% url 'users:api_admin_agent_transporters' 0 %}">
     {% verbatim %}
+    <a class="users-summary" href="{% endverbatim %}{% url 'tenders:admin_users' %}{% verbatim %}" v-cloak title="View all users">
+      <span class="users-summary-dot" v-bind:class="{ 'is-online': onlineCount > 0 }"></span>
+      <strong>{{ onlineCount }}</strong><span class="users-summary-sep">&middot;</span>
+      <strong>{{ totalUsers }}</strong>
+      <span class="users-summary-label">online / total users</span>
+      <span class="users-summary-arrow">&rarr;</span>
+    </a>
     <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
     <div class="alert alert-success" v-if="message" style="margin-bottom:16px;">{{ message }}</div>
     <div class="alert alert-info" v-if="createdPassword" style="margin-bottom:16px;">
@@ -179,6 +186,8 @@
         return {
           transporters: [],
           agents: [],
+          onlineCount: 0,
+          totalUsers: 0,
           agentForm: blankAgent(),
           showForm: false,
           saving: false,
@@ -200,6 +209,8 @@
             if (res && res.ok === false) { self.error = res.error || 'Failed to load admin panel.'; return; }
             self.transporters = (res && res.transporters) || [];
             self.agents = (res && res.agents) || [];
+            self.onlineCount = (res && res.online_count) || 0;
+            self.totalUsers = (res && res.total_users) || 0;
           } catch (e) {
             self.error = e.message;
           }

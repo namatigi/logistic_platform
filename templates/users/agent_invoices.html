@@ -11,7 +11,7 @@
 
   <div id="agent-invoices-app" data-url="{% url 'users:api_agent_invoices' %}"
        data-paid-base="{% url 'users:api_agent_invoice_paid' 0 %}"
-       data-selcom-url="{% url 'tenders:api_invoice_selcom_initiate' 0 %}"
+       data-checkout-url="{% url 'tenders:api_order_checkout' 0 %}"
        data-selcom-status-url="{% url 'tenders:api_invoice_selcom_status' 0 %}" v-cloak>
     {% verbatim %}
     <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
@@ -37,26 +37,26 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="inv in invoices" v-bind:key="inv.id">
+            <tr v-for="inv in invoices" v-bind:key="inv.order_pk">
               <td><strong>{{ inv.number }}</strong></td>
               <td>{{ inv.transporter }}</td>
               <td>{{ inv.order_name }}</td>
               <td>{{ inv.cargo_reference || '-' }}</td>
               <td>{{ inv.route || '-' }}</td>
-              <td>{{ inv.created_at }}</td>
+              <td>{{ fmtDate(inv.created_at) }}</td>
               <td><strong>{{ money(inv.amount_total, inv.currency) }}</strong></td>
               <td><span class="badge" v-bind:class="inv.status === 'paid' ? 'badge-success' : 'badge-warning'">{{ inv.status }}</span></td>
               <td v-if="selcomEnabled && inv.status !== 'paid'" style="white-space:nowrap;">
                 <a v-if="inv.selcom_pay_link" class="btn btn-primary btn-sm" target="_blank" rel="noopener" v-bind:href="inv.selcom_pay_link">Open checkout</a>
-                <button v-else type="button" class="btn btn-primary btn-sm" :disabled="busyId === inv.id" @click="payNow(inv)">
-                  {{ busyId === inv.id ? 'Creating...' : 'Pay now' }}
+                <button v-else type="button" class="btn btn-primary btn-sm" :disabled="busyId === inv.order_pk" @click="payNow(inv)">
+                  {{ busyId === inv.order_pk ? 'Creating...' : 'Pay now' }}
                 </button>
                 <button type="button" class="btn btn-secondary btn-sm" v-if="inv.selcom_order_token" @click="checkStatus(inv)">Refresh</button>
               </td>
               <td v-else>
                 <button v-if="inv.status === 'pending'" type="button" class="btn btn-secondary btn-sm"
-                        @click="markPaid(inv)" :disabled="payingId === inv.id">
-                  {{ payingId === inv.id ? 'Saving...' : 'Mark as paid' }}
+                        @click="markPaid(inv)" :disabled="payingId === inv.order_pk">
+                  {{ payingId === inv.order_pk ? 'Saving...' : 'Mark as paid' }}
                 </button>
               </td>
             </tr>
@@ -84,6 +84,7 @@
       created: function () { this.load(); },
       methods: {
         money: function (v, c) { return HY.money(v, c); },
+        fmtDate: function (v) { return HY.fmtDate(v); },
         withPk: function (urlPrefix, id) {
           return String(urlPrefix).replace('/0/', '/' + id + '/');
         },
@@ -102,12 +103,12 @@
           var self = this;
           self.error = '';
           self.message = '';
-          self.busyId = inv.id;
+          self.busyId = inv.order_pk;
           try {
-            var res = await api.post(self.withPk(root.dataset.selcomUrl, inv.id), {});
+            var res = await api.post(self.withPk(root.dataset.checkoutUrl, inv.order_pk), {});
             if (res && res.ok === false) { self.error = res.error || 'Could not create the payment.'; return; }
             if (res && res.invoice) {
-              var idx = self.invoices.findIndex(function (x) { return x.id === inv.id; });
+              var idx = self.invoices.findIndex(function (x) { return x.order_pk === inv.order_pk; });
               if (idx !== -1) { self.invoices[idx] = res.invoice; }
             }
             if (res && res.pay_link) { window.open(res.pay_link, '_blank', 'noopener'); }
@@ -120,12 +121,12 @@
         checkStatus: async function (inv) {
           var self = this;
           self.error = '';
-          self.busyId = inv.id;
+          self.busyId = inv.order_pk;
           try {
             var res = await api.post(self.withPk(root.dataset.selcomStatusUrl, inv.id), {});
             if (res && res.ok === false) { self.error = res.error || 'Could not check the payment status.'; return; }
             if (res && res.invoice) {
-              var idx = self.invoices.findIndex(function (x) { return x.id === inv.id; });
+              var idx = self.invoices.findIndex(function (x) { return x.order_pk === inv.order_pk; });
               if (idx !== -1) { self.invoices[idx] = res.invoice; }
             }
           } catch (e) {
@@ -138,13 +139,17 @@
           var self = this;
           self.error = '';
           self.message = '';
-          self.payingId = inv.id;
+          self.payingId = inv.order_pk;
           try {
-            var url = root.dataset.paidBase.replace('0', String(inv.id));
+            var url = root.dataset.paidBase.replace('0', String(inv.order_pk));
             var res = await api.post(url, {});
             if (res && res.ok === false) { self.error = res.error || 'Could not update invoice.'; return; }
             inv.status = 'paid';
             self.message = res.message || 'Invoice marked as paid.';
+            if (res && res.invoice) {
+              var idx = self.invoices.findIndex(function (x) { return x.order_pk === inv.order_pk; });
+              if (idx !== -1) { self.invoices[idx] = res.invoice; }
+            }
           } catch (e) {
             self.error = e.message;
           } finally {

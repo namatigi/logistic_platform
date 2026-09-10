@@ -14,7 +14,7 @@
   <div id="invoices-app"
        data-url="{% url 'tenders:api_invoices' %}"
        data-map-url="{% url 'tenders:route_map' %}"
-       data-selcom-url="{% url 'tenders:api_invoice_selcom_initiate' 0 %}"
+       data-checkout-url="{% url 'tenders:api_order_checkout' 0 %}"
        data-selcom-status-url="{% url 'tenders:api_invoice_selcom_status' 0 %}"
        v-cloak>
     {% verbatim %}
@@ -40,8 +40,8 @@
             </tr>
           </thead>
           <tbody>
-            <template v-for="inv in invoices" v-bind:key="inv.id">
-            <tr class="order-row" v-bind:class="{ 'row-expanded': expandedId === inv.id }"
+            <template v-for="inv in invoices" v-bind:key="inv.order_pk">
+            <tr class="order-row" v-bind:class="{ 'row-expanded': expandedId === inv.order_pk }"
                 @click="toggle(inv)">
               <td><strong>{{ inv.number }}</strong></td>
               <td>{{ inv.transporter }}</td>
@@ -58,14 +58,14 @@
               <td v-if="selcomEnabled">
                 <span v-if="inv.status === 'paid'"><span class="badge badge-success">Paid</span></span>
                 <template v-else>
-                  <button type="button" class="btn btn-primary btn-sm" :disabled="busyId === inv.id"
-                          @click.stop="payNow(inv)">{{ busyId === inv.id ? 'Creating...' : 'Pay now' }}</button>
+                  <button type="button" class="btn btn-primary btn-sm" :disabled="busyId === inv.order_pk"
+                          @click.stop="payNow(inv)">{{ busyId === inv.order_pk ? 'Creating...' : 'Pay now' }}</button>
                   <button type="button" class="btn btn-secondary btn-sm" v-if="inv.selcom_order_token"
                           @click.stop="checkStatus(inv)">Refresh</button>
                 </template>
               </td>
             </tr>
-            <tr v-if="expandedId === inv.id" class="order-detail-row">
+            <tr v-if="expandedId === inv.order_pk" class="order-detail-row">
               <td :colspan="selcomEnabled ? 9 : 8" style="padding:0;">
                 <div class="order-detail-summary">
                   <div>
@@ -122,8 +122,8 @@
                     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                       <a v-if="inv.selcom_pay_link" class="btn btn-primary btn-sm" target="_blank" rel="noopener"
                          v-bind:href="inv.selcom_pay_link" @click.stop>Open checkout</a>
-                      <button type="button" class="btn btn-primary btn-sm" :disabled="busyId === inv.id"
-                              @click.stop="payNow(inv)">{{ busyId === inv.id ? 'Creating...' : 'Pay now' }}</button>
+                      <button type="button" class="btn btn-primary btn-sm" :disabled="busyId === inv.order_pk"
+                              @click.stop="payNow(inv)">{{ busyId === inv.order_pk ? 'Creating...' : 'Pay now' }}</button>
                       <button type="button" class="btn btn-secondary btn-sm" v-if="inv.selcom_order_token"
                               @click.stop="checkStatus(inv)">Check status</button>
                     </div>
@@ -203,7 +203,7 @@
           return String(urlPrefix).replace('/0/', '/' + id + '/');
         },
         toggle: function (inv) {
-          this.expandedId = (this.expandedId === inv.id) ? null : inv.id;
+          this.expandedId = (this.expandedId === inv.order_pk) ? null : inv.order_pk;
         },
         routeUrl: function (inv) {
           return String(root.dataset.mapUrl) + '?from=' + encodeURIComponent(inv.tender_loading || '') +
@@ -232,12 +232,12 @@
         payNow: async function (inv) {
           var self = this;
           self.error = '';
-          self.busyId = inv.id;
+          self.busyId = inv.order_pk;
           try {
-            var res = await api.post(self.withPk(root.dataset.selcomUrl, inv.id), {});
+            var res = await api.post(self.withPk(root.dataset.checkoutUrl, inv.order_pk), {});
             if (res && res.ok === false) { self.error = res.error || 'Could not create the payment.'; return; }
             if (res && res.invoice) {
-              var idx = self.invoices.findIndex(function (x) { return x.id === inv.id; });
+              var idx = self.invoices.findIndex(function (x) { return x.order_pk === inv.order_pk; });
               if (idx !== -1) { self.invoices[idx] = res.invoice; }
             }
             if (res && res.pay_link) {
@@ -252,12 +252,12 @@
         checkStatus: async function (inv) {
           var self = this;
           self.error = '';
-          self.busyId = inv.id;
+          self.busyId = inv.order_pk;
           try {
             var res = await api.post(self.withPk(root.dataset.selcomStatusUrl, inv.id), {});
             if (res && res.ok === false) { self.error = res.error || 'Could not check the payment status.'; return; }
             if (res && res.invoice) {
-              var idx = self.invoices.findIndex(function (x) { return x.id === inv.id; });
+              var idx = self.invoices.findIndex(function (x) { return x.order_pk === inv.order_pk; });
               if (idx !== -1) { self.invoices[idx] = res.invoice; }
             }
           } catch (e) {

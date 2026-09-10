@@ -342,8 +342,6 @@ def perform_award(order, setting, line_ids, is_partial):
         order.state = 'confirmed'
     order.save()
 
-    get_or_create_invoice(order)
-
     notify_order_update(order)
 
     message = parsed.get('message') if isinstance(parsed, dict) else None
@@ -1145,17 +1143,22 @@ def api_order_award(request, pk):
 def api_order_pay(request, pk):
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required.'}, status=405)
-    order = (
-        Order.objects.filter(_visible_orders_q(request))
-        .filter(pk=pk)
-        .first()
-    )
-    if order is None:
+    order = Order.objects.filter(pk=pk).first()
+    if not _payment_order_in_scope(request, order):
         return JsonResponse({'ok': False, 'error': 'Order not found.'})
-    return JsonResponse({
-        'ok': True,
-        'message': f'Payment for order {order.order_name or order.order_id} is not available yet.',
-    })
+    invoice = get_or_create_invoice(order)
+    return _confirm_invoice_paid(invoice)
+
+
+@login_required
+def api_order_checkout(request, pk):
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required.'}, status=405)
+    order = Order.objects.filter(pk=pk).first()
+    if not _payment_order_in_scope(request, order):
+        return JsonResponse({'ok': False, 'error': 'Order not found.'})
+    invoice = get_or_create_invoice(order)
+    return _initiate_selcom(request, invoice)
 
 
 @login_required
@@ -1451,11 +1454,27 @@ def api_tracker(request):
     return _cached_json_bytes(_cache_key('trk', scope), 15, loader)
 
 
+def _invoice_lines(order):
+    return [
+        {
+            'line_id': line.line_id,
+            'product_name': line.product_name,
+            'quantity': str(line.quantity),
+            'price_unit': str(line.price_unit),
+            'price_subtotal': str(line.price_subtotal),
+            'tax': str(line.price_total - line.price_subtotal),
+            'price_total': str(line.price_total),
+        }
+        for line in order.lines.filter(awarded=True).order_by('line_id')
+    ]
+
+
 def _invoice_dict(invoice):
     order = invoice.order
     tender = order.tender
     return {
         'id': invoice.pk,
+        'order_pk': order.pk,
         'number': invoice.number,
         'status': invoice.status,
         'amount_total': str(invoice.amount_total),
@@ -1480,18 +1499,43 @@ def _invoice_dict(invoice):
         'selcom_pay_link': invoice.selcom_pay_link,
         'selcom_status': invoice.selcom_status,
         'selcom_updated_at': invoice.selcom_updated_at.isoformat() if invoice.selcom_updated_at else None,
-        'lines': [
-            {
-                'line_id': line.line_id,
-                'product_name': line.product_name,
-                'quantity': str(line.quantity),
-                'price_unit': str(line.price_unit),
-                'price_subtotal': str(line.price_subtotal),
-                'tax': str(line.price_total - line.price_subtotal),
-                'price_total': str(line.price_total),
-            }
-            for line in order.lines.filter(awarded=True).order_by('line_id')
-        ],
+        'lines': _invoice_lines(order),
+    }
+
+
+def _synthetic_invoice_dict(order):
+    tender = order.tender
+    awarded_amount = order.awarded_amount
+    if awarded_amount is None:
+        awarded_amount = order.amount_total or 0
+    return {
+        'id': None,
+        'order_pk': order.pk,
+        'number': f'INV-{order.order_id}',
+        'status': Invoice.Status.PENDING,
+        'amount_total': str(awarded_amount),
+        'deposited_amount': '0.00',
+        'payment_terms': tender.payment_terms.name if tender and tender.payment_terms_id else '',
+        'payment_term_id': tender.payment_terms_id if tender else None,
+        'currency': order.currency or 'TZS',
+        'created_at': None,
+        'order_id': order.order_id,
+        'order_name': order.order_name or f'#{order.order_id}',
+        'transporter': order.company_name or '',
+        'customer': order.customer or '',
+        'cargo_reference': order.cargo_reference,
+        'cargo_id': order.cargo_id,
+        'route': f'{tender.route_loading} \u2192 {tender.route_delivery}' if tender else '',
+        'tender_loading': tender.route_loading if tender else '',
+        'tender_delivery': tender.route_delivery if tender else '',
+        'tender_id': tender.pk if tender else None,
+        'order_user': order.user.email if order.user else '',
+        'selcom_reference': None,
+        'selcom_order_token': None,
+        'selcom_pay_link': None,
+        'selcom_status': None,
+        'selcom_updated_at': None,
+        'lines': _invoice_lines(order),
     }
 
 
@@ -1578,19 +1622,24 @@ def invoice_list(request):
 @login_required
 def api_invoices(request):
     order_q = _visible_orders_q(request)
-    for order in Order.objects.filter(order_q, lines__awarded=True).select_related('tender').distinct():
-        get_or_create_invoice(order)
-    invoices = (
-        Invoice.objects.filter(
-            order__in=Order.objects.filter(order_q),
-        )
-        .select_related('order__tender', 'transporter')
-        .order_by('-created_at')
+    awarded_orders = (
+        Order.objects.filter(order_q, lines__awarded=True)
+        .select_related('tender')
+        .distinct()
+        .order_by('-awarded_at', '-created_at')
     )
+    invoice_map = {
+        inv.order_id: inv
+        for inv in Invoice.objects.filter(order__in=awarded_orders).select_related('transporter')
+    }
+    rows = []
+    for order in awarded_orders:
+        invoice = invoice_map.get(order.pk)
+        rows.append(_invoice_dict(invoice) if invoice else _synthetic_invoice_dict(order))
     return JsonResponse({
         'ok': True,
         'selcom_enabled': _shared_setting().selcom_enabled,
-        'invoices': [_invoice_dict(i) for i in invoices],
+        'invoices': rows,
     })
 
 
@@ -1611,13 +1660,13 @@ def _external_invoice_number(parsed):
 @require_POST
 def api_invoice_paid(request, pk):
     invoice = Invoice.objects.select_related('order__tender', 'transporter').filter(pk=pk).first()
-    if invoice is None:
+    if invoice is None or not _payment_order_in_scope(request, invoice.order):
         return JsonResponse({'ok': False, 'error': 'Invoice not found.'}, status=404)
+    return _confirm_invoice_paid(invoice)
+
+
+def _confirm_invoice_paid(invoice):
     order = invoice.order
-    is_admin = request.user.role == CustomUser.Role.ADMINISTRATOR
-    in_scope = order.user_id is None or order.user_id == request.user.pk
-    if not (is_admin or in_scope):
-        return JsonResponse({'ok': False, 'error': 'Invoice not found.'}, status=404)
     setting = _shared_setting()
     if not setting.base_url:
         return JsonResponse({'ok': False, 'error': 'Configure the shared API base URL in Setting before confirming an invoice.'})
@@ -1862,6 +1911,34 @@ def _invoice_in_scope(request, invoice):
     return False
 
 
+def _transporter_matches_order(transporter, order):
+    if transporter.company_id and order.company_id == transporter.company_id:
+        return True
+    if (
+        transporter.company_name
+        and order.company_name
+        and order.company_name.strip().lower() == transporter.company_name.strip().lower()
+    ):
+        return True
+    return False
+
+
+def _agent_matches_order(user, order):
+    return any(_transporter_matches_order(t, order) for t in user.linked_transporters.all())
+
+
+def _payment_order_in_scope(request, order):
+    if order is None:
+        return False
+    if request.user.role == CustomUser.Role.ADMINISTRATOR:
+        return True
+    if order.user_id and order.user_id == request.user.pk:
+        return True
+    if request.user.role == CustomUser.Role.AGENT:
+        return _agent_matches_order(request.user, order)
+    return order.user_id is None
+
+
 def _set_invoice_paid(invoice, deposited_amount=None):
     if deposited_amount is None:
         deposited_amount = invoice.amount_total if invoice.amount_total is not None else Decimal('0.00')
@@ -1892,6 +1969,10 @@ def api_invoice_selcom_initiate(request, pk):
     invoice = Invoice.objects.select_related('order__tender', 'transporter', 'order__user').filter(pk=pk).first()
     if not _invoice_in_scope(request, invoice):
         return JsonResponse({'ok': False, 'error': 'Invoice not found.'}, status=404)
+    return _initiate_selcom(request, invoice)
+
+
+def _initiate_selcom(request, invoice):
     if invoice.status == Invoice.Status.PAID:
         return JsonResponse({'ok': False, 'error': 'This invoice is already paid.'})
     setting = _shared_setting()

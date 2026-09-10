@@ -26,10 +26,13 @@ from tenders.models import ApiSetting, Invoice, Order, OrderLine, Tender, Town, 
 from tenders.views import (
     SIM_ACCELERATION,
     SIM_SPEED_KMH,
+    _agent_matches_order,
     _invoice_dict,
+    _online_user_ids,
     _position_at,
     _route_arrays,
     _shared_setting,
+    _synthetic_invoice_dict,
     get_or_create_invoice,
     get_route,
 )
@@ -212,10 +215,13 @@ def api_admin_dashboard(request):
         return JsonResponse({'ok': False, 'error': 'Administrator access required.'}, status=403)
     transporters = Transporter.objects.order_by('company_name', 'alias')
     agents = CustomUser.objects.filter(role=CustomUser.Role.AGENT).select_related('profile').order_by('-date_joined')
+    online_ids = _online_user_ids()
     return JsonResponse({
         'ok': True,
         'transporters': [_transporter_dict(t) for t in transporters],
         'agents': [_agent_dict(a) for a in agents],
+        'online_count': len(online_ids),
+        'total_users': CustomUser.objects.count(),
     })
 
 
@@ -445,23 +451,25 @@ def api_agent_invoices(request):
             per |= Q(company_name__iexact=transporter.company_name)
         q |= per
     awarded_orders = Order.objects.filter(q, lines__awarded=True).select_related('tender').distinct()
-    for order in awarded_orders:
-        get_or_create_invoice(order)
-    invoices = (
-        Invoice.objects.filter(transporter__in=transporters)
-        .select_related('order__tender', 'transporter')
-        .order_by('-created_at')
-    )
+    invoice_map = {
+        inv.order_id: inv
+        for inv in Invoice.objects.filter(order__in=awarded_orders).select_related('transporter')
+    }
+    rows = [
+        _invoice_dict(invoice_map[order.pk]) if order.pk in invoice_map else _synthetic_invoice_dict(order)
+        for order in awarded_orders
+    ]
     setting = _shared_setting()
-    return JsonResponse({'ok': True, 'selcom_enabled': setting.selcom_enabled, 'invoices': [_invoice_dict(i) for i in invoices]})
+    return JsonResponse({'ok': True, 'selcom_enabled': setting.selcom_enabled, 'invoices': rows})
 
 
 @login_required
 @require_POST
 def api_agent_invoice_paid(request, pk):
-    invoice = Invoice.objects.filter(pk=pk, transporter__agents=request.user).first()
-    if invoice is None:
+    order = Order.objects.filter(pk=pk).first()
+    if order is None or not _agent_matches_order(request.user, order):
         return JsonResponse({'ok': False, 'error': 'Invoice not found.'}, status=404)
+    invoice = get_or_create_invoice(order)
     invoice.status = Invoice.Status.PAID
     invoice.save(update_fields=('status',))
     return JsonResponse({'ok': True, 'message': 'Invoice marked as paid.', 'invoice': _invoice_dict(invoice)})

@@ -45,6 +45,7 @@ urlpatterns = [
     path('api/orders/<int:pk>/', views.api_order_detail, name='api_order_detail'),
     path('api/orders/<int:pk>/award/', views.api_order_award, name='api_order_award'),
     path('api/orders/<int:pk>/pay/', views.api_order_pay, name='api_order_pay'),
+    path('api/orders/<int:pk>/checkout/', views.api_order_checkout, name='api_order_checkout'),
     path('api/settings/', views.api_settings, name='api_settings_json'),
     path('api/towns/', views.api_towns, name='api_towns'),
     path('api/town-route/', views.api_town_route, name='api_town_route'),

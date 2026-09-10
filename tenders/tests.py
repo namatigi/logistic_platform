@@ -694,6 +694,63 @@ class InvoicesPageTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '/api/invoices/')
 
+    def _awarded_order(self, order_id, ref, user=None):
+        from tenders.models import Order, OrderLine
+        tender = self._tender(user or self.user_a, f'REF-{ref}')
+        order = Order.objects.create(
+            order_id=order_id, order_name=f'ORD-{order_id}', user=user or self.user_a, tender=tender,
+            company_id=1, company_name='Alpha Haulage', cargo_reference=f'REF-{ref}', state='confirmed',
+            amount_total=0, currency='USD',
+        )
+        OrderLine.objects.create(
+            order=order, line_id=order_id, product_name='Sand', quantity=1,
+            price_unit=100, commission=0, price_subtotal=100, price_total=100, awarded=True,
+        )
+        return order
+
+    def test_invoices_api_does_not_create_invoice_or_escrow(self):
+        from tenders.models import EscrowAccount, Invoice
+        order = self._awarded_order(7090, 'DEFER')
+        self.client.login(email='invoice-a@example.com', password='pass1234')
+        data = self.client.get(reverse('tenders:api_invoices')).json()
+        row = next(r for r in data['invoices'] if r['order_id'] == 7090)
+        self.assertIsNone(row['id'])
+        self.assertEqual(row['order_pk'], order.pk)
+        self.assertEqual(row['number'], 'INV-7090')
+        self.assertEqual(row['status'], 'pending')
+        self.assertEqual(row['amount_total'], '100.00')
+        self.assertFalse(Invoice.objects.filter(order=order).exists())
+        self.assertFalse(EscrowAccount.objects.filter(tender=order.tender).exists())
+
+    def test_order_pay_creates_invoice_and_escrow_on_click(self):
+        from tenders.models import EscrowAccount, Invoice
+        order = self._awarded_order(7091, 'PAY')
+        self.client.login(email='invoice-a@example.com', password='pass1234')
+        response = self.client.post(reverse('tenders:api_order_pay', args=[order.pk]), {})
+        self.assertFalse(response.json()['ok'])
+        invoice = Invoice.objects.get(order=order)
+        self.assertEqual(invoice.number, 'INV-7091')
+        self.assertEqual(invoice.status, 'pending')
+        escrow = EscrowAccount.objects.filter(tender=order.tender).first()
+        self.assertIsNotNone(escrow)
+        self.assertTrue(escrow.invoices.filter(pk=invoice.pk).exists())
+
+    def test_order_checkout_creates_invoice_and_escrow_on_click(self):
+        from tenders.models import EscrowAccount, Invoice
+        order = self._awarded_order(7092, 'CHECKOUT')
+        ApiSetting.objects.create(selcom_enabled=True, selcom_client_id='c', selcom_client_secret='s')
+        self.client.login(email='invoice-a@example.com', password='pass1234')
+        with patch('tenders.views.selcom.create_checkout_order', return_value={
+            'order_token': 'tok-defer', 'pay_link': 'https://checkout/tok-defer',
+        }):
+            response = self.client.post(reverse('tenders:api_order_checkout', args=[order.pk]), {})
+        self.assertTrue(response.json()['ok'])
+        invoice = Invoice.objects.get(order=order)
+        self.assertEqual(invoice.selcom_order_token, 'tok-defer')
+        escrow = EscrowAccount.objects.filter(tender=order.tender).first()
+        self.assertIsNotNone(escrow)
+        self.assertTrue(escrow.invoices.filter(pk=invoice.pk).exists())
+
 
 class DashboardRoleTest(TestCase):
     def test_agent_dashboard_hides_send_tender_buttons(self):
