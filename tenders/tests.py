@@ -1,6 +1,8 @@
 from datetime import timedelta
 import json
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+import requests
 
 from django.contrib.gis.geos import Point
 from django.core.mail.backends.console import EmailBackend as ConsoleBackend
@@ -1561,3 +1563,63 @@ class ApiDiagnosticsTest(TestCase):
         ).json()
         self.assertEqual(data['total'], 1)
         self.assertEqual(data['diagnostics'][0]['api_point'], 'order.award')
+
+
+class SubmitRetryTest(TestCase):
+    """Outgoing HTTP calls retry on connection errors and report friendly messages."""
+
+    def setUp(self):
+        self.user = CustomUser.objects.create_user(email='retry@example.com', password='pass1234')
+        self.setting = ApiSetting.objects.create(base_url='https://flaky.example.com/')
+        self.tender = Tender.objects.create(
+            user=self.user, route_loading='Nairobi', route_delivery='Mombasa',
+            customer='RetryCo', cargo_type=Tender.CargoType.DRY_VAN,
+            truck_type=Tender.TruckType.TRUCK, weight=10.0, number_of_trucks=1,
+            distance_km=480, cargo_date=timezone.localdate(),
+        )
+
+    def _response(self, status=200, text='ok'):
+        resp = Mock()
+        resp.status_code = status
+        resp.text = text
+        resp.ok = status < 400
+        return resp
+
+    def test_retries_once_then_succeeds(self):
+        with patch('tenders.views.http.post', side_effect=[
+            requests.ConnectionError('[Errno 111] Connection refused'),
+            self._response(200, '{"status":"success"}'),
+        ]) as m:
+            status, body, ok = tenders_views.submit_tender(self.setting, self.tender)
+        self.assertEqual(m.call_count, 2)
+        self.assertEqual(status, 200)
+        self.assertTrue(ok)
+        self.assertIn('success', body)
+
+    def test_connection_error_exhausts_retries(self):
+        with patch('tenders.views.http.post',
+                   side_effect=requests.ConnectionError('[Errno 111] Connection refused')) as m:
+            status, body, ok = tenders_views.submit_tender(self.setting, self.tender)
+        self.assertEqual(m.call_count, 2)
+        self.assertIsNone(status)
+        self.assertFalse(ok)
+        self.assertIn('[Errno 111]', body)
+
+    def test_http_error_not_retried(self):
+        with patch('tenders.views.http.post', return_value=self._response(500, 'boom')) as m:
+            status, body, ok = tenders_views.submit_tender(self.setting, self.tender)
+        self.assertEqual(m.call_count, 1)
+        self.assertEqual(status, 500)
+        self.assertFalse(ok)
+
+    def test_friendly_connection_refused_message(self):
+        message = tenders_views._submit_failure_message(
+            'Tender submission', None, "HTTPSConnectionPool(...): Max retries exceeded ... [Errno 111] Connection refused",
+        )
+        self.assertIn('connection refused', message)
+        self.assertIn('instance is online', message)
+        self.assertNotIn('HTTP None', message)
+
+    def test_friendly_timeout_message(self):
+        message = tenders_views._submit_failure_message('Order confirmation', None, '[Errno 110] Connection timed out')
+        self.assertIn('connection timed out', message)

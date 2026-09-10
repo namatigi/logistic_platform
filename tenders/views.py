@@ -2,6 +2,8 @@ import concurrent.futures
 import json
 import logging
 import math
+import re
+import time
 from datetime import datetime
 from decimal import Decimal
 
@@ -266,45 +268,81 @@ def build_payload(tender):
     return payload
 
 
-def submit_tender(setting, tender):
-    payload = build_payload(tender)
+def _build_auth(setting):
     headers = {'Content-Type': 'application/json'}
     auth = None
-
     if setting.auth_type == ApiSetting.AuthType.BEARER and setting.api_token:
         headers['Authorization'] = f'Bearer {setting.api_token}'
     elif setting.auth_type == ApiSetting.AuthType.BASIC:
         auth = (setting.username, setting.password)
+    return headers, auth
 
-    try:
-        response = http.post(
-            setting.endpoint_url(),
-            json=payload,
-            headers=headers,
-            auth=auth,
-            timeout=20,
+
+_HTTP_RETRIES = 1
+_HTTP_RETRY_DELAY_SECONDS = 2
+
+
+def _post_with_retry(url, payload, headers, auth):
+    """POST a JSON payload, retrying once on transport-level (connection) errors.
+
+    HTTP error responses (4xx/5xx) are returned as-is and never retried, so a
+    request that might already have reached the external system is not repeated.
+    """
+    last_error = None
+    attempts = _HTTP_RETRIES + 1
+    for attempt in range(attempts):
+        try:
+            response = http.post(url, json=payload, headers=headers, auth=auth, timeout=20)
+            return response.status_code, response.text, response.ok
+        except http.RequestException as exc:
+            last_error = exc
+            logger.warning('POST to %s failed (attempt %d/%d): %s', url, attempt + 1, attempts, exc)
+            if attempt < _HTTP_RETRIES:
+                time.sleep(_HTTP_RETRY_DELAY_SECONDS)
+    return None, str(last_error), False
+
+
+def _describe_connection_error(body):
+    text = str(body)
+    match = re.search(r'\[Errno\s+(\d+)\]', text)
+    if match:
+        code = match.group(1)
+        if code == '111':
+            return 'connection refused (the Odoo instance is not accepting connections)'
+        if code in ('110', '10060'):
+            return 'connection timed out'
+        if code in ('-2', '-3'):
+            return 'the host name could not be resolved'
+        return f'connection error (Errno {code})'
+    if 'NameResolutionError' in text or 'Failed to resolve' in text:
+        return 'the host name could not be resolved'
+    if 'Max retries exceeded' in text:
+        return 'network error when reaching the Odoo instance'
+    if 'ConnectionError' in text:
+        return 'connection error'
+    return 'a network error occurred'
+
+
+def _submit_failure_message(label, status_code, body):
+    if status_code is None:
+        issue = _describe_connection_error(body)
+        return (
+            f'{label} failed: {issue}. '
+            f'Could not reach the Odoo instance — check the base URL and that the instance is online, '
+            f'then submit again.'
         )
-        return response.status_code, response.text, response.ok
-    except http.RequestException as exc:
-        logger.exception('Tender submission to %s failed', setting.endpoint_url())
-        return None, str(exc), False
+    return f'{label} failed (HTTP {status_code}). Response: {body[:300]}'
+
+
+def submit_tender(setting, tender):
+    payload = build_payload(tender)
+    headers, auth = _build_auth(setting)
+    return _post_with_retry(setting.endpoint_url(), payload, headers, auth)
 
 
 def submit_confirmation(setting, url, payload):
-    headers = {'Content-Type': 'application/json'}
-    auth = None
-
-    if setting.auth_type == ApiSetting.AuthType.BEARER and setting.api_token:
-        headers['Authorization'] = f'Bearer {setting.api_token}'
-    elif setting.auth_type == ApiSetting.AuthType.BASIC:
-        auth = (setting.username, setting.password)
-
-    try:
-        response = http.post(url, json=payload, headers=headers, auth=auth, timeout=20)
-        return response.status_code, response.text, response.ok
-    except http.RequestException as exc:
-        logger.exception('Order confirmation to %s failed', url)
-        return None, str(exc), False
+    headers, auth = _build_auth(setting)
+    return _post_with_retry(url, payload, headers, auth)
 
 
 def perform_award(order, setting, line_ids, is_partial):
@@ -352,9 +390,10 @@ def perform_award(order, setting, line_ids, is_partial):
     if not is_ok:
         return {
             'ok': False,
-            'message': f'Order confirmation failed (HTTP {status_code}). Response: {body[:300]}',
+            'message': _submit_failure_message('Order confirmation', status_code, body),
             'url': url,
             'status_code': status_code,
+            'response': body[:4000],
         }
 
     order.award_response = parsed if isinstance(parsed, dict) else {}
@@ -400,7 +439,8 @@ def award_order(request, pk):
     if not result['ok']:
         _record_diagnostic(
             request, 'order.award', result['message'], status_code=result.get('status_code'), method='POST',
-            path=result.get('url', ''), detail={'order_id': order.order_id},
+            path=result.get('url', ''),
+            detail={'order_id': order.order_id, 'response': result.get('response', '')},
         )
     (messages.success if result['ok'] else messages.error)(request, result['message'])
 
@@ -1132,7 +1172,7 @@ def api_tender_create(request):
             + (f' Reference: {tender.cargo_reference}.' if tender.cargo_reference else '')
         )
     else:
-        result['message'] = f'Tender submission failed (HTTP {status_code}). Response: {body[:300]}'
+        result['message'] = _submit_failure_message('Tender submission', status_code, body)
         _record_diagnostic(
             request, 'tender.submit', result['message'], status_code=status_code, method='POST',
             path=setting.endpoint_url(), detail={'response': body[:4000], 'api_setting': setting.pk},
@@ -1222,7 +1262,8 @@ def api_order_award(request, pk):
     if not result['ok']:
         _record_diagnostic(
             request, 'order.award', result['message'], status_code=result.get('status_code'), method='POST',
-            path=result.get('url', ''), detail={'order_id': order.order_id},
+            path=result.get('url', ''),
+            detail={'order_id': order.order_id, 'response': result.get('response', '')},
         )
         return JsonResponse({'ok': False, 'error': result['message']})
     return JsonResponse({
