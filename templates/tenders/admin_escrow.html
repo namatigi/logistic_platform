@@ -40,7 +40,10 @@
                 <div v-if="a.selcom_order_token" class="escrow-mono" style="font-size:12px;">{{ a.selcom_order_token }}</div>
               </td>
               <td>{{ a.customer || '-' }}</td>
-              <td>{{ a.transporter || '-' }}</td>
+              <td>
+                <div v-for="t in a.transporter_names" v-bind:key="t">{{ t }}</div>
+                <span v-if="!a.transporter_names.length">{{ a.transporter }}</span>
+              </td>
               <td><strong>{{ money(a.amount, a.currency) }}</strong></td>
               <td>
                 {{ a.payment_terms || '-' }}
@@ -48,7 +51,10 @@
               </td>
               <td>{{ fmtDate(a.created_at) }}</td>
               <td>{{ a.cargo_reference || '-' }}</td>
-              <td>{{ a.invoice_number || '-' }}</td>
+              <td>
+                <div v-for="n in a.invoice_numbers" v-bind:key="n">{{ n }}</div>
+                <span v-if="!a.invoice_numbers.length">-</span>
+              </td>
               <td>{{ a.bank || 'Selcom' }}</td>
               <td><strong>{{ money(a.deposited_amount, a.currency) }}</strong></td>
               <td>

@@ -123,13 +123,13 @@ class EscrowAccount(models.Model):
     payment_terms = models.ForeignKey(
         PaymentTerm, null=True, blank=True, on_delete=models.SET_NULL, related_name='escrow_accounts',
     )
-    transporter = models.ForeignKey(
-        'Transporter', null=True, blank=True, on_delete=models.SET_NULL, related_name='escrow_accounts',
-        help_text='Transport company related to this escrow account.',
+    transporters = models.ManyToManyField(
+        'Transporter', blank=True, related_name='escrow_accounts',
+        help_text='Transport companies related to this escrow account. The same cargo reference can have multiple transporters.',
     )
-    invoice = models.OneToOneField(
-        'Invoice', null=True, blank=True, on_delete=models.SET_NULL, related_name='escrow_account',
-        help_text='Primary invoice related to this tender/cargo.',
+    invoices = models.ManyToManyField(
+        'Invoice', blank=True, related_name='escrow_accounts',
+        help_text='Invoices issued against this cargo reference. A cargo reference can have more than one invoice.',
     )
     bank = models.CharField(max_length=60, blank=True, default='Selcom')
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)

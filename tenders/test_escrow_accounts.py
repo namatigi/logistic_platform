@@ -139,6 +139,56 @@ class EscrowAccountsTest(TestCase):
         escrow = EscrowAccount.objects.filter(tender=tender).first()
         self.assertIsNotNone(escrow)
         self.assertEqual(escrow.virtual_account, f'EA-{escrow.pk:05d}')
-        self.assertEqual(escrow.invoice_id, invoice.pk)
+        self.assertTrue(escrow.invoices.filter(pk=invoice.pk).exists())
         self.assertEqual(escrow.user_id, self.user.pk)
         self.assertTrue(escrow.virtual_account.startswith('EA-'))
+
+    def test_escrow_multiple_invoices(self):
+        from tenders.views import get_or_create_invoice
+        from tenders.models import Order, Tender, EscrowAccount, OrderLine, Invoice
+        tender = Tender.objects.create(
+            user=self.user, route_loading='Dar es Salaam', route_delivery='Mombasa',
+            customer='HYPAX', cargo_type='container_20', truck_type='trailer',
+            weight=10, number_of_trucks=1, distance_km=100, cargo_date='2026-09-01',
+        )
+        invoices = []
+        for offset, amount, company in ((9001, 500, 'Transit Ltd'), (9002, 700, 'Haulmax Ltd')):
+            order = Order.objects.create(
+                order_id=offset, order_name=f'ORD-{offset}', company_name=company,
+                amount_total=amount, currency='TZS', cargo_reference='CAR9001', tender=tender,
+            )
+            OrderLine.objects.create(order=order, line_id=offset, product_name='Freight', quantity=1, price_unit=amount, price_total=amount, awarded=True)
+            invoices.append(get_or_create_invoice(order))
+        escrow = EscrowAccount.objects.filter(tender=tender).first()
+        self.assertIsNotNone(escrow)
+        self.assertEqual(set(escrow.invoices.values_list('pk', flat=True)), {i.pk for i in invoices})
+        self.assertEqual(set(escrow.transporters.values_list('company_name', flat=True)), {'Transit Ltd', 'Haulmax Ltd'})
+        invoice_a, invoice_b = invoices
+        invoice_a.deposited_amount = 300
+        invoice_a.save(update_fields=('deposited_amount',))
+        invoice_b.deposited_amount = 400
+        invoice_b.save(update_fields=('deposited_amount',))
+        from tenders.views import _refresh_escrow
+        _refresh_escrow(escrow)
+        escrow.refresh_from_db()
+        self.assertEqual(escrow.deposited_amount, 700)
+
+        self.client.login(email='admin@example.com', password='pass1234')
+        res = self.client.get(reverse('tenders:api_admin_escrow'))
+        data = res.json()['escrow_accounts'][0]
+        self.assertEqual(set(data['invoice_numbers']), {i.number for i in invoices})
+        self.assertEqual(set(data['transporter_names']), {'Transit Ltd', 'Haulmax Ltd'})
+        self.assertIn(',', data['transporter'])
+        self.assertEqual(data['cargo_reference'], 'CAR9001')
+        self.assertEqual(data['status'], 'open')
+
+        invoice_a.status = Invoice.Status.PAID
+        invoice_a.save(update_fields=('status',))
+        _refresh_escrow(escrow)
+        escrow.refresh_from_db()
+        self.assertEqual(escrow.status, EscrowAccount.Status.PENDING)
+        invoice_b.status = Invoice.Status.PAID
+        invoice_b.save(update_fields=('status',))
+        _refresh_escrow(escrow)
+        escrow.refresh_from_db()
+        self.assertEqual(escrow.status, EscrowAccount.Status.PAID)

@@ -135,27 +135,19 @@ def get_or_create_invoice(order):
 def _ensure_escrow_account(tender, order, invoice):
     if tender is None:
         return None
-    escrow = EscrowAccount.objects.filter(tender=tender).select_related('user', 'invoice').first()
+    escrow = EscrowAccount.objects.filter(tender=tender).select_related('user').first()
     update_fields = []
     if escrow is None:
         escrow = EscrowAccount.objects.create(
             tender=tender,
             user=tender.user,
             amount=invoice.amount_total if invoice else Decimal('0.00'),
-            transporter=invoice.transporter if invoice else None,
-            invoice=invoice,
             payment_terms=tender.payment_terms,
             bank='Selcom',
         )
         escrow.virtual_account = f'EA-{escrow.pk:05d}'
         escrow.save(update_fields=('virtual_account',))
     else:
-        if escrow.invoice_id is None and invoice is not None:
-            escrow.invoice = invoice
-            update_fields.append('invoice')
-        if escrow.transporter_id is None and invoice is not None and invoice.transporter_id:
-            escrow.transporter = invoice.transporter
-            update_fields.append('transporter')
         if escrow.amount == 0 and invoice is not None and invoice.amount_total:
             escrow.amount = invoice.amount_total
             update_fields.append('amount')
@@ -164,6 +156,11 @@ def _ensure_escrow_account(tender, order, invoice):
             update_fields.append('payment_terms')
         if update_fields:
             escrow.save(update_fields=update_fields)
+    if invoice is not None:
+        if invoice.transporter_id and not escrow.transporters.filter(pk=invoice.transporter_id).exists():
+            escrow.transporters.add(invoice.transporter)
+        if not escrow.invoices.filter(pk=invoice.pk).exists():
+            escrow.invoices.add(invoice)
     _refresh_escrow(escrow)
     return escrow
 
@@ -172,8 +169,14 @@ def _refresh_escrow(escrow):
     invoices = Invoice.objects.filter(order__tender=escrow.tender)
     deposited = invoices.aggregate(total=Sum('deposited_amount'))['total'] or Decimal('0.00')
     has_checkout = invoices.exclude(selcom_order_token='').exists()
-    primary_paid = bool(escrow.invoice_id and escrow.invoice is not None and escrow.invoice.status == Invoice.Status.PAID)
-    status = EscrowAccount.Status.PAID if primary_paid else (EscrowAccount.Status.PENDING if has_checkout else EscrowAccount.Status.OPEN)
+    total_invoices = invoices.count()
+    paid_invoices = invoices.filter(status=Invoice.Status.PAID).count()
+    if total_invoices and paid_invoices == total_invoices:
+        status = EscrowAccount.Status.PAID
+    elif has_checkout or paid_invoices > 0:
+        status = EscrowAccount.Status.PENDING
+    else:
+        status = EscrowAccount.Status.OPEN
     updated = []
     if escrow.deposited_amount != deposited:
         escrow.deposited_amount = deposited
@@ -1507,39 +1510,41 @@ def _payment_term_dict(term):
 
 
 def _escrow_dict(escrow):
-    invoice = escrow.invoice if escrow.invoice_id else None
-    order = invoice.order if invoice else None
+    invoices = list(escrow.invoices.select_related('order', 'transporter').order_by('created_at'))
+    transporters = list(escrow.transporters.all())
+    order = invoices[0].order if invoices else None
     tender = escrow.tender
     cargo_reference = ''
     if order and order.cargo_reference:
         cargo_reference = order.cargo_reference
     elif tender and tender.cargo_reference:
         cargo_reference = tender.cargo_reference
-    invoiced_company = ''
-    if escrow.transporter_id and escrow.transporter:
-        invoiced_company = escrow.transporter.company_name
-    if not invoiced_company and order and order.company_name:
-        invoiced_company = order.company_name
+    transporter_names = [t.company_name or t.alias for t in transporters if t.company_name or t.alias]
+    if not transporter_names and order and order.company_name:
+        transporter_names = [order.company_name]
     tender_customer = tender.customer if tender else ''
+    pending_tokens = [i.selcom_order_token for i in invoices if i.selcom_order_token]
     return {
         'id': escrow.pk,
         'virtual_account': escrow.virtual_account or '',
         'customer': tender_customer or '-',
-        'transporter': invoiced_company or '-',
+        'transporter': ', '.join(transporter_names) or '-',
+        'transporter_names': transporter_names,
         'amount': str(escrow.amount),
-        'currency': invoice.currency if invoice else 'TZS',
+        'currency': invoices[0].currency if invoices else 'TZS',
         'payment_terms': escrow.payment_terms.name if escrow.payment_terms else '',
         'payment_terms_description': escrow.payment_terms.description if escrow.payment_terms else '',
         'created_at': escrow.created_at.isoformat() if escrow.created_at else None,
         'cargo_reference': cargo_reference or '',
-        'invoice_number': invoice.number if invoice else '',
+        'invoice_numbers': [i.number for i in invoices],
+        'invoice_number': ', '.join(i.number for i in invoices),
         'bank': escrow.bank or 'Selcom',
         'deposited_amount': str(escrow.deposited_amount),
         'status': escrow.status,
         'status_label': escrow.get_status_display(),
-        'selcom_order_token': invoice.selcom_order_token if invoice else '',
-        'selcom_pay_link': invoice.selcom_pay_link if invoice else '',
-        'selcom_status': invoice.selcom_status if invoice else '',
+        'selcom_order_token': pending_tokens[0] if pending_tokens else '',
+        'selcom_pay_link': invoices[0].selcom_pay_link if invoices else '',
+        'selcom_status': invoices[0].selcom_status if invoices else '',
     }
 
 
@@ -1771,7 +1776,8 @@ def admin_escrow(request):
 def api_admin_escrow(request):
     accounts = (
         EscrowAccount.objects
-        .select_related('tender', 'user', 'transporter', 'payment_terms', 'invoice__order__tender')
+        .select_related('tender', 'user', 'payment_terms')
+        .prefetch_related('invoices__order__tender', 'invoices__transporter', 'transporters')
         .order_by('-created_at')
     )
     return JsonResponse({'ok': True, 'escrow_accounts': [_escrow_dict(a) for a in accounts]})

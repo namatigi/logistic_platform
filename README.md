@@ -97,8 +97,9 @@ Every user has a personal **Pay Term** library (`/payment-terms/`):
 
 ### Escrow accounts
 An escrow account is created automatically for each tender once its cargo is awarded (invoice issued):
-- Virtual account number `EA-00001`, customer, transporter, amount, payment terms and status (**open** → **pending** → **paid**).
-- `deposited_amount` is summed from all invoices of the tender; confirming a Selcom payment marks the invoice paid and refreshes the escrow.
+- Virtual account number `EA-00001`, customer, transporter(s), amount, payment terms and status (**open** → **pending** → **paid**).
+- A cargo reference can have **multiple invoices** — one per transporter/order. All invoices and all their transporters are listed on the escrow account.
+- `deposited_amount` is summed from all invoices of the tender; confirming a Selcom payment marks the invoice paid and refreshes the escrow. The account is **paid** once every invoice is paid.
 - Administrators monitor everything on the **Escrow** page (`/escrow/`).
 
 ### Administrator tools
