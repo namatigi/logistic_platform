@@ -1,0 +1,110 @@
+{% extends 'base.html' %}
+{% block title %}Escrow Accounts &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Escrow Accounts</h1>
+      <p class="page-subtitle">Virtual accounts customers deposit into for their posted tenders.</p>
+    </div>
+  </div>
+
+  <div id="escrow-app"
+       data-url="{% url 'tenders:api_admin_escrow' %}"
+       v-cloak>
+    {% verbatim %}
+    <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
+
+    <div class="card">
+      <div class="table-wrap" v-if="accounts.length">
+        <table>
+          <thead>
+            <tr>
+              <th>Virtual account</th>
+              <th>Customer</th>
+              <th>Transporter</th>
+              <th>Amount</th>
+              <th>Payment terms</th>
+              <th>Created</th>
+              <th>Cargo reference</th>
+              <th>Invoice</th>
+              <th>Bank</th>
+              <th>Deposited</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="a in accounts" v-bind:key="a.id">
+              <td>
+                <strong>{{ a.virtual_account || '-' }}</strong>
+                <div v-if="a.selcom_order_token" class="escrow-mono" style="font-size:12px;">{{ a.selcom_order_token }}</div>
+              </td>
+              <td>
+                {{ a.customer || '-' }}
+                <div v-if="a.customer_email && a.customer_email !== a.customer" style="color:#64748b; font-size:12px;">{{ a.customer_email }}</div>
+              </td>
+              <td>{{ a.transporter || '-' }}</td>
+              <td><strong>{{ money(a.amount, a.currency) }}</strong></td>
+              <td>
+                {{ a.payment_terms || '-' }}
+                <div v-if="a.payment_terms_description" style="color:#64748b; font-size:12px;">{{ a.payment_terms_description }}</div>
+              </td>
+              <td>{{ fmtDate(a.created_at) }}</td>
+              <td>{{ a.cargo_reference || '-' }}</td>
+              <td>{{ a.invoice_number || '-' }}</td>
+              <td>{{ a.bank || 'Selcom' }}</td>
+              <td><strong>{{ money(a.deposited_amount, a.currency) }}</strong></td>
+              <td>
+                <span class="badge" :class="statusClass(a.status)">{{ a.status_label }}</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="empty" v-else-if="loaded">
+        <p style="padding:24px;">No escrow accounts yet. They are created automatically for each tender once its cargo is awarded.</p>
+      </div>
+      <div class="empty" v-else>
+        <p style="padding:24px;">Loading escrow accounts...</p>
+      </div>
+    </div>
+    {% endverbatim %}
+  </div>
+</div>
+
+<script>
+  (function () {
+    var root = document.getElementById('escrow-app');
+    var api = window.HYPAX.api;
+    var HY = window.HYPAX;
+
+    Vue.createApp({
+      data: function () {
+        return { accounts: [], error: '', loaded: false };
+      },
+      created: function () { this.load(); },
+      methods: {
+        money: function (v, c) { return HY.money(v, c); },
+        fmtDate: function (v) { return HY.fmtDate(v); },
+        statusClass: function (s) {
+          if (s === 'paid') return 'badge-success';
+          if (s === 'open') return 'badge-info';
+          return 'badge-warning';
+        },
+        load: async function () {
+          var self = this;
+          try {
+            var res = await api.get(root.dataset.url);
+            if (res && res.ok === false) { self.error = res.error || 'Failed to load escrow accounts.'; return; }
+            self.accounts = (res && res.escrow_accounts) || [];
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.loaded = true;
+          }
+        }
+      }
+    }).mount('#escrow-app');
+  })();
+</script>
+{% endblock %}

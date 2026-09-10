@@ -56,6 +56,9 @@
         <li class="{% if request.resolver_match.url_name == 'invoices' %}active{% endif %}">
           <a href="{% url 'tenders:invoices' %}">Invoices</a>
         </li>
+        <li class="{% if request.resolver_match.url_name == 'payment_terms' %}active{% endif %}">
+          <a href="{% url 'tenders:payment_terms' %}">Payment terms</a>
+        </li>
         <li class="{% if request.resolver_match.url_name == 'tracker' %}active{% endif %}">
           <a href="{% url 'tenders:tracker' %}">Tracker</a>
         </li>
@@ -79,6 +82,9 @@
         </li>
         <li class="{% if request.resolver_match.url_name == 'admin_dashboard' %}active{% endif %}">
           <a href="{% url 'users:admin_dashboard' %}">Admin</a>
+        </li>
+        <li class="{% if request.resolver_match.url_name == 'admin_escrow' %}active{% endif %}">
+          <a href="{% url 'tenders:admin_escrow' %}">Escrow</a>
         </li>
         {% endif %}
       </ul>

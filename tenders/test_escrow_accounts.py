@@ -1,0 +1,78 @@
+from django.test import TestCase
+from django.urls import reverse
+
+from users.models import CustomUser
+
+
+class EscrowAccountsTest(TestCase):
+    def setUp(self):
+        self.admin = CustomUser.objects.create_user(
+            email='admin@example.com', password='pass1234', role=CustomUser.Role.ADMINISTRATOR,
+        )
+        self.user = CustomUser.objects.create_user(
+            email='user@example.com', password='pass1234', role=CustomUser.Role.USER,
+        )
+
+    def test_payment_term_crud(self):
+        self.client.login(email='user@example.com', password='pass1234')
+        res = self.client.get(reverse('tenders:api_payment_terms'))
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()['payment_terms'], [])
+        res = self.client.post(reverse('tenders:api_payment_term_create'), {'name': 'Net 30', 'description': 'Pay within 30 days'}, content_type='application/json')
+        self.assertEqual(res.status_code, 200, res.content)
+        pid = res.json()['payment_term']['id']
+        res = self.client.get(reverse('tenders:api_payment_terms'))
+        self.assertEqual(len(res.json()['payment_terms']), 1)
+        res = self.client.post(reverse('tenders:api_payment_term_toggle', args=[pid]), {}, content_type='application/json')
+        self.assertEqual(res.json()['payment_term']['is_active'], False)
+        res = self.client.post(reverse('tenders:api_payment_term_delete', args=[pid]), {}, content_type='application/json')
+        self.assertEqual(res.status_code, 200)
+        res = self.client.get(reverse('tenders:api_payment_terms'))
+        self.assertEqual(res.json()['payment_terms'], [])
+
+    def test_payment_term_not_owned(self):
+        other = CustomUser.objects.create_user(email='other@example.com', password='pass1234')
+        from tenders.models import PaymentTerm
+        term = PaymentTerm.objects.create(user=other, name='Mine')
+        self.client.login(email='user@example.com', password='pass1234')
+        res = self.client.post(reverse('tenders:api_payment_term_delete', args=[term.pk]), {}, content_type='application/json')
+        self.assertEqual(res.status_code, 404)
+
+    def test_escrow_admin_requires_admin(self):
+        self.client.login(email='user@example.com', password='pass1234')
+        res = self.client.get(reverse('tenders:api_admin_escrow'))
+        self.assertEqual(res.status_code, 302)
+        self.client.login(email='admin@example.com', password='pass1234')
+        res = self.client.get(reverse('tenders:api_admin_escrow'))
+        self.assertEqual(res.status_code, 200)
+        self.assertIn('escrow_accounts', res.json())
+
+    def test_form_meta_includes_payment_terms(self):
+        from tenders.models import PaymentTerm
+        PaymentTerm.objects.create(user=self.user, name='On confirmation')
+        self.client.login(email='user@example.com', password='pass1234')
+        res = self.client.get(reverse('tenders:api_form_meta'))
+        meta = res.json()['meta']
+        self.assertEqual(len(meta['payment_terms']), 1)
+        self.assertEqual(meta['payment_terms'][0]['name'], 'On confirmation')
+
+    def test_escrow_created_with_invoice(self):
+        from tenders.views import get_or_create_invoice
+        from tenders.models import Order, Tender, EscrowAccount, OrderLine
+        tender = Tender.objects.create(
+            user=self.user, route_loading='Dar es Salaam', route_delivery='Mombasa',
+            customer='HYPAX', cargo_type='container_20', truck_type='trailer',
+            weight=10, number_of_trucks=1, distance_km=100, cargo_date='2026-09-01',
+        )
+        order = Order.objects.create(
+            order_id=9001, order_name='ORD-9001', company_name='Transit Ltd',
+            amount_total=1000, currency='TZS', cargo_reference='CAR9001', tender=tender,
+        )
+        OrderLine.objects.create(order=order, line_id=1, product_name='Freight', quantity=1, price_unit=1000, price_total=1000, awarded=True)
+        invoice = get_or_create_invoice(order)
+        escrow = EscrowAccount.objects.filter(tender=tender).first()
+        self.assertIsNotNone(escrow)
+        self.assertEqual(escrow.virtual_account, f'EA-{escrow.pk:05d}')
+        self.assertEqual(escrow.invoice_id, invoice.pk)
+        self.assertEqual(escrow.user_id, self.user.pk)
+        self.assertTrue(escrow.virtual_account.startswith('EA-'))

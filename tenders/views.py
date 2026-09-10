@@ -28,10 +28,22 @@ from .forms import (
     MediaConfigForm,
     OdooConfigForm,
     OutgoingEmailConfigForm,
+    PaymentTermForm,
     SelcomConfigForm,
     TenderForm,
 )
-from .models import ApiSetting, Invoice, Order, OrderLine, Tender, Town, Transporter, generate_transporter_alias
+from .models import (
+    ApiSetting,
+    EscrowAccount,
+    Invoice,
+    Order,
+    OrderLine,
+    PaymentTerm,
+    Tender,
+    Town,
+    Transporter,
+    generate_transporter_alias,
+)
 from . import selcom as selcom
 from .towns import TOWN_CHOICES
 from companies.models import Company
@@ -107,16 +119,70 @@ def get_or_create_transporter(order):
 
 def get_or_create_invoice(order):
     invoice = Invoice.objects.filter(order=order).first()
-    if invoice is not None:
-        return invoice
-    transporter = get_or_create_transporter(order)
-    return Invoice.objects.create(
-        number=f'INV-{order.order_id}',
-        order=order,
-        transporter=transporter,
-        amount_total=order.awarded_amount,
-        currency=order.currency or 'TZS',
-    )
+    if invoice is None:
+        transporter = get_or_create_transporter(order)
+        invoice = Invoice.objects.create(
+            number=f'INV-{order.order_id}',
+            order=order,
+            transporter=transporter,
+            amount_total=order.awarded_amount,
+            currency=order.currency or 'TZS',
+        )
+    _ensure_escrow_account(order.tender, order, invoice)
+    return invoice
+
+
+def _ensure_escrow_account(tender, order, invoice):
+    if tender is None:
+        return None
+    escrow = EscrowAccount.objects.filter(tender=tender).select_related('user', 'invoice').first()
+    update_fields = []
+    if escrow is None:
+        escrow = EscrowAccount.objects.create(
+            tender=tender,
+            user=tender.user,
+            amount=invoice.amount_total if invoice else Decimal('0.00'),
+            transporter=invoice.transporter if invoice else None,
+            invoice=invoice,
+            payment_terms=tender.payment_terms,
+            bank='Selcom',
+        )
+        escrow.virtual_account = f'EA-{escrow.pk:05d}'
+        escrow.save(update_fields=('virtual_account',))
+    else:
+        if escrow.invoice_id is None and invoice is not None:
+            escrow.invoice = invoice
+            update_fields.append('invoice')
+        if escrow.transporter_id is None and invoice is not None and invoice.transporter_id:
+            escrow.transporter = invoice.transporter
+            update_fields.append('transporter')
+        if escrow.amount == 0 and invoice is not None and invoice.amount_total:
+            escrow.amount = invoice.amount_total
+            update_fields.append('amount')
+        if escrow.payment_terms_id is None and tender.payment_terms_id:
+            escrow.payment_terms = tender.payment_terms
+            update_fields.append('payment_terms')
+        if update_fields:
+            escrow.save(update_fields=update_fields)
+    _refresh_escrow(escrow)
+    return escrow
+
+
+def _refresh_escrow(escrow):
+    invoices = Invoice.objects.filter(order__tender=escrow.tender)
+    deposited = invoices.aggregate(total=Sum('deposited_amount'))['total'] or Decimal('0.00')
+    has_checkout = invoices.exclude(selcom_order_token='').exists()
+    primary_paid = bool(escrow.invoice_id and escrow.invoice is not None and escrow.invoice.status == Invoice.Status.PAID)
+    status = EscrowAccount.Status.PAID if primary_paid else (EscrowAccount.Status.PENDING if has_checkout else EscrowAccount.Status.OPEN)
+    updated = []
+    if escrow.deposited_amount != deposited:
+        escrow.deposited_amount = deposited
+        updated.append('deposited_amount')
+    if escrow.status != status:
+        escrow.status = status
+        updated.append('status')
+    if updated:
+        escrow.save(update_fields=updated)
 
 
 def notify_order_update(order):
@@ -430,6 +496,11 @@ class TenderCreate(TenderCreatorRequiredMixin, LoginRequiredMixin, CreateView):
     template_name = 'tenders/tender_form.html'
     success_url = reverse_lazy('tenders:create')
 
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['user'] = self.request.user
+        return kwargs
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['api_setting'] = _shared_setting()
@@ -679,6 +750,8 @@ def _tender_dict(tender):
         'status_label': tender.get_status_display(),
         'cargo_reference': tender.cargo_reference,
         'response_code': tender.response_code,
+        'payment_terms': tender.payment_terms.name if tender.payment_terms_id else '',
+        'payment_term_id': tender.payment_terms_id,
         'created_at': tender.created_at.isoformat() if tender.created_at else None,
     }
 
@@ -741,6 +814,8 @@ def _order_dict(order, include_lines=False):
         'award_message': (order.award_response_data or {}).get('message', ''),
         'invoice_id': invoice.pk if invoice else None,
         'payment_status': invoice.status if invoice else None,
+        'payment_term_id': order.tender.payment_terms_id if order.tender else None,
+        'payment_terms': order.tender.payment_terms.name if order.tender and order.tender.payment_terms_id else '',
     }
     if include_lines:
         data['lines'] = [
@@ -906,14 +981,16 @@ def api_tender_list(request):
 
 @login_required
 def api_form_meta(request):
-    return JsonResponse({'ok': True, 'meta': _form_meta()})
+    meta = _form_meta()
+    meta['payment_terms'] = [_payment_term_dict(t) for t in request.user.payment_terms.order_by('-created_at')]
+    return JsonResponse({'ok': True, 'meta': meta})
 
 
 @login_required
 def api_tender_create(request):
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required.'}, status=405)
-    form = TenderForm(_json_body(request))
+    form = TenderForm(_json_body(request), user=request.user)
     if not form.is_valid():
         return JsonResponse({'ok': False, 'error': 'Please fix the highlighted fields.', 'errors': form.errors})
 
@@ -1369,6 +1446,9 @@ def _invoice_dict(invoice):
         'number': invoice.number,
         'status': invoice.status,
         'amount_total': str(invoice.amount_total),
+        'deposited_amount': str(invoice.deposited_amount),
+        'payment_terms': tender.payment_terms.name if tender and tender.payment_terms_id else '',
+        'payment_term_id': tender.payment_terms_id if tender else None,
         'currency': invoice.currency,
         'created_at': invoice.created_at.isoformat(),
         'order_id': order.order_id,
@@ -1399,6 +1479,56 @@ def _invoice_dict(invoice):
             }
             for line in order.lines.filter(awarded=True).order_by('line_id')
         ],
+    }
+
+
+def _payment_term_dict(term):
+    return {
+        'id': term.pk,
+        'name': term.name,
+        'description': term.description,
+        'is_active': term.is_active,
+        'created_at': term.created_at.isoformat() if term.created_at else None,
+    }
+
+
+def _escrow_dict(escrow):
+    invoice = escrow.invoice if escrow.invoice_id else None
+    order = invoice.order if invoice else None
+    tender = escrow.tender
+    cargo_reference = ''
+    if order and order.cargo_reference:
+        cargo_reference = order.cargo_reference
+    elif tender and tender.cargo_reference:
+        cargo_reference = tender.cargo_reference
+    transporter_name = ''
+    if escrow.transporter_id and escrow.transporter:
+        transporter_name = escrow.transporter.company_name
+    elif order and order.company_name:
+        transporter_name = order.company_name
+    user_name = ''
+    if escrow.user_id and escrow.user:
+        user_name = escrow.user.get_full_name() or escrow.user.email
+    return {
+        'id': escrow.pk,
+        'virtual_account': escrow.virtual_account or '',
+        'customer': user_name or (tender.customer if tender else ''),
+        'customer_email': escrow.user.email if escrow.user else '',
+        'transporter': transporter_name or '-',
+        'amount': str(escrow.amount),
+        'currency': invoice.currency if invoice else 'TZS',
+        'payment_terms': escrow.payment_terms.name if escrow.payment_terms else '',
+        'payment_terms_description': escrow.payment_terms.description if escrow.payment_terms else '',
+        'created_at': escrow.created_at.isoformat() if escrow.created_at else None,
+        'cargo_reference': cargo_reference or '',
+        'invoice_number': invoice.number if invoice else '',
+        'bank': escrow.bank or 'Selcom',
+        'deposited_amount': str(escrow.deposited_amount),
+        'status': escrow.status,
+        'status_label': escrow.get_status_display(),
+        'selcom_order_token': invoice.selcom_order_token if invoice else '',
+        'selcom_pay_link': invoice.selcom_pay_link if invoice else '',
+        'selcom_status': invoice.selcom_status if invoice else '',
     }
 
 
@@ -1512,6 +1642,80 @@ def api_invoice_paid(request, pk):
 
 
 # ---------------------------------------------------------------------------
+# Payment terms (user-managed library)
+# ---------------------------------------------------------------------------
+
+@login_required
+def payment_terms_page(request):
+    return render(request, 'tenders/payment_terms.html', {'active_tab': 'payment_terms'})
+
+
+@login_required
+def api_payment_terms(request):
+    terms = request.user.payment_terms.order_by('-created_at')
+    return JsonResponse({'ok': True, 'payment_terms': [_payment_term_dict(t) for t in terms]})
+
+
+@login_required
+@require_POST
+def api_payment_term_create(request):
+    form = PaymentTermForm(_json_body(request))
+    if not form.is_valid():
+        return JsonResponse({'ok': False, 'error': 'Please fix the highlighted fields.', 'errors': form.errors})
+    term = form.save(commit=False)
+    term.user = request.user
+    term.is_active = True
+    term.save()
+    return JsonResponse({
+        'ok': True,
+        'message': 'Payment term created.',
+        'payment_term': _payment_term_dict(term),
+    })
+
+
+@login_required
+@require_POST
+def api_payment_term_delete(request, pk):
+    term = request.user.payment_terms.filter(pk=pk).first()
+    if term is None:
+        return JsonResponse({'ok': False, 'error': 'Payment term not found.'}, status=404)
+    term.delete()
+    return JsonResponse({'ok': True, 'message': 'Payment term deleted.'})
+
+
+@login_required
+@require_POST
+def api_payment_term_toggle(request, pk):
+    term = request.user.payment_terms.filter(pk=pk).first()
+    if term is None:
+        return JsonResponse({'ok': False, 'error': 'Payment term not found.'}, status=404)
+    term.is_active = not term.is_active
+    term.save(update_fields=('is_active',))
+    return JsonResponse({'ok': True, 'message': 'Payment term updated.', 'payment_term': _payment_term_dict(term)})
+
+
+# ---------------------------------------------------------------------------
+# Escrow accounts (administrator)
+# ---------------------------------------------------------------------------
+
+@login_required
+@_admin_required
+def admin_escrow(request):
+    return render(request, 'tenders/admin_escrow.html', {'active_tab': 'escrow'})
+
+
+@login_required
+@_admin_required
+def api_admin_escrow(request):
+    accounts = (
+        EscrowAccount.objects
+        .select_related('tender', 'user', 'transporter', 'payment_terms', 'invoice__order__tender')
+        .order_by('-created_at')
+    )
+    return JsonResponse({'ok': True, 'escrow_accounts': [_escrow_dict(a) for a in accounts]})
+
+
+# ---------------------------------------------------------------------------
 # Selcom payment gateway
 # ---------------------------------------------------------------------------
 
@@ -1528,14 +1732,18 @@ def _invoice_in_scope(request, invoice):
     return False
 
 
-def _set_invoice_paid(invoice):
-    if invoice.status == Invoice.Status.PAID:
-        return
+def _set_invoice_paid(invoice, deposited_amount=None):
+    if deposited_amount is None:
+        deposited_amount = invoice.amount_total if invoice.amount_total is not None else Decimal('0.00')
     invoice.status = Invoice.Status.PAID
-    fields = ['status', 'selcom_status']
+    invoice.deposited_amount = deposited_amount
+    fields = ['status', 'selcom_status', 'deposited_amount']
     selcom_status = invoice.selcom_status or 'paid'
     invoice.selcom_status = selcom_status
     invoice.save(update_fields=fields)
+    escrow = EscrowAccount.objects.filter(tender=invoice.order.tender).first()
+    if escrow is not None:
+        _refresh_escrow(escrow)
     _flush_derived_caches()
 
 
@@ -1582,6 +1790,9 @@ def api_invoice_selcom_initiate(request, pk):
     invoice.selcom_status = 'created'
     invoice.selcom_updated_at = timezone.now()
     invoice.save(update_fields=('selcom_order_token', 'selcom_pay_link', 'selcom_status', 'selcom_updated_at'))
+    escrow = EscrowAccount.objects.filter(tender=invoice.order.tender).first()
+    if escrow is not None:
+        _refresh_escrow(escrow)
     _flush_derived_caches()
     return JsonResponse({
         'ok': True,
@@ -1612,9 +1823,12 @@ def api_invoice_selcom_status(request, pk):
     invoice.selcom_status = result['status'] or invoice.selcom_status
     invoice.selcom_updated_at = timezone.now()
     if result['paid']:
-        _set_invoice_paid(invoice)
+        _set_invoice_paid(invoice, selcom.collected_amount(result['parsed']))
     else:
         invoice.save(update_fields=('selcom_status', 'selcom_updated_at'))
+    escrow = EscrowAccount.objects.filter(tender=invoice.order.tender).first()
+    if escrow is not None:
+        _refresh_escrow(escrow)
     _flush_derived_caches()
     return JsonResponse({
         'ok': True,
@@ -1665,5 +1879,5 @@ def webhook_selcom(request):
 
     invoice.selcom_status = 'paid'
     invoice.selcom_updated_at = timezone.now()
-    _set_invoice_paid(invoice)
+    _set_invoice_paid(invoice, selcom.collected_amount(payload))
     return JsonResponse({'ok': True, 'paid': True, 'invoice': _invoice_dict(invoice)})

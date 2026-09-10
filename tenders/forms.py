@@ -1,6 +1,6 @@
 from django import forms
 
-from .models import ApiSetting, Tender
+from .models import ApiSetting, PaymentTerm, Tender
 
 
 class TenderForm(forms.ModelForm):
@@ -16,11 +16,27 @@ class TenderForm(forms.ModelForm):
             'number_of_trucks',
             'distance_km',
             'cargo_date',
+            'payment_terms',
         )
         widgets = {
             'cargo_date': forms.DateInput(attrs={'type': 'date'}),
             'weight': forms.NumberInput(attrs={'step': '0.1'}),
             'distance_km': forms.NumberInput(attrs={'step': '0.1'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        user = kwargs.pop('user', None)
+        super().__init__(*args, **kwargs)
+        if user is not None:
+            self.fields['payment_terms'].queryset = PaymentTerm.objects.filter(user=user)
+
+
+class PaymentTermForm(forms.ModelForm):
+    class Meta:
+        model = PaymentTerm
+        fields = ('name', 'description', 'is_active')
+        widgets = {
+            'description': forms.Textarea(attrs={'rows': 3}),
         }
 
 

@@ -129,6 +129,18 @@
             <input type="date" v-model="form.cargo_date" required>
             <div class="field-error" v-if="errors.cargo_date"><ul><li v-for="e in errors.cargo_date">{{ e }}</li></ul></div>
           </div>
+          <div class="form-row">
+            <label>Payment terms</label>
+            <select v-model="form.payment_terms">
+              <option v-bind:value="null" disabled>Select payment terms</option>
+              <option v-for="pt in paymentTerms" v-bind:key="pt.id" v-bind:value="pt.id">{{ pt.name }}</option>
+            </select>
+            <div class="form-help">
+              Optional. Choose from your saved payment terms.
+              <a href="{% url 'tenders:payment_terms' %}" target="_blank" rel="noopener">Create payment terms</a>
+            </div>
+            <div class="field-error" v-if="errors.payment_terms"><ul><li v-for="e in errors.payment_terms">{{ e }}</li></ul></div>
+          </div>
         </div>
         <div class="form-actions">
           <button type="submit" class="btn btn-primary" :disabled="loading || success">
@@ -163,7 +175,7 @@
     function blank() {
       return {
         route_loading: '', route_delivery: '', customer: '', cargo_type: '', truck_type: '',
-        weight: null, number_of_trucks: null, distance_km: null, cargo_date: ''
+        weight: null, number_of_trucks: null, distance_km: null, cargo_date: '', payment_terms: null
       };
     }
 
@@ -174,6 +186,7 @@
           towns: [],
           cargoTypes: [],
           truckTypes: [],
+          paymentTerms: [],
           companies: [],
           loadingQuery: '',
           deliveryQuery: '',
@@ -205,6 +218,7 @@
           this.towns = (meta.meta && meta.meta.towns) || [];
           this.cargoTypes = (meta.meta && meta.meta.cargo_types) || [];
           this.truckTypes = (meta.meta && meta.meta.truck_types) || [];
+          this.paymentTerms = (meta.meta && meta.meta.payment_terms) || [];
 
           var towns = await api.get(root.dataset.townsUrl);
           var byName = {};

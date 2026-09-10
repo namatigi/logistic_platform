@@ -58,10 +58,70 @@ class Tender(models.Model):
     external_id = models.BigIntegerField(null=True, blank=True, help_text='ID returned by the external system')
     cargo_reference = models.CharField(max_length=200, blank=True, default='', help_text='Reference returned by the external system (e.g. CAR00014)')
     external_status = models.CharField(max_length=50, blank=True, default='', help_text='Status returned by the external system')
+    payment_terms = models.ForeignKey(
+        'PaymentTerm', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='tenders', help_text='Payment terms chosen by the posting user for this tender.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f'{self.customer} - {self.route_loading} to {self.route_delivery}'
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class PaymentTerm(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='payment_terms',
+        help_text='User who created this payment terms.',
+    )
+    name = models.CharField(max_length=100, help_text='Short label, e.g. Net 30 or Payment on confirmation.')
+    description = models.TextField(blank=True, default='', help_text='Full details of the payment terms.')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class EscrowAccount(models.Model):
+    class Status(models.TextChoices):
+        OPEN = 'open', 'Open'
+        PENDING = 'pending', 'Pending'
+        PAID = 'paid', 'Paid'
+        CLOSED = 'closed', 'Closed'
+
+    tender = models.OneToOneField(Tender, on_delete=models.CASCADE, related_name='escrow_account')
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='escrow_accounts',
+        help_text='Customer who posted the tender and deposits into this account.',
+    )
+    virtual_account = models.CharField(max_length=120, blank=True, default='', help_text='Escrow account number shown to the customer.')
+    amount = models.DecimalField(max_digits=14, decimal_places=2, default=0, help_text='Expected amount to be deposited.')
+    deposited_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0, help_text='Amount actually deposited (reported by the payment gateway).')
+    payment_terms = models.ForeignKey(
+        PaymentTerm, null=True, blank=True, on_delete=models.SET_NULL, related_name='escrow_accounts',
+    )
+    transporter = models.ForeignKey(
+        'Transporter', null=True, blank=True, on_delete=models.SET_NULL, related_name='escrow_accounts',
+        help_text='Transport company related to this escrow account.',
+    )
+    invoice = models.OneToOneField(
+        'Invoice', null=True, blank=True, on_delete=models.SET_NULL, related_name='escrow_account',
+        help_text='Primary invoice related to this tender/cargo.',
+    )
+    bank = models.CharField(max_length=60, blank=True, default='Selcom')
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.virtual_account or f'Escrow for tender #{self.tender_id}'
 
     class Meta:
         ordering = ['-created_at']
@@ -320,6 +380,7 @@ class Invoice(models.Model):
         help_text='Transport company this invoice is issued to',
     )
     amount_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    deposited_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0, help_text='Amount actually collected by the payment gateway for this invoice.')
     currency = models.CharField(max_length=10, blank=True, default='')
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     selcom_reference = models.CharField(max_length=120, blank=True, default='', help_text='Vendor reference used when creating the Selcom checkout order')

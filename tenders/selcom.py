@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 
 import requests
 
@@ -121,6 +122,26 @@ def current_status(parsed):
         if status:
             return status
     return ''
+
+
+def collected_amount(parsed):
+    primary = _payment_dict(parsed)
+    candidates = [parsed, primary]
+    for obj in list(candidates):
+        if isinstance(obj, dict) and isinstance(obj.get('payment'), dict):
+            candidates.append(obj['payment'])
+    for obj in candidates:
+        if not isinstance(obj, dict):
+            continue
+        for key in ('amount', 'paid_amount', 'deposited_amount', 'transaction_amount', 'amount_paid'):
+            value = obj.get(key)
+            if value is None or str(value).strip() in ('', 'None', 'null'):
+                continue
+            try:
+                return Decimal(str(value))
+            except (InvalidOperation, ValueError, TypeError):
+                continue
+    return None
 
 
 def _classify(methods):
