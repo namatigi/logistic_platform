@@ -1501,20 +1501,18 @@ def _escrow_dict(escrow):
         cargo_reference = order.cargo_reference
     elif tender and tender.cargo_reference:
         cargo_reference = tender.cargo_reference
-    transporter_name = ''
+    invoiced_company = ''
     if escrow.transporter_id and escrow.transporter:
-        transporter_name = escrow.transporter.company_name
-    elif order and order.company_name:
-        transporter_name = order.company_name
-    user_name = ''
-    if escrow.user_id and escrow.user:
-        user_name = escrow.user.get_full_name() or escrow.user.email
+        invoiced_company = escrow.transporter.company_name
+    if not invoiced_company and order and order.company_name:
+        invoiced_company = order.company_name
+    if not invoiced_company and tender and tender.customer:
+        invoiced_company = tender.customer
     return {
         'id': escrow.pk,
         'virtual_account': escrow.virtual_account or '',
-        'customer': user_name or (tender.customer if tender else ''),
-        'customer_email': escrow.user.email if escrow.user else '',
-        'transporter': transporter_name or '-',
+        'customer': invoiced_company or '-',
+        'transporter': invoiced_company or '-',
         'amount': str(escrow.amount),
         'currency': invoice.currency if invoice else 'TZS',
         'payment_terms': escrow.payment_terms.name if escrow.payment_terms else '',

@@ -39,10 +39,7 @@
                 <strong>{{ a.virtual_account || '-' }}</strong>
                 <div v-if="a.selcom_order_token" class="escrow-mono" style="font-size:12px;">{{ a.selcom_order_token }}</div>
               </td>
-              <td>
-                {{ a.customer || '-' }}
-                <div v-if="a.customer_email && a.customer_email !== a.customer" style="color:#64748b; font-size:12px;">{{ a.customer_email }}</div>
-              </td>
+              <td>{{ a.customer || '-' }}</td>
               <td>{{ a.transporter || '-' }}</td>
               <td><strong>{{ money(a.amount, a.currency) }}</strong></td>
               <td>
