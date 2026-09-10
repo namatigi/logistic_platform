@@ -1701,3 +1701,136 @@ class PerTransporterTenderTest(TestCase):
         self.assertTrue(response.json()['ok'])
         self.assertTrue(response.json()['needs_settings'])
         m.assert_not_called()
+
+
+class PendingPushTest(TestCase):
+    """Failed tender submissions are queued and re-sent when the Odoo API is reachable again."""
+
+    def setUp(self):
+        from tenders.models import PendingPush
+        self.pending_model = PendingPush
+        self.user = CustomUser.objects.create_user(email='queue@example.com', password='pass1234')
+        self.client.login(email='queue@example.com', password='pass1234')
+        self.admin = CustomUser.objects.create_user(
+            email='queueadmin@example.com', password='pass1234',
+            role=CustomUser.Role.ADMINISTRATOR,
+        )
+        self.setting = ApiSetting.objects.create(base_url='https://queue.example.com/')
+
+    def _payload(self):
+        return {
+            'route_loading': 'Nairobi',
+            'route_delivery': 'Mombasa',
+            'customer': 'QueueCo',
+            'cargo_type': 'dry_van',
+            'truck_type': 'truck',
+            'weight': 10.0,
+            'number_of_trucks': 1,
+            'distance_km': 480.0,
+            'cargo_date': timezone.localdate().isoformat(),
+        }
+
+    def _post_tender(self):
+        return self.client.post(
+            reverse('tenders:api_tender_create'), json.dumps(self._payload()),
+            content_type='application/json',
+        )
+
+    def _enqueue(self):
+        tender = Tender.objects.create(
+            user=self.user, route_loading='Nairobi', route_delivery='Mombasa',
+            customer='QueueCo', cargo_type=Tender.CargoType.DRY_VAN,
+            truck_type=Tender.TruckType.TRUCK, weight=10.0, number_of_trucks=1,
+            distance_km=480, cargo_date=timezone.localdate(), status=Tender.Status.FAILED,
+        )
+        return tenders_views._enqueue_tender(tender, 'initial failure')
+
+    def test_transient_failure_is_queued(self):
+        with patch('tenders.views.submit_tender',
+                   return_value=(None, 'HTTPSConnectionPool(...): [Errno 111] Connection refused', False)):
+            response = self._post_tender()
+        data = response.json()
+        self.assertTrue(data['queued'])
+        self.assertIn('queued', data['message'])
+        push = self.pending_model.objects.get()
+        self.assertEqual(push.state, self.pending_model.State.PENDING)
+        self.assertEqual(push.tender.status, Tender.Status.FAILED)
+
+    def test_http_5xx_failure_is_queued(self):
+        with patch('tenders.views.submit_tender', return_value=(503, 'Service Unavailable', False)):
+            response = self._post_tender()
+        self.assertTrue(response.json()['queued'])
+        self.assertEqual(self.pending_model.objects.count(), 1)
+
+    def test_http_4xx_failure_not_queued(self):
+        with patch('tenders.views.submit_tender', return_value=(400, '{"message":"bad request"}', False)):
+            response = self._post_tender()
+        data = response.json()
+        self.assertNotIn('queued', data)
+        self.assertEqual(self.pending_model.objects.count(), 0)
+
+    def test_flush_delivers_pending_push(self):
+        push = self._enqueue()
+        with patch('tenders.views.submit_tender',
+                   return_value=(200, '{"status":"success","data":{"id":9,"name":"CAR0009"}}', True)):
+            delivered, failed, skipped = tenders_views.flush_pending_pushes()
+        self.assertEqual((delivered, failed, skipped), (1, 0, 0))
+        push.refresh_from_db()
+        self.assertEqual(push.state, self.pending_model.State.DELIVERED)
+        self.assertIsNotNone(push.delivered_at)
+        push.tender.refresh_from_db()
+        self.assertEqual(push.tender.status, Tender.Status.SUCCESS)
+        self.assertEqual(push.tender.external_id, 9)
+        self.assertEqual(push.tender.cargo_reference, 'CAR0009')
+
+    def test_flush_keeps_pending_when_still_down(self):
+        push = self._enqueue()
+        with patch('tenders.views.submit_tender', return_value=(None, '[Errno 111] Connection refused', False)):
+            delivered, failed, skipped = tenders_views.flush_pending_pushes()
+        self.assertEqual((delivered, failed, skipped), (0, 0, 0))
+        push.refresh_from_db()
+        self.assertEqual(push.state, self.pending_model.State.PENDING)
+        self.assertEqual(push.attempts, 1)
+        self.assertIn('connection refused', push.last_error)
+
+    def test_flush_marks_4xx_permanently_failed(self):
+        push = self._enqueue()
+        with patch('tenders.views.submit_tender', return_value=(400, '{"message":"bad"}', False)):
+            delivered, failed, skipped = tenders_views.flush_pending_pushes()
+        self.assertEqual((delivered, failed, skipped), (0, 1, 0))
+        push.refresh_from_db()
+        self.assertEqual(push.state, self.pending_model.State.FAILED)
+
+    def test_flush_skips_when_no_base_url(self):
+        push = self._enqueue()
+        ApiSetting.objects.all().delete()
+        delivered, failed, skipped = tenders_views.flush_pending_pushes()
+        self.assertEqual((delivered, failed, skipped), (0, 0, 1))
+        push.refresh_from_db()
+        self.assertEqual(push.state, self.pending_model.State.PENDING)
+        self.assertEqual(self.pending_model.objects.filter(state=self.pending_model.State.PENDING).count(), 1)
+
+    def test_successful_submission_flushes_queued(self):
+        queued = self._enqueue()
+
+        def send_tender(setting, tender):
+            return (200, '{"status":"success","data":{"id":%d,"name":"CAR%04d"}}' % (tender.pk, tender.pk), True)
+
+        with patch('tenders.views.submit_tender', side_effect=send_tender) as m:
+            response = self._post_tender()
+        self.assertTrue(response.json()['ok'])
+        self.assertEqual(m.call_count, 2)
+        queued.refresh_from_db()
+        self.assertEqual(queued.state, self.pending_model.State.DELIVERED)
+
+    def test_admin_page_shows_pending_and_retries(self):
+        self._enqueue()
+        self.client.login(email='queueadmin@example.com', password='pass1234')
+        response = self.client.get(reverse('tenders:admin_diagnostic'))
+        self.assertContains(response, 'Pending tender submissions')
+        with patch('tenders.views.submit_tender',
+                   return_value=(200, '{"status":"success","data":{"id":10,"name":"CAR0010"}}', True)):
+            response = self.client.post(reverse('tenders:admin_diagnostic'), {'action': 'retry_pending'})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.pending_model.objects.filter(state=self.pending_model.State.DELIVERED).count(), 1)
+        self.assertEqual(self.pending_model.objects.filter(state=self.pending_model.State.PENDING).count(), 0)

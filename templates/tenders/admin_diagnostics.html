@@ -9,6 +9,49 @@
     </div>
   </div>
 
+  {% if pending_pushes %}
+    <div class="card" style="border-color:#fdba74; background:#fff7ed; margin-bottom:16px;">
+      <div class="card-title">
+        Pending tender submissions
+        <span class="badge badge-warning">{{ pending_count }}</span>
+      </div>
+      <p class="form-help" style="margin:-4px 0 12px;">
+        These tenders could not reach their Odoo instance when first submitted and are queued to be sent
+        automatically once it is reachable again. They are also re-sent whenever any submission succeeds, or by
+        running <code>manage.py flush_pending_pushes</code>.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>User</th>
+              <th>Target</th>
+              <th>Attempts</th>
+              <th>Last error</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for push in pending_pushes %}
+              <tr>
+                <td>{{ push.tender.customer }} &middot; {{ push.tender.route_loading }} &rarr; {{ push.tender.route_delivery }}</td>
+                <td>{{ push.tender.user.email }}</td>
+                <td><code>{{ push.tender.user.companies.first.odoo_company.base_url|default:'shared' }}</code></td>
+                <td>{{ push.attempts }}</td>
+                <td style="max-width:340px; word-break:break-word;">{{ push.last_error }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <form method="post" style="margin-top:12px;" action="{% url 'tenders:admin_diagnostic' %}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="retry_pending">
+        <button type="submit" class="btn btn-primary">Retry now</button>
+      </form>
+    </div>
+  {% endif %}
+
   <div id="diagnostics-app"
        data-url="{% url 'tenders:api_admin_diagnostic' %}"
        v-cloak>

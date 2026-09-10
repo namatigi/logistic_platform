@@ -629,3 +629,35 @@ class ApiDiagnostic(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+
+class PendingPush(models.Model):
+    """A queued tender submission waiting for the Odoo instance to come back online.
+
+    Tenders whose initial submission failed with a transport/server error are
+    enqueued here and re-sent automatically (flush_pending_pushes) once the API
+    is reachable again, or manually from the diagnostics page.
+    """
+
+    class State(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        DELIVERED = 'delivered', 'Delivered'
+        FAILED = 'failed', 'Failed'
+
+    tender = models.ForeignKey(Tender, on_delete=models.CASCADE, related_name='pending_pushes')
+    state = models.CharField(
+        max_length=20, choices=State.choices, default=State.PENDING, db_index=True,
+        help_text='pending = awaiting delivery, delivered = sent, failed = permanently rejected (4xx).',
+    )
+    attempts = models.PositiveIntegerField(default=0, help_text='How many times delivery has been attempted.')
+    response_code = models.IntegerField(null=True, blank=True, help_text='HTTP status of the last delivery attempt.')
+    last_error = models.TextField(blank=True, default='', help_text='Error message of the last failed attempt.')
+    last_attempt_at = models.DateTimeField(null=True, blank=True, help_text='When the last delivery attempt happened.')
+    delivered_at = models.DateTimeField(null=True, blank=True, help_text='When the submission was finally delivered.')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f'Push for tender #{self.tender_id} · {self.state}'
+
+    class Meta:
+        ordering = ['-created_at']

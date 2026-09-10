@@ -13,6 +13,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
+from django.db import transaction
 from django.db.models import Q, Sum, Count
 from django.core.cache import cache
 from django.core.exceptions import ObjectDoesNotExist
@@ -43,6 +44,7 @@ from .models import (
     Order,
     OrderLine,
     PaymentTerm,
+    PendingPush,
     Tender,
     Town,
     Transporter,
@@ -363,6 +365,87 @@ def submit_tender(setting, tender):
 def submit_confirmation(setting, url, payload):
     headers, auth = _build_auth(setting)
     return _post_with_retry(url, payload, headers, auth)
+
+
+def _parse_tender_result(tender, status_code, body):
+    """Extract the external system's response into the tender and decide success."""
+    parsed = {}
+    try:
+        parsed = json.loads(body) if body else {}
+    except (ValueError, TypeError):
+        pass
+    data = parsed.get('data') or {} if isinstance(parsed, dict) else {}
+    tender.external_id = data.get('id') if isinstance(data, dict) else None
+    tender.cargo_reference = data.get('name', '') if isinstance(data, dict) else ''
+    tender.external_status = data.get('status', '') if isinstance(data, dict) else ''
+    is_ok = status_code is not None and 200 <= status_code < 300
+    if not is_ok and isinstance(parsed, dict) and parsed.get('status') == 'success':
+        is_ok = True
+    return parsed, is_ok
+
+
+def _enqueue_tender(tender, error_message):
+    """Queue a failed tender submission so it is re-sent when the API is back up."""
+    existing = PendingPush.objects.filter(
+        tender=tender, state=PendingPush.State.PENDING,
+    ).first()
+    if existing is not None:
+        return existing
+    return PendingPush.objects.create(tender=tender, last_error=error_message)
+
+
+def _deliver_push(push, setting):
+    """Attempt one delivery of a queued tender. Returns True when delivered."""
+    status_code, body, _ok = submit_tender(setting, push.tender)
+    push.attempts += 1
+    push.last_attempt_at = timezone.now()
+    push.response_code = status_code
+
+    parsed, is_ok = _parse_tender_result(push.tender, status_code, body)
+    if is_ok:
+        push.tender.response_code = status_code
+        push.tender.response_body = (body or '')[:4000]
+        push.tender.status = Tender.Status.SUCCESS
+        push.tender.save()
+        push.state = PendingPush.State.DELIVERED
+        push.last_error = ''
+        push.delivered_at = timezone.now()
+        push.save()
+        _flush_derived_caches()
+        return True
+
+    push.last_error = _submit_failure_message('Tender submission', status_code, body)
+    if status_code is not None and status_code < 500:
+        # Permanent rejection (4xx): retrying will never help, stop queuing it.
+        push.state = PendingPush.State.FAILED
+        _record_diagnostic(
+            None, 'tender.relay', push.last_error, status_code=status_code, method='POST',
+            path=setting.endpoint_url(),
+            detail={'tender_id': push.tender_id, 'pending_push': push.pk, 'response': body[:4000]},
+        )
+    push.save()
+    return False
+
+
+def flush_pending_pushes(user=None):
+    """Re-send queued tender submissions. Returns (delivered, permanently_failed, skipped)."""
+    delivered = failed = skipped = 0
+    queryset = PendingPush.objects.select_related('tender', 'tender__user').filter(
+        state=PendingPush.State.PENDING,
+    )
+    if user is not None:
+        queryset = queryset.filter(tender__user=user)
+    for push in queryset.order_by('created_at'):
+        setting = _tender_submission_setting(push.tender.user)
+        if setting is None or not setting.base_url:
+            skipped += 1
+            continue
+        with transaction.atomic():
+            if _deliver_push(push, setting):
+                delivered += 1
+            elif push.state == PendingPush.State.FAILED:
+                failed += 1
+    return delivered, failed, skipped
 
 
 def perform_award(order, setting, line_ids, is_partial):
@@ -1183,19 +1266,7 @@ def api_tender_create(request):
     tender.response_code = status_code
     tender.response_body = body[:4000]
 
-    parsed = {}
-    try:
-        parsed = json.loads(body) if body else {}
-    except (ValueError, TypeError):
-        pass
-    data = parsed.get('data') or {} if isinstance(parsed, dict) else {}
-    tender.external_id = data.get('id') if isinstance(data, dict) else None
-    tender.cargo_reference = data.get('name', '') if isinstance(data, dict) else ''
-    tender.external_status = data.get('status', '') if isinstance(data, dict) else ''
-
-    is_ok = status_code is not None and 200 <= status_code < 300
-    if not is_ok and isinstance(parsed, dict) and parsed.get('status') == 'success':
-        is_ok = True
+    parsed, is_ok = _parse_tender_result(tender, status_code, body)
     tender.status = Tender.Status.SUCCESS if is_ok else Tender.Status.FAILED
     tender.save()
 
@@ -1205,12 +1276,21 @@ def api_tender_create(request):
             f'Tender sent successfully (HTTP {status_code}).'
             + (f' Reference: {tender.cargo_reference}.' if tender.cargo_reference else '')
         )
+        # The API is reachable right now, so try to flush any queued submissions.
+        flush_pending_pushes(user=request.user)
     else:
         result['message'] = _submit_failure_message('Tender submission', status_code, body)
         _record_diagnostic(
             request, 'tender.submit', result['message'], status_code=status_code, method='POST',
             path=setting.endpoint_url(), detail={'response': body[:4000], 'api_setting': setting.pk},
         )
+        if status_code is None or status_code >= 500:
+            _enqueue_tender(tender, result['message'])
+            result['queued'] = True
+            result['message'] += (
+                ' The submission has been queued and will be sent automatically when the '
+                'Odoo instance is reachable again.'
+            )
     return JsonResponse(result)
 
 
@@ -2074,7 +2154,20 @@ def api_admin_users(request):
 @login_required
 @_admin_required
 def admin_diagnostic(request):
-    return render(request, 'tenders/admin_diagnostics.html', {'active_tab': 'diagnostics'})
+    if request.method == 'POST' and request.POST.get('action') == 'retry_pending':
+        delivered, failed, skipped = flush_pending_pushes()
+        messages.success(
+            request,
+            f'Re-sent {delivered} queued submission(s), {failed} permanently failed, {skipped} skipped '
+            '(no base URL configured).',
+        )
+        return redirect('tenders:admin_diagnostic')
+    pending_pushes = PendingPush.objects.select_related('tender').filter(state=PendingPush.State.PENDING)
+    return render(request, 'tenders/admin_diagnostics.html', {
+        'active_tab': 'diagnostics',
+        'pending_pushes': pending_pushes,
+        'pending_count': pending_pushes.count(),
+    })
 
 
 @login_required
