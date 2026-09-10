@@ -18,13 +18,28 @@ class EscrowAccountsTest(TestCase):
         res = self.client.get(reverse('tenders:api_payment_terms'))
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()['payment_terms'], [])
-        res = self.client.post(reverse('tenders:api_payment_term_create'), {'name': 'Net 30', 'description': 'Pay within 30 days'}, content_type='application/json')
+        res = self.client.post(
+            reverse('tenders:api_payment_term_create'),
+            {'name': 'Net 30', 'description': 'Pay within 30 days', 'items': [{'text': '50% on confirmation'}, {'text': 'Balance on delivery'}]},
+            content_type='application/json',
+        )
         self.assertEqual(res.status_code, 200, res.content)
         pid = res.json()['payment_term']['id']
+        items = res.json()['payment_term']['items']
+        self.assertEqual(len(items), 2)
+        self.assertEqual(items[0]['text'], '50% on confirmation')
         res = self.client.get(reverse('tenders:api_payment_terms'))
         self.assertEqual(len(res.json()['payment_terms']), 1)
+        self.assertEqual(len(res.json()['payment_terms'][0]['items']), 2)
         res = self.client.post(reverse('tenders:api_payment_term_toggle', args=[pid]), {}, content_type='application/json')
         self.assertEqual(res.json()['payment_term']['is_active'], False)
+        res = self.client.post(reverse('tenders:api_payment_term_add_item', args=[pid]), {'text': 'Net 30 days'}, content_type='application/json')
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(len(res.json()['payment_term']['items']), 3)
+        item_pk = res.json()['item']['id']
+        res = self.client.post(reverse('tenders:api_payment_term_item_delete', args=[pid, item_pk]), {}, content_type='application/json')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.json()['payment_term']['items']), 2)
         res = self.client.post(reverse('tenders:api_payment_term_delete', args=[pid]), {}, content_type='application/json')
         self.assertEqual(res.status_code, 200)
         res = self.client.get(reverse('tenders:api_payment_terms'))
@@ -36,6 +51,8 @@ class EscrowAccountsTest(TestCase):
         term = PaymentTerm.objects.create(user=other, name='Mine')
         self.client.login(email='user@example.com', password='pass1234')
         res = self.client.post(reverse('tenders:api_payment_term_delete', args=[term.pk]), {}, content_type='application/json')
+        self.assertEqual(res.status_code, 404)
+        res = self.client.post(reverse('tenders:api_payment_term_add_item', args=[term.pk]), {'text': 'x'}, content_type='application/json')
         self.assertEqual(res.status_code, 404)
 
     def test_escrow_admin_requires_admin(self):

@@ -57,7 +57,7 @@
           <a href="{% url 'tenders:invoices' %}">Invoices</a>
         </li>
         <li class="{% if request.resolver_match.url_name == 'payment_terms' %}active{% endif %}">
-          <a href="{% url 'tenders:payment_terms' %}">Payment terms</a>
+          <a href="{% url 'tenders:payment_terms' %}">Pay Term</a>
         </li>
         <li class="{% if request.resolver_match.url_name == 'tracker' %}active{% endif %}">
           <a href="{% url 'tenders:tracker' %}">Tracker</a>

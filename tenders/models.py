@@ -89,6 +89,22 @@ class PaymentTerm(models.Model):
         ordering = ['-created_at']
 
 
+class PaymentTermItem(models.Model):
+    payment_term = models.ForeignKey(
+        PaymentTerm, on_delete=models.CASCADE, related_name='items',
+        help_text='Payment term this individual term belongs to.',
+    )
+    text = models.CharField(max_length=300, help_text='A single term detail, e.g. 50% advance on confirmation.')
+    sort_order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.text
+
+    class Meta:
+        ordering = ['sort_order', 'created_at']
+
+
 class EscrowAccount(models.Model):
     class Status(models.TextChoices):
         OPEN = 'open', 'Open'

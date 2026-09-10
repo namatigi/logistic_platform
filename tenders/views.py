@@ -1488,6 +1488,10 @@ def _payment_term_dict(term):
         'name': term.name,
         'description': term.description,
         'is_active': term.is_active,
+        'items': [
+            {'id': item.pk, 'text': item.text}
+            for item in term.items.order_by('sort_order', 'created_at')
+        ],
         'created_at': term.created_at.isoformat() if term.created_at else None,
     }
 
@@ -1656,18 +1660,69 @@ def api_payment_terms(request):
 @login_required
 @require_POST
 def api_payment_term_create(request):
-    form = PaymentTermForm(_json_body(request))
+    body = _json_body(request) or {}
+    form = PaymentTermForm(body)
     if not form.is_valid():
         return JsonResponse({'ok': False, 'error': 'Please fix the highlighted fields.', 'errors': form.errors})
     term = form.save(commit=False)
     term.user = request.user
     term.is_active = True
     term.save()
+    _create_payment_term_items(term, body.get('items') or [])
     return JsonResponse({
         'ok': True,
         'message': 'Payment term created.',
         'payment_term': _payment_term_dict(term),
     })
+
+
+def _create_payment_term_items(term, raw_items):
+    sort = 0
+    if isinstance(raw_items, (list, tuple)):
+        for raw in raw_items:
+            text = ''
+            if isinstance(raw, dict):
+                text = str(raw.get('text') or '').strip()
+            elif isinstance(raw, str):
+                text = raw.strip()
+            if not text:
+                continue
+            term.items.create(text=text[:300], sort_order=sort)
+            sort += 1
+
+
+@login_required
+@require_POST
+def api_payment_term_add_item(request, pk):
+    term = request.user.payment_terms.filter(pk=pk).first()
+    if term is None:
+        return JsonResponse({'ok': False, 'error': 'Payment term not found.'}, status=404)
+    body = _json_body(request) or {}
+    text = str(body.get('text') or '').strip()
+    if not text:
+        return JsonResponse({'ok': False, 'error': 'Term detail text is required.'})
+    last = term.items.order_by('-sort_order').first()
+    sort = (last.sort_order + 1) if last else 0
+    item = term.items.create(text=text[:300], sort_order=sort)
+    return JsonResponse({
+        'ok': True,
+        'message': 'Term detail added.',
+        'item': {'id': item.pk, 'text': item.text},
+        'payment_term': _payment_term_dict(term),
+    })
+
+
+@login_required
+@require_POST
+def api_payment_term_item_delete(request, pk, item_pk):
+    term = request.user.payment_terms.filter(pk=pk).first()
+    if term is None:
+        return JsonResponse({'ok': False, 'error': 'Payment term not found.'}, status=404)
+    item = term.items.filter(pk=item_pk).first()
+    if item is None:
+        return JsonResponse({'ok': False, 'error': 'Term detail not found.'}, status=404)
+    item.delete()
+    return JsonResponse({'ok': True, 'message': 'Term detail removed.', 'payment_term': _payment_term_dict(term)})
 
 
 @login_required

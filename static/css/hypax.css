@@ -1255,3 +1255,38 @@ tr:hover td {
   }
 }
 [v-cloak] { display: none; }
+
+.terms-builder {
+  margin: 4px 0 12px;
+}
+
+.terms-builder-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.terms-builder-row input {
+  flex: 1;
+}
+
+.payterm-items {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.payterm-items li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 14px;
+}
+
+.payterm-items li:last-child {
+  border-bottom: 0;
+}

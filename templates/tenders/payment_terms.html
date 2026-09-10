@@ -1,11 +1,11 @@
 {% extends 'base.html' %}
-{% block title %}Payment terms &middot; HYPAX{% endblock %}
+{% block title %}Pay Term &middot; HYPAX{% endblock %}
 {% block content %}
 <div class="container">
   <div class="page-header">
     <div>
-      <h1 class="page-title">Payment terms</h1>
-      <p class="page-subtitle">Payment terms you create can be linked to your tenders (and their orders and invoices).</p>
+      <h1 class="page-title">Pay Term</h1>
+      <p class="page-subtitle">One pay term can hold several details. Your pay terms can be linked to your tenders (and their orders and invoices).</p>
     </div>
   </div>
 
@@ -14,64 +14,78 @@
        data-create-url="{% url 'tenders:api_payment_term_create' %}"
        data-toggle-base="{% url 'tenders:api_payment_term_toggle' 0 %}"
        data-delete-base="{% url 'tenders:api_payment_term_delete' 0 %}"
+       data-item-base="{% url 'tenders:api_payment_term_add_item' 0 %}"
+       data-item-delete-base="{% url 'tenders:api_payment_term_item_delete' 0 0 %}"
        v-cloak>
     {% verbatim %}
     <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
     <div class="alert alert-success" v-if="message" style="margin-bottom:16px;">{{ message }}</div>
 
     <div class="card" v-if="loaded">
-      <div class="form-grid" style="max-width:720px;">
+      <h2 class="card-title">New pay term</h2>
+      <div class="form-grid">
         <div class="form-row">
           <label>Name</label>
           <input type="text" v-model.trim="form.name" placeholder="e.g. Net 30, Payment on confirmation" required>
+          <div class="field-error" v-if="errors.name"><ul><li v-for="e in errors.name">{{ e }}</li></ul></div>
         </div>
         <div class="form-row" style="grid-column: 1 / -1;">
-          <label>Details</label>
-          <textarea rows="3" v-model.trim="form.description" placeholder="Describe the terms..."></textarea>
+          <label>Details (optional)</label>
+          <textarea rows="2" v-model.trim="form.description" placeholder="Optional overall description..."></textarea>
         </div>
       </div>
+
+      <div class="terms-builder">
+        <div style="font-size:13px; font-weight:700; color:#334155; margin-bottom:8px;">Term details</div>
+        <div v-for="(item, idx) in form.items" v-bind:key="idx" class="terms-builder-row">
+          <input type="text" v-model.trim="item.text" :placeholder="'Term ' + (idx + 1) + ' e.g. 50% advance on confirmation'">
+          <button type="button" class="btn btn-secondary btn-sm" v-if="form.items.length > 1" @click="removeBlank(idx)" title="Remove">&#215;</button>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" @click="addBlank">+ Add another term</button>
+      </div>
+
       <div class="form-actions">
         <button type="button" class="btn btn-primary" @click="create" :disabled="saving">
           <span v-if="saving">Saving...</span>
-          <span v-else>Create payment term</span>
+          <span v-else>Create pay term</span>
         </button>
       </div>
     </div>
 
-    <div class="card" v-if="terms.length" style="margin-top:16px;">
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Details</th>
-              <th>Created</th>
-              <th>Status</th>
-              <th style="text-align:right;">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="t in terms" v-bind:key="t.id">
-              <td><strong>{{ t.name }}</strong></td>
-              <td class="terms-details">{{ t.description || '-' }}</td>
-              <td>{{ fmtDate(t.created_at) }}</td>
-              <td>
-                <span class="badge" v-bind:class="t.is_active ? 'badge-success' : 'badge-warning'">
-                  {{ t.is_active ? 'Active' : 'Inactive' }}
-                </span>
-              </td>
-              <td style="text-align:right; white-space:nowrap;">
-                <button type="button" class="btn btn-secondary btn-sm" @click="toggle(t)">Toggle</button>
-                <button type="button" class="btn btn-danger btn-sm" @click="remove(t)">Delete</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+    <div class="address-list" v-if="terms.length">
+      <div class="address-item payterm-item" v-for="t in terms" v-bind:key="t.id">
+        <div class="address-body">
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:space-between;">
+            <strong>{{ t.name }}</strong>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <span class="badge" :class="t.is_active ? 'badge-success' : 'badge-warning'">
+                {{ t.is_active ? 'Active' : 'Inactive' }}
+              </span>
+              <button type="button" class="btn btn-secondary btn-sm" @click="toggle(t)">Toggle</button>
+              <button type="button" class="btn btn-danger btn-sm" @click="remove(t)">Delete</button>
+            </div>
+          </div>
+          <div v-if="t.description" style="color:#64748b; font-size:14px; margin-top:4px;">{{ t.description }}</div>
+
+          <ul class="payterm-items" v-if="t.items.length">
+            <li v-for="it in t.items" v-bind:key="it.id">
+              <span>{{ it.text }}</span>
+              <button type="button" class="btn btn-danger btn-sm" @click="removeItem(t, it)">&#215;</button>
+            </li>
+          </ul>
+
+          <div class="terms-builder-row" style="margin-top:10px;">
+            <input type="text" v-model.trim="t.newItem" placeholder="Add a term detail, e.g. 50% balance on delivery"
+                   @keydown.enter.prevent="addItem(t)">
+            <button type="button" class="btn btn-secondary btn-sm" @click="addItem(t)">+ Add</button>
+          </div>
+          <div style="color:#94a3b8; font-size:12px; margin-top:6px;">Created {{ fmtDate(t.created_at) }}</div>
+        </div>
       </div>
     </div>
 
     <div class="empty" v-else-if="loaded">
-      <p style="padding:24px;">No payment terms yet. Create one above to use it on your tenders.</p>
+      <p style="padding:24px;">No pay terms yet. Create one above to use it on your tenders.</p>
     </div>
     {% endverbatim %}
   </div>
@@ -83,15 +97,20 @@
     var api = window.HYPAX.api;
     var HY = window.HYPAX;
 
-    function withPk(urlPrefix, id) {
+    function withPk0(urlPrefix, id) {
       return String(urlPrefix).replace('/0/', '/' + id + '/');
+    }
+
+    function withPks(urlPrefix, id1, id2) {
+      return String(urlPrefix).replace('/0/', '/' + id1 + '/').replace('/0/', '/' + id2 + '/');
     }
 
     Vue.createApp({
       data: function () {
         return {
           terms: [],
-          form: { name: '', description: '' },
+          form: { name: '', description: '', items: [{ text: '' }] },
+          errors: {},
           saving: false,
           error: '',
           message: '',
@@ -105,7 +124,7 @@
           var self = this;
           try {
             var res = await api.get(root.dataset.url);
-            if (res && res.ok === false) { self.error = res.error || 'Failed to load payment terms.'; return; }
+            if (res && res.ok === false) { self.error = res.error || 'Failed to load pay terms.'; return; }
             self.terms = (res && res.payment_terms) || [];
           } catch (e) {
             self.error = e.message;
@@ -113,18 +132,33 @@
             self.loaded = true;
           }
         },
+        addBlank: function () {
+          this.form.items.push({ text: '' });
+        },
+        removeBlank: function (idx) {
+          this.form.items.splice(idx, 1);
+        },
         create: async function () {
           var self = this;
           self.error = '';
           self.message = '';
+          self.errors = {};
           if (!self.form.name) { self.error = 'Name is required.'; return; }
           self.saving = true;
           try {
-            var res = await api.post(root.dataset.createUrl, self.form);
-            if (res && res.ok === false) { self.error = res.error || 'Could not create the payment term.'; return; }
+            var res = await api.post(root.dataset.createUrl, {
+              name: self.form.name,
+              description: self.form.description || '',
+              items: self.form.items
+            });
+            if (res && res.ok === false) {
+              self.errors = res.errors || {};
+              self.error = res.error || 'Could not create the pay term.';
+              return;
+            }
             self.terms.unshift(res.payment_term);
-            self.message = res.message || 'Payment term created.';
-            self.form = { name: '', description: '' };
+            self.message = res.message || 'Pay term created.';
+            self.form = { name: '', description: '', items: [{ text: '' }] };
           } catch (e) {
             self.error = e.message;
           } finally {
@@ -134,10 +168,9 @@
         toggle: async function (t) {
           var self = this;
           self.error = '';
-          self.message = '';
           try {
-            var res = await api.post(withPk(root.dataset.toggleBase, t.id), {});
-            if (res && res.ok === false) { self.error = res.error || 'Could not update the payment term.'; return; }
+            var res = await api.post(withPk0(root.dataset.toggleBase, t.id), {});
+            if (res && res.ok === false) { self.error = res.error || 'Could not update the pay term.'; return; }
             var idx = self.terms.findIndex(function (x) { return x.id === t.id; });
             if (idx !== -1) { self.terms[idx] = res.payment_term; }
           } catch (e) {
@@ -147,13 +180,41 @@
         remove: async function (t) {
           var self = this;
           self.error = '';
-          self.message = '';
-          if (!window.confirm('Delete payment term "' + (t.name || '') + '"?')) return;
+          if (!window.confirm('Delete pay term "' + (t.name || '') + '"?')) return;
           try {
-            var res = await api.post(withPk(root.dataset.deleteBase, t.id), {});
-            if (res && res.ok === false) { self.error = res.error || 'Could not delete the payment term.'; return; }
+            var res = await api.post(withPk0(root.dataset.deleteBase, t.id), {});
+            if (res && res.ok === false) { self.error = res.error || 'Could not delete the pay term.'; return; }
             self.terms = self.terms.filter(function (x) { return x.id !== t.id; });
-            self.message = res.message || 'Payment term deleted.';
+            self.message = res.message || 'Pay term deleted.';
+          } catch (e) {
+            self.error = e.message;
+          }
+        },
+        addItem: async function (t) {
+          var self = this;
+          self.error = '';
+          var text = (t.newItem || '').trim();
+          if (!text) return;
+          try {
+            var res = await api.post(withPk0(root.dataset.itemBase, t.id), { text: text });
+            if (res && res.ok === false) { self.error = res.error || 'Could not add the term detail.'; return; }
+            var idx = self.terms.findIndex(function (x) { return x.id === t.id; });
+            if (idx !== -1) { self.terms[idx] = res.payment_term; }
+            t.newItem = '';
+            self.message = res.message || 'Term detail added.';
+          } catch (e) {
+            self.error = e.message;
+          }
+        },
+        removeItem: async function (t, it) {
+          var self = this;
+          self.error = '';
+          try {
+            var res = await api.post(withPks(root.dataset.itemDeleteBase, t.id, it.id), {});
+            if (res && res.ok === false) { self.error = res.error || 'Could not remove the term detail.'; return; }
+            var idx = self.terms.findIndex(function (x) { return x.id === t.id; });
+            if (idx !== -1) { self.terms[idx] = res.payment_term; }
+            self.message = res.message || 'Term detail removed.';
           } catch (e) {
             self.error = e.message;
           }
