@@ -93,6 +93,64 @@
     </div>
 
     <div class="card" v-cloak>
+      <h2 class="card-title">Preferences</h2>
+
+      <div class="pref-group">
+        <div class="pref-label">Theme</div>
+        <div class="pref-options">
+          <label class="pref-option">
+            <input type="radio" value="system" v-model="form.theme" name="theme">
+            <span class="pref-option-body">
+              <strong>System</strong>
+              <small>Follow your device setting</small>
+            </span>
+          </label>
+          <label class="pref-option">
+            <input type="radio" value="light" v-model="form.theme" name="theme">
+            <span class="pref-option-body">
+              <strong>Light</strong>
+              <small>Always light theme</small>
+            </span>
+          </label>
+          <label class="pref-option">
+            <input type="radio" value="dark" v-model="form.theme" name="theme">
+            <span class="pref-option-body">
+              <strong>Dark</strong>
+              <small>Always dark theme</small>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <div class="pref-group">
+        <div class="pref-label">Notifications</div>
+        <div class="pref-options">
+          <label class="pref-option">
+            <input type="radio" value="email" v-model="form.notification_pref" name="notification_pref">
+            <span class="pref-option-body">
+              <strong>By Email</strong>
+              <small>Send updates to my email address</small>
+            </span>
+          </label>
+          <label class="pref-option">
+            <input type="radio" value="hypax" v-model="form.notification_pref" name="notification_pref">
+            <span class="pref-option-body">
+              <strong>In HYPAX</strong>
+              <small>Show updates inside the platform</small>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button type="button" class="btn btn-primary" @click="saveProfile" :disabled="saving">
+          <span v-if="saving">Saving...</span>
+          <span v-else>Save preferences</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="card" v-cloak>
       <h2 class="card-title">Physical addresses</h2>
 
       <div v-if="!addresses.length" class="empty">
@@ -304,7 +362,7 @@
     Vue.createApp({
       data: function () {
         return {
-          form: { first_name: '', last_name: '', email: '', phone: '', bio: '', picture: '', newPicture: null },
+          form: { first_name: '', last_name: '', email: '', phone: '', bio: '', picture: '', newPicture: null, theme: 'system', notification_pref: 'email' },
           errors: {},
           error: '',
           message: '',
@@ -353,6 +411,8 @@
             this.form.phone = p.phone || '';
             this.form.bio = p.bio || '';
             this.form.picture = p.picture || '';
+            this.form.theme = p.theme || 'system';
+            this.form.notification_pref = p.notification_pref || 'email';
             this.addresses = (res && res.addresses) || [];
             this.linkedTransporters = (res && res.linked_transporters) || [];
             if ('showCompanies' in root.dataset) {
@@ -387,6 +447,8 @@
             fd.append('email', self.form.email || '');
             fd.append('phone', self.form.phone || '');
             fd.append('bio', self.form.bio || '');
+            fd.append('theme', self.form.theme || 'system');
+            fd.append('notification_pref', self.form.notification_pref || 'email');
             if (self.form.newPicture) fd.append('profile_picture', self.form.newPicture, self.form.newPicture.name);
 
             var resp = await fetch(root.dataset.profileSaveUrl, {
@@ -408,7 +470,10 @@
               self.form.first_name = res.profile.first_name || '';
               self.form.last_name = res.profile.last_name || '';
               self.form.picture = res.profile.picture || self.form.picture;
+              self.form.theme = res.profile.theme || 'system';
+              self.form.notification_pref = res.profile.notification_pref || 'email';
             }
+            if (window.HYPAX.applyTheme) window.HYPAX.applyTheme(self.form.theme);
             self.form.newPicture = null;
           } catch (e) {
             self.error = e.message || 'Profile could not be saved.';

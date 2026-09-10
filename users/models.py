@@ -93,6 +93,15 @@ class CustomUser(AbstractUser):
 
 
 class Profile(models.Model):
+    class Theme(models.TextChoices):
+        SYSTEM = 'system', 'System'
+        LIGHT = 'light', 'Light'
+        DARK = 'dark', 'Dark'
+
+    class Notifications(models.TextChoices):
+        EMAIL = 'email', 'By Email'
+        HYPAX = 'hypax', 'In HYPAX'
+
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -101,6 +110,14 @@ class Profile(models.Model):
     bio = models.TextField(blank=True, default='', help_text='Short personal or company bio')
     profile_picture = models.ImageField(upload_to='profiles/', null=True, blank=True)
     phone = models.CharField(max_length=50, blank=True, default='')
+    theme = models.CharField(
+        max_length=20, choices=Theme.choices, default=Theme.SYSTEM,
+        help_text='UI theme: follow the system, or force light/dark.',
+    )
+    notification_pref = models.CharField(
+        max_length=20, choices=Notifications.choices, default=Notifications.EMAIL,
+        help_text='How the account owner wants to receive notifications.',
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):

@@ -857,6 +857,8 @@ def _profile_dict(user, profile):
             'last_name': user.last_name,
             'bio': profile.bio,
             'phone': profile.phone,
+            'theme': profile.theme,
+            'notification_pref': profile.notification_pref,
             'street': addr.street if addr else '',
             'city': addr.city if addr else '',
             'country': addr.country if addr else '',
@@ -929,10 +931,18 @@ def api_profile_save(request):
         except Exception:
             return JsonResponse({'ok': False, 'error': 'The uploaded picture could not be processed.'})
     form.save()
+    profile.refresh_from_db()
+    theme = (request.POST.get('theme') or '').strip()
+    if theme in Profile.Theme.values:
+        profile.theme = theme
+    notification_pref = (request.POST.get('notification_pref') or '').strip()
+    if notification_pref in Profile.Notifications.values:
+        profile.notification_pref = notification_pref
+    profile.save(update_fields=('theme', 'notification_pref'))
     return JsonResponse({
         'ok': True,
         'message': 'Profile saved successfully.',
-        'profile': _profile_dict(request.user, form.instance)['profile'],
+        'profile': _profile_dict(request.user, profile)['profile'],
     })
 
 

@@ -1,6 +1,6 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-user-theme="{{ user_theme|default:'system' }}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +8,30 @@
   <link rel="stylesheet" href="{% static 'css/hypax.css' %}">
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
   <script src="{% static 'js/hypax.js' %}"></script>
+  <script>
+    (function () {
+      function resolveTheme(pref) {
+        if (pref === 'dark' || pref === 'light') return pref;
+        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      function applyTheme(pref) {
+        var root = document.documentElement;
+        root.setAttribute('data-theme', resolveTheme(pref));
+      }
+      var current = document.documentElement.getAttribute('data-user-theme') || 'system';
+      applyTheme(current);
+      var mq = window.matchMedia('(prefers-color-scheme: dark)');
+      mq.addEventListener('change', function () {
+        var pref = document.documentElement.getAttribute('data-user-theme') || 'system';
+        if (pref === 'system') applyTheme('system');
+      });
+      window.HYPAX = window.HYPAX || {};
+      window.HYPAX.applyTheme = function (pref) {
+        document.documentElement.setAttribute('data-user-theme', pref);
+        applyTheme(pref);
+      };
+    })();
+  </script>
 </head>
 <body>
   {% if user.is_authenticated %}
