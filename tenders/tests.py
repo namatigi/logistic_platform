@@ -1123,22 +1123,33 @@ class AdminConfigurationTest(TestCase):
         self.assertRedirects(response, reverse('tenders:config_odoo'))
         self.assertFalse(OdooCompany.objects.filter(pk=company.pk).exists())
 
-    def test_company_form_saves_endpoint_paths(self):
+    def test_odoo_page_hides_endpoint_path_fields(self):
+        self.client.login(email='admin@example.com', password='pass1234')
+        response = self.client.get(reverse('tenders:config_odoo'))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'Tenders path')
+        self.assertNotContains(response, 'Order confirmation path')
+        self.assertNotContains(response, 'Partial order confirmation path')
+        self.assertNotContains(response, 'Order invoice path')
+
+    def test_shared_settings_save_keeps_paths(self):
+        self.setting.tenders_path = '/shared/tenders'
+        self.setting.order_confirmation_path = '/shared/confirmed'
+        self.setting.save()
         self.client.login(email='admin@example.com', password='pass1234')
         response = self.client.post(
             reverse('tenders:config_odoo'),
             {
-                'name': 'Path Co', 'base_url': 'https://path.example.com/', 'auth_type': 'bearer',
-                'tenders_path': '/tenders' , 'order_confirmation_path': '/confirmed',
-                'partial_order_confirmation_path': '/part', 'order_invoice_path': '/invoice',
+                'shared': '1',
+                'base_url': 'https://shared.example.com/',
+                'auth_type': 'bearer',
             },
         )
         self.assertRedirects(response, reverse('tenders:config_odoo'))
-        company = OdooCompany.objects.get(name='Path Co')
-        self.assertEqual(company.tenders_path, '/tenders')
-        self.assertEqual(company.order_confirmation_path, '/confirmed')
-        self.assertEqual(company.partial_order_confirmation_path, '/part')
-        self.assertEqual(company.order_invoice_path, '/invoice')
+        self.setting.refresh_from_db()
+        self.assertEqual(self.setting.base_url, 'https://shared.example.com/')
+        self.assertEqual(self.setting.tenders_path, '/shared/tenders')
+        self.assertEqual(self.setting.order_confirmation_path, '/shared/confirmed')
 
     def test_odoo_page_shows_company_webhook_url(self):
         company = OdooCompany.objects.create(name='Webhook Co', base_url='https://wh.example.com')

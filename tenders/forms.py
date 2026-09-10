@@ -75,6 +75,22 @@ class OdooCompanyForm(forms.ModelForm):
         }
 
 
+class SharedOdooConfigForm(ApiSettingForm):
+    """ApiSettingForm without the four API path fields (edited on Configuration > API Settings)."""
+
+    class Meta(ApiSettingForm.Meta):
+        fields = ('base_url', 'auth_type', 'api_token', 'username', 'password')
+
+
+class OdooCompanyConfigForm(OdooCompanyForm):
+    """OdooCompanyForm without the four API path fields (edited on Configuration > API Settings)."""
+
+    class Meta(OdooCompanyForm.Meta):
+        fields = (
+            'name', 'slug', 'base_url', 'auth_type', 'api_token', 'username', 'password', 'is_active',
+        )
+
+
 class SelcomConfigForm(forms.ModelForm):
     class Meta:
         model = ApiSetting

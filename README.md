@@ -123,16 +123,18 @@ Global platform setting (shared by every user, administrator-only) for the **out
 The page also shows the **incoming webhook URL** (with a copy button) to share with the external system.
 
 The same **Odoo** configuration page includes a **Shared settings** box (administrator only) for the shared API
-`base_url` (preview: `&lt;base_url&gt;{{ tenders_path|default:'/api/v1/tenders' }}`), its auth, and the four outgoing
-API paths. Tenders submitted by companies **not** linked to an Odoo company, and confirmations for orders received on
-the shared (legacy) webhook, use these shared settings.
+`base_url` and its auth. The four outgoing API paths are configured on **Configuration > API Settings**. Tenders
+submitted by companies **not** linked to an Odoo company, and confirmations for orders received on the shared
+(legacy) webhook, use these shared settings.
 
 ### Configuration &gt; Odoo companies
 Multiple Odoo instances/companies can be registered on the **Odoo** configuration page. Each company has:
 - `name` and auto-generated `slug` (customisable)
 - `base_url`, `auth_type`, `api_token`, `username`, `password`
-- its own configurable **four API endpoint paths** (default: `/api/v1/...`)
 - `is_active` — inactive companies reject webhooks with HTTP 403
+
+Each company uses the default four API paths (`/api/v1/tenders`, `/api/v1/order-confirmation`,
+`/api/v1/partial-order-confirmation`, `/api/v1/order-invoice`), overridable per company in the Django admin.
 
 Every company gets its own incoming order webhook URL: `…/webhook/orders/<slug>/`. Orders posted to it are attributed to that company, and the **order/invoice confirmations are sent back to that company** (its `base_url` + configured paths).
 

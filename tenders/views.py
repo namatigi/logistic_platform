@@ -29,10 +29,12 @@ from .forms import (
     ApiSettingForm,
     IncomingEmailConfigForm,
     MediaConfigForm,
+    OdooCompanyConfigForm,
     OdooCompanyForm,
     OutgoingEmailConfigForm,
     PaymentTermForm,
     SelcomConfigForm,
+    SharedOdooConfigForm,
     TenderForm,
 )
 from .models import (
@@ -857,11 +859,11 @@ def config_odoo(request):
         editing = OdooCompany.objects.filter(pk=edit_pk).first()
 
     shared_setting = _shared_setting()
-    form = OdooCompanyForm(instance=editing) if editing else OdooCompanyForm()
-    shared_form = ApiSettingForm(instance=shared_setting)
+    form = OdooCompanyConfigForm(instance=editing) if editing else OdooCompanyConfigForm()
+    shared_form = SharedOdooConfigForm(instance=shared_setting)
     if request.method == 'POST':
         if request.POST.get('shared') == '1':
-            shared_form = ApiSettingForm(request.POST, instance=shared_setting)
+            shared_form = SharedOdooConfigForm(request.POST, instance=shared_setting)
             if shared_form.is_valid():
                 shared_form.save()
                 _flush_derived_caches()
@@ -871,15 +873,15 @@ def config_odoo(request):
             instance = editing
             if instance is None and request.POST.get('name'):
                 instance = OdooCompany()
-            form = OdooCompanyForm(request.POST, instance=instance) if instance else None
+            form = OdooCompanyConfigForm(request.POST, instance=instance) if instance else None
             if form is not None and form.is_valid():
                 form.save()
                 _flush_derived_caches()
                 messages.success(request, 'Odoo company saved.')
                 return redirect('tenders:config_odoo')
     else:
-        form = OdooCompanyForm(instance=editing) if editing else OdooCompanyForm()
-        shared_form = ApiSettingForm(instance=shared_setting)
+        form = OdooCompanyConfigForm(instance=editing) if editing else OdooCompanyConfigForm()
+        shared_form = SharedOdooConfigForm(instance=shared_setting)
 
     companies = OdooCompany.objects.all()
     for company in companies:
