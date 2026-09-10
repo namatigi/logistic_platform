@@ -5,7 +5,7 @@ A Django web platform for managing cargo logistics:
 - Email-based **user sign up / sign in** with three roles: **Administrator**, **Agent** and **User**
 - **Company registration** with full company details
 - **Odoo integration** with one or more external Odoo instances/companies, each with its own base URL, auth and webhook URL
-- **Tender submission** to an external Odoo system via `POST {base_url}/api/v1/tenders`, including **payment terms**
+- **Tender submission** to the transporter's Odoo instance via `POST {base_url}/api/v1/tenders`, including **payment terms**
 - **Orders inbox** fed by a **webhook** from the external Odoo instances, linked back to the originating tender
 - **Award confirmations** (`order-confirmation` / `partial-order-confirmation`) and **invoice confirmations** (`order-invoice`) sent back to the Odoo instance the order came from
 - **Configurable API endpoint paths** for every outgoing Odoo endpoint (defaults to `/api/v1/...`)
@@ -30,14 +30,15 @@ A Django web platform for managing cargo logistics:
 - User registrations are scoped to their own companies and tenders.
 
 ### Companies
-- Register / edit / delete companies (name, registration number, contact person, phone, email, address, city, country).
+- Register / edit / delete companies (name, registration number, TIN/VAT, contact person, phone, email, address, city, country).
+- Every registered company is a **transporter**, and every transporter is its own **Odoo company/instance**. The company form links the company to the `OdooCompany` whose base URL its tenders are submitted to.
 - Scoped per authenticated user.
 
 ### Tenders
 - Submit cargo tenders with:
   `route_loading`, `route_delivery`, `customer`, `cargo_type`, `truck_type`, `weight`, `number_of_trucks`, `distance_km`, `cargo_date`.
 - `route_loading` / `route_delivery` are selectable towns for **Tanzania, Zambia, Congo, Burundi, Rwanda, Kenya, South Sudan and Uganda** (`tenders/towns.py`).
-- On submit the form `POST`s the JSON payload to `{base_url}/api/v1/tenders` (using the **shared API setting**, not a per-company endpoint) and records the response (HTTP status, body, and the returned `data.id` / `data.name` / `data.status`).
+- On submit the form `POST`s the JSON payload to the **Odoo base URL configured for the transporter** and records the response (HTTP status, body, and the returned `data.id` / `data.name` / `data.status`).
 
 #### Tender request payload
 ```json
@@ -127,7 +128,9 @@ Multiple Odoo instances/companies can be registered on the **Odoo** configuratio
 - its own configurable **four API endpoint paths** (default: `/api/v1/...`)
 - `is_active` — inactive companies reject webhooks with HTTP 403
 
-Every company gets its own incoming order webhook URL: `…/webhook/orders/<slug>/`. Orders posted to it are attributed to that company, and the **order/invoice confirmations are sent back to that company** (its `base_url` + configured paths). Companies can be added, edited, deleted, and each one's webhook URL is shown with a copy button.
+Every company gets its own incoming order webhook URL: `…/webhook/orders/<slug>/`. Orders posted to it are attributed to that company, and the **order/invoice confirmations are sent back to that company** (its `base_url` + configured paths).
+
+An **Odoo company is a transporter**: a registered company (see *Companies*) linked to an Odoo company submits its **tenders to that instance's `base_url` + `tenders_path`** (with that instance's auth). Unlinked companies fall back to the shared API setting. Each company's webhook URL is shown with a copy button.
 
 ### Configuration &gt; Selcom payment gateway
 The Setting page (administrator only) also configures **invoice payments** through [Selcom](https://selcom.net) APGW:

@@ -14,6 +14,14 @@ class Company(models.Model):
     address = models.CharField(max_length=255, blank=True)
     city = models.CharField(max_length=100, blank=True)
     country = models.CharField(max_length=100, blank=True)
+    odoo_company = models.ForeignKey(
+        'tenders.OdooCompany',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='registered_companies',
+        help_text='The Odoo company/instance this transporter posts its tenders to. Tenders are submitted to its base URL when linked.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

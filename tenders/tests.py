@@ -1623,3 +1623,81 @@ class SubmitRetryTest(TestCase):
     def test_friendly_timeout_message(self):
         message = tenders_views._submit_failure_message('Order confirmation', None, '[Errno 110] Connection timed out')
         self.assertIn('connection timed out', message)
+
+
+class PerTransporterTenderTest(TestCase):
+    """Tenders are posted to the Odoo company linked to the poster's registered company."""
+
+    def setUp(self):
+        self.user = CustomUser.objects.create_user(email='tender.co@example.com', password='pass1234')
+        self.client.login(email='tender.co@example.com', password='pass1234')
+
+    def _payload(self):
+        return {
+            'route_loading': 'Nairobi',
+            'route_delivery': 'Mombasa',
+            'customer': 'TransCo',
+            'cargo_type': 'dry_van',
+            'truck_type': 'truck',
+            'weight': 10.0,
+            'number_of_trucks': 1,
+            'distance_km': 480.0,
+            'cargo_date': timezone.localdate().isoformat(),
+        }
+
+    def test_tender_posts_to_linked_odoo_company(self):
+        odoo = OdooCompany.objects.create(
+            name='Trans Co', base_url='https://transporter.example.com', auth_type='bearer', api_token='tok',
+        )
+        Company.objects.create(user=self.user, name='Transporter Ltd', odoo_company=odoo)
+        with patch('tenders.views.submit_tender',
+                   return_value=(200, '{"status":"success","data":{"id":5,"name":"CAR0001"}}', True)) as m:
+            response = self.client.post(
+                reverse('tenders:api_tender_create'), json.dumps(self._payload()),
+                content_type='application/json',
+            )
+        self.assertTrue(response.json()['ok'])
+        setting = m.call_args[0][0]
+        self.assertEqual(setting.pk, odoo.pk)
+        url = setting.endpoint_url()
+        self.assertEqual(url, 'https://transporter.example.com/api/v1/tenders')
+
+    def test_tender_posts_to_linked_odoo_company_custom_path(self):
+        odoo = OdooCompany.objects.create(
+            name='Trans Co', base_url='https://transporter.example.com', tenders_path='/dispatch/tender',
+        )
+        Company.objects.create(user=self.user, name='Transporter Ltd', odoo_company=odoo)
+        with patch('tenders.views.submit_tender',
+                   return_value=(200, '{"status":"success","data":{"id":6,"name":"CAR0002"}}', True)) as m:
+            self.client.post(
+                reverse('tenders:api_tender_create'), json.dumps(self._payload()),
+                content_type='application/json',
+            )
+        setting = m.call_args[0][0]
+        self.assertEqual(setting.endpoint_url(), 'https://transporter.example.com/dispatch/tender')
+
+    def test_tender_falls_back_to_shared_setting_without_link(self):
+        shared = ApiSetting.objects.create(base_url='https://shared.example.com/')
+        Company.objects.create(user=self.user, name='Transporter Ltd', odoo_company=None)
+        with patch('tenders.views.submit_tender',
+                   return_value=(200, '{"status":"success","data":{"id":7,"name":"CAR0003"}}', True)) as m:
+            response = self.client.post(
+                reverse('tenders:api_tender_create'), json.dumps(self._payload()),
+                content_type='application/json',
+            )
+        self.assertTrue(response.json()['ok'])
+        setting = m.call_args[0][0]
+        self.assertEqual(setting.pk, shared.pk)
+        self.assertEqual(setting.endpoint_url(), 'https://shared.example.com/api/v1/tenders')
+
+    def test_tender_saved_locally_when_no_target(self):
+        # No shared setting and no linked company -> saved locally, not submitted.
+        Company.objects.create(user=self.user, name='Transporter Ltd', odoo_company=None)
+        with patch('tenders.views.submit_tender') as m:
+            response = self.client.post(
+                reverse('tenders:api_tender_create'), json.dumps(self._payload()),
+                content_type='application/json',
+            )
+        self.assertTrue(response.json()['ok'])
+        self.assertTrue(response.json()['needs_settings'])
+        m.assert_not_called()

@@ -97,6 +97,26 @@ def _order_endpoint(order):
     return _shared_setting()
 
 
+def _tender_submission_setting(user):
+    """Return the Odoo company a user's tenders are posted to.
+
+    A registered company is a transporter, and each transporter is its own Odoo
+    company/instance. If one of the posting user's companies is linked to an
+    Odoo company, tenders are submitted to that instance; otherwise they fall
+    back to the shared API setting.
+    """
+    if user is not None and user.is_authenticated:
+        company = (
+            user.companies
+            .select_related('odoo_company')
+            .order_by('name')
+            .first()
+        )
+        if company is not None and company.odoo_company_id and company.odoo_company.base_url:
+            return company.odoo_company
+    return _shared_setting()
+
+
 class AdminRequiredMixin(UserPassesTestMixin):
     def test_func(self):
         return getattr(self.request.user, 'role', None) == CustomUser.Role.ADMINISTRATOR
@@ -1135,7 +1155,7 @@ def api_tender_create(request):
     tender.save()
     _flush_derived_caches()
 
-    setting = _shared_setting()
+    setting = _tender_submission_setting(request.user)
     if setting is None or not setting.base_url:
         result = {
             'ok': True,

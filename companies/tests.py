@@ -2,6 +2,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from .models import Company
+from tenders.models import OdooCompany
 from users.models import CustomUser
 
 
@@ -57,6 +58,39 @@ class CompanyAgentRestrictionTest(TestCase):
         saved = body['companies'][0]
         self.assertEqual(saved['tin'], 'TIN-111')
         self.assertEqual(saved['vat'], 'VAT-222')
+
+    def test_company_odoo_company_saved_and_returned(self):
+        odoo = OdooCompany.objects.create(name='Trans Co', base_url='https://transporter.example.com')
+        self._login('shipper@example.com')
+        response = self.client.post(
+            reverse('companies:api_create'),
+            {'name': 'Shipper Co', 'odoo_company': odoo.pk},
+            content_type='application/json',
+        )
+        self.assertTrue(response.json()['ok'])
+        company = Company.objects.get(name='Shipper Co')
+        self.assertEqual(company.odoo_company, odoo)
+        body = self.client.get(reverse('companies:api_list')).json()
+        saved = body['companies'][0]
+        self.assertEqual(saved['odoo_company'], odoo.pk)
+
+    def test_company_odoo_company_can_be_cleared(self):
+        odoo = OdooCompany.objects.create(name='Trans Co', base_url='https://transporter.example.com')
+        self._login('shipper@example.com')
+        self.client.post(
+            reverse('companies:api_create'),
+            {'name': 'Shipper Co', 'odoo_company': odoo.pk},
+            content_type='application/json',
+        )
+        company = Company.objects.get(name='Shipper Co')
+        response = self.client.post(
+            reverse('companies:api_update', args=[company.pk]),
+            {'name': 'Shipper Co', 'odoo_company': None},
+            content_type='application/json',
+        )
+        self.assertTrue(response.json()['ok'])
+        company.refresh_from_db()
+        self.assertIsNone(company.odoo_company)
 
     def test_agent_profile_hides_companies_card(self):
         self._login('agent@example.com')

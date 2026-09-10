@@ -15,6 +15,7 @@
          data-list-url="{% url 'companies:list' %}"
          data-wait-redirect="{% url 'companies:list' %}"
          data-create-url="{% url 'companies:api_create' %}"
+         data-odoo="{{ odoo_companies_json }}"
          {% if object %}data-update-url="{% url 'companies:api_update' object.pk %}"{% endif %}
          {% if object %}data-pk="{{ object.pk }}"{% endif %}>
       {% verbatim %}
@@ -74,6 +75,17 @@
               <input type="text" v-model.trim="form.country">
               <div class="field-error" v-if="errors.country"><ul><li v-for="e in errors.country">{{ e }}</li></ul></div>
             </div>
+            <div class="form-row" v-if="odooCompanies.length">
+              <label>Odoo company (transporter)</label>
+              <select v-model.number="form.odoo_company">
+                <option v-bind:value="null">None — use the shared API setting</option>
+                <option v-for="oc in odooCompanies" v-bind:key="oc.id" v-bind:value="oc.id">{{ oc.label }}</option>
+              </select>
+              <div class="field-error" v-if="errors.odoo_company"><ul><li v-for="e in errors.odoo_company">{{ e }}</li></ul></div>
+              <p style="color:var(--muted); font-size:13px; margin-top:4px;">
+                Your tenders are submitted to this Odoo instance's base URL.
+              </p>
+            </div>
           </div>
           <div class="form-actions">
             <button type="submit" class="btn btn-primary" :disabled="loading">
@@ -95,13 +107,16 @@
     var api = window.HYPAX.api;
 
     function blank() {
-      return { name: '', registration_number: '', tin: '', vat: '', contact_person: '', phone: '', email: '', address: '', city: '', country: '' };
+      return { name: '', registration_number: '', tin: '', vat: '', contact_person: '', phone: '', email: '', address: '', city: '', country: '', odoo_company: null };
     }
 
     Vue.createApp({
       data: function () {
+        var opts = [];
+        try { opts = JSON.parse(root.dataset.odoo || '[]'); } catch (e) {}
         return {
           form: blank(),
+          odooCompanies: opts,
           errors: {},
           error: '',
           message: '',
@@ -127,7 +142,8 @@
               email: found.email || '',
               address: found.address || '',
               city: found.city || '',
-              country: found.country || ''
+              country: found.country || '',
+              odoo_company: found.odoo_company || null
             };
           }
         } catch (e) {
