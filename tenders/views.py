@@ -105,24 +105,32 @@ def _order_endpoint(order):
     return None
 
 
-def _tender_submission_setting(user):
-    """Return the Odoo company (transporter) a user's tenders are posted to.
+def _available_transporters():
+    return [c for c in OdooCompany.objects.filter(is_active=True) if c.base_url]
 
-    Each registered company is a transporter linked to its own Odoo company, so
-    tenders are always submitted to that instance. Returns None when the user's
-    company has no linked Odoo company (or it has no base URL) — there is no
-    shared fallback any more.
+
+def _resolve_transporter(choice=None):
+    """Resolve the transport company (Odoo instance) a tender is submitted to.
+
+    Registering a company on the Companies page adds a *customer* company (who we
+    ship cargo for) — it has no transporter link. Tenders always go to an Odoo
+    company (transport company): the explicitly chosen one, or, when exactly one
+    active transport company with a base URL is configured (e.g. "LAKE TRANS"),
+    that one automatically. Returns None when the target is ambiguous/missing.
     """
-    if user is not None and user.is_authenticated:
-        company = (
-            user.companies
-            .select_related('odoo_company')
-            .order_by('name')
-            .first()
-        )
-        if company is not None and company.odoo_company_id and company.odoo_company.base_url:
-            return company.odoo_company
+    if choice is not None:
+        company = choice if isinstance(choice, OdooCompany) else OdooCompany.objects.filter(pk=choice, is_active=True).first()
+        if company is not None and company.base_url:
+            return company
+        return None
+    active = _available_transporters()
+    if len(active) == 1:
+        return active[0]
     return None
+
+
+def _tender_submission_setting(user):
+    return _resolve_transporter()
 
 
 class AdminRequiredMixin(UserPassesTestMixin):
@@ -442,7 +450,7 @@ def flush_pending_pushes(user=None):
     if user is not None:
         queryset = queryset.filter(tender__user=user)
     for push in queryset.order_by('created_at'):
-        setting = _tender_submission_setting(push.tender.user)
+        setting = push.tender.odoo_company or _resolve_transporter()
         if setting is None or not setting.base_url:
             skipped += 1
             continue
@@ -722,12 +730,13 @@ class TenderCreate(TenderCreatorRequiredMixin, LoginRequiredMixin, CreateView):
         tender = form.save(commit=False)
         tender.user = self.request.user
 
-        setting = _tender_submission_setting(self.request.user)
+        setting = _resolve_transporter(form.cleaned_data.get('odoo_company'))
+        tender.odoo_company = setting
         if setting is None:
             messages.warning(
                 self.request,
-                'Your company is not linked to an Odoo company yet. An administrator must set your '
-                'company\'s transporter (Odoo company with a base URL) before tenders can be sent.',
+                'No target transport company is configured yet. An administrator must add an Odoo '
+                'company (Configuration > Odoo) with a base URL before tenders can be sent.',
             )
             tender.status = Tender.Status.PENDING
             tender.save()
@@ -954,6 +963,7 @@ def _json_body(request):
 
 
 def _tender_dict(tender):
+    odoo = tender.odoo_company
     return {
         'id': tender.id,
         'customer': tender.customer,
@@ -970,6 +980,11 @@ def _tender_dict(tender):
         'response_code': tender.response_code,
         'payment_terms': tender.payment_terms.name if tender.payment_terms_id else '',
         'payment_term_id': tender.payment_terms_id,
+        'odoo_company': {
+            'id': odoo.pk,
+            'name': odoo.name,
+            'base_url': odoo.base_url,
+        } if odoo else None,
         'created_at': tender.created_at.isoformat() if tender.created_at else None,
     }
 
@@ -1167,6 +1182,10 @@ def api_tender_list(request):
 def api_form_meta(request):
     meta = _form_meta()
     meta['payment_terms'] = [_payment_term_dict(t) for t in request.user.payment_terms.order_by('-created_at')]
+    meta['transporters'] = [
+        {'id': c.pk, 'name': c.name, 'base_url': c.base_url}
+        for c in _available_transporters()
+    ]
     setting = _tender_submission_setting(request.user)
     meta['transporter'] = {
         'name': setting.name if setting else None,
@@ -1187,16 +1206,17 @@ def api_tender_create(request):
 
     tender = form.save(commit=False)
     tender.user = request.user
+    tender.odoo_company = _resolve_transporter(form.cleaned_data.get('odoo_company'))
     tender.save()
     _flush_derived_caches()
 
-    setting = _tender_submission_setting(request.user)
+    setting = tender.odoo_company
     if setting is None:
         result = {
             'ok': True,
             'message': (
-                'Tender saved locally. Your company is not linked to an Odoo company — an administrator '
-                'must set the transporter (Odoo company with a base URL) before tenders can be sent.'
+                'Tender saved locally. No target transport company is configured yet — an administrator '
+                'must add an Odoo company (Configuration > Odoo) with a base URL before tenders can be sent.'
             ),
             'tender': _tender_dict(tender),
             'needs_settings': True,

@@ -28,12 +28,11 @@
     <div class="alert" v-if="!loaded"><p>Loading form...</p></div>
 
     <div class="alert alert-warning" v-if="loaded && !transporter">
-      Your company is not linked to a transporter (Odoo company with a base URL), so tenders will be saved
-      locally and cannot be sent.
+      No target transport company is configured, so tenders will be saved locally and cannot be sent.
       <span v-if="canEditSettings">
-        <a v-bind:href="configUrl">Configure Odoo companies now &rarr;</a>
+        <a v-bind:href="configUrl">add a transport company (Odoo company with a base URL) &rarr;</a>
       </span>
-      <span v-else>Your administrator must link your company to a transporter before tenders can be sent.</span>
+      <span v-else>Your administrator must configure a transport company before tenders can be sent.</span>
     </div>
 
     <div class="alert alert-success" v-if="success" style="margin:14px 0;">{{ message }} Redirecting...</div>
@@ -93,6 +92,14 @@
               <option v-for="c in companies" v-bind:key="c.id" v-bind:value="c.name">{{ c.name }}</option>
             </select>
             <div class="field-error" v-if="errors.customer"><ul><li v-for="e in errors.customer">{{ e }}</li></ul></div>
+          </div>
+          <div class="form-row">
+            <label>Transport company</label>
+            <select v-model.number="form.odoo_company">
+              <option v-bind:value="null" disabled>Select transport company</option>
+              <option v-for="t in transporters" v-bind:key="t.id" v-bind:value="t.id">{{ t.name }}{{ t.base_url ? ' — ' + t.base_url : '' }}</option>
+            </select>
+            <div class="field-error" v-if="errors.odoo_company"><ul><li v-for="e in errors.odoo_company">{{ e }}</li></ul></div>
           </div>
           <div class="form-row">
             <label>Cargo type</label>
@@ -176,7 +183,7 @@
     function blank() {
       return {
         route_loading: '', route_delivery: '', customer: '', cargo_type: '', truck_type: '',
-        weight: null, number_of_trucks: null, distance_km: null, cargo_date: '', payment_terms: null
+        weight: null, number_of_trucks: null, distance_km: null, cargo_date: '', payment_terms: null, odoo_company: null
       };
     }
 
@@ -189,6 +196,7 @@
           truckTypes: [],
           paymentTerms: [],
           companies: [],
+          transporters: [],
           loadingQuery: '',
           deliveryQuery: '',
           openField: null,
@@ -220,6 +228,8 @@
           this.cargoTypes = (meta.meta && meta.meta.cargo_types) || [];
           this.truckTypes = (meta.meta && meta.meta.truck_types) || [];
           this.transporter = (meta.meta && meta.meta.transporter) || null;
+          this.transporters = (meta.meta && meta.meta.transporters) || [];
+          if (this.transporters.length === 1) { this.form.odoo_company = this.transporters[0].id; }
           this.paymentTerms = (meta.meta && meta.meta.payment_terms) || [];
 
           var towns = await api.get(root.dataset.townsUrl);

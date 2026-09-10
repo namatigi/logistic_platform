@@ -9,20 +9,11 @@ from django.views.generic import CreateView, DeleteView, ListView, UpdateView
 
 from .forms import CompanyForm
 from .models import Company
-from tenders.models import OdooCompany
 from users.models import CustomUser
 
 
 def _is_agent(user):
     return getattr(user, 'role', None) == CustomUser.Role.AGENT
-
-
-def _odoo_companies_for_form():
-    return (
-        OdooCompany.objects.filter(is_active=True)
-        .order_by('name')
-        .values_list('id', 'name', 'base_url')
-    )
 
 
 class AgentForbiddenMixin:
@@ -47,15 +38,6 @@ class CompanyCreate(AgentForbiddenMixin, LoginRequiredMixin, CreateView):
     template_name = 'companies/company_form.html'
     success_url = reverse_lazy('companies:list')
 
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['odoo_companies'] = _odoo_companies_for_form()
-        context['odoo_companies_json'] = json.dumps([
-            {'id': pk, 'label': f'{name} ({base_url})'}
-            for pk, name, base_url in context['odoo_companies']
-        ])
-        return context
-
     def form_valid(self, form):
         form.instance.user = self.request.user
         messages.success(self.request, 'Company registered successfully.')
@@ -67,15 +49,6 @@ class CompanyUpdate(AgentForbiddenMixin, LoginRequiredMixin, UpdateView):
     form_class = CompanyForm
     template_name = 'companies/company_form.html'
     success_url = reverse_lazy('companies:list')
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['odoo_companies'] = _odoo_companies_for_form()
-        context['odoo_companies_json'] = json.dumps([
-            {'id': pk, 'label': f'{name} ({base_url})'}
-            for pk, name, base_url in context['odoo_companies']
-        ])
-        return context
 
     def get_queryset(self):
         return Company.objects.filter(user=self.request.user)
@@ -110,7 +83,6 @@ def _company_dict(company):
         'address': company.address,
         'city': company.city,
         'country': company.country,
-        'odoo_company': company.odoo_company_id,
         'edit_url': reverse('companies:update', args=[company.pk]),
         'delete_url': reverse('companies:delete', args=[company.pk]),
     }

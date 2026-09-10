@@ -36,7 +36,7 @@
               <tr>
                 <td>{{ push.tender.customer }} &middot; {{ push.tender.route_loading }} &rarr; {{ push.tender.route_delivery }}</td>
                 <td>{{ push.tender.user.email }}</td>
-                <td><code>{{ push.tender.user.companies.first.odoo_company.base_url|default:'shared' }}</code></td>
+                <td><code>{{ push.tender.odoo_company.base_url|default:'not configured' }}</code></td>
                 <td>{{ push.attempts }}</td>
                 <td style="max-width:340px; word-break:break-word;">{{ push.last_error }}</td>
               </tr>

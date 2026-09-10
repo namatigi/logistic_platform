@@ -1373,7 +1373,6 @@ class ApiDiagnosticsTest(TestCase):
         self.company = OdooCompany.objects.create(
             name='Diag Transporter', base_url='https://diag.example.com/', auth_type='bearer', api_token='tok',
         )
-        Company.objects.create(user=self.user, name='Diag Ltd', odoo_company=self.company)
 
     def _login(self, user):
         self.client.force_login(user)
@@ -1582,15 +1581,20 @@ class SubmitRetryTest(TestCase):
         self.assertIn('connection timed out', message)
 
 
-class PerTransporterTenderTest(TestCase):
-    """Tenders are posted to the Odoo company linked to the poster's registered company."""
+class TransportCompanyRoutingTest(TestCase):
+    """Tenders are posted to a transport company (an Odoo instance with a base URL).
+
+    Registered companies are *customer* companies (who we ship cargo for) and carry
+    no transporter link. The target is the transport company chosen on the form, or
+    the sole configured transport company (e.g. "LAKE TRANS") automatically.
+    """
 
     def setUp(self):
         self.user = CustomUser.objects.create_user(email='tender.co@example.com', password='pass1234')
         self.client.login(email='tender.co@example.com', password='pass1234')
 
-    def _payload(self):
-        return {
+    def _payload(self, **extra):
+        payload = {
             'route_loading': 'Nairobi',
             'route_delivery': 'Mombasa',
             'customer': 'TransCo',
@@ -1601,12 +1605,15 @@ class PerTransporterTenderTest(TestCase):
             'distance_km': 480.0,
             'cargo_date': timezone.localdate().isoformat(),
         }
+        payload.update(extra)
+        return payload
 
-    def test_tender_posts_to_linked_odoo_company(self):
+    def test_tender_posts_to_sole_configured_transport_company(self):
+        # A single configured transport company (e.g. "LAKE TRANS") receives tenders
+        # automatically — no customer-company link is involved.
         odoo = OdooCompany.objects.create(
-            name='Trans Co', base_url='https://transporter.example.com', auth_type='bearer', api_token='tok',
+            name='LAKE TRANS', base_url='https://lake.example.com', auth_type='bearer', api_token='tok',
         )
-        Company.objects.create(user=self.user, name='Transporter Ltd', odoo_company=odoo)
         with patch('tenders.views.submit_tender',
                    return_value=(200, '{"status":"success","data":{"id":5,"name":"CAR0001"}}', True)) as m:
             response = self.client.post(
@@ -1614,31 +1621,61 @@ class PerTransporterTenderTest(TestCase):
                 content_type='application/json',
             )
         self.assertTrue(response.json()['ok'])
+        self.assertNotIn('needs_settings', response.json())
         setting = m.call_args[0][0]
         self.assertEqual(setting.pk, odoo.pk)
-        url = setting.endpoint_url()
-        self.assertEqual(url, 'https://transporter.example.com/api/v1/tenders')
+        self.assertEqual(setting.endpoint_url(), 'https://lake.example.com/api/v1/tenders')
 
-    def test_tender_posts_to_linked_odoo_company_custom_path(self):
-        odoo = OdooCompany.objects.create(
-            name='Trans Co', base_url='https://transporter.example.com', tenders_path='/dispatch/tender',
+    def test_tender_posts_to_picked_transport_company(self):
+        first = OdooCompany.objects.create(name='Lake Trans', base_url='https://lake.example.com')
+        second = OdooCompany.objects.create(
+            name='Second Trans', base_url='https://second.example.com', tenders_path='/dispatch/tender',
         )
-        Company.objects.create(user=self.user, name='Transporter Ltd', odoo_company=odoo)
         with patch('tenders.views.submit_tender',
                    return_value=(200, '{"status":"success","data":{"id":6,"name":"CAR0002"}}', True)) as m:
             self.client.post(
-                reverse('tenders:api_tender_create'), json.dumps(self._payload()),
+                reverse('tenders:api_tender_create'),
+                json.dumps(self._payload(odoo_company=second.pk)),
                 content_type='application/json',
             )
         setting = m.call_args[0][0]
-        self.assertEqual(setting.endpoint_url(), 'https://transporter.example.com/dispatch/tender')
+        self.assertEqual(setting.pk, second.pk)
+        self.assertEqual(setting.endpoint_url(), 'https://second.example.com/dispatch/tender')
 
-    def test_tender_not_submitted_without_company_link(self):
-        # No shared fallback: a linked Odoo company is required even if an ApiSetting row exists.
-        ApiSetting.objects.create(base_url='https://shared.example.com/')
-        Company.objects.create(user=self.user, name='Transporter Ltd', odoo_company=None)
+    def test_tender_records_chosen_transport_company(self):
+        odoo = OdooCompany.objects.create(name='Lake Trans', base_url='https://lake.example.com')
         with patch('tenders.views.submit_tender',
-                   return_value=(200, '{"status":"success","data":{"id":7,"name":"CAR0003"}}', True)) as m:
+                   return_value=(200, '{"status":"success","data":{"id":56,"name":"CAR0056"}}', True)) as m:
+            response = self.client.post(
+                reverse('tenders:api_tender_create'),
+                json.dumps(self._payload(odoo_company=odoo.pk)),
+                content_type='application/json',
+            )
+        self.assertTrue(response.json()['ok'])
+        tender_data = response.json()['tender']
+        self.assertEqual(tender_data['odoo_company']['id'], odoo.pk)
+        self.assertEqual(tender_data['odoo_company']['name'], 'Lake Trans')
+        tender = Tender.objects.get(pk=tender_data['id'])
+        self.assertEqual(tender.odoo_company, odoo)
+
+    def test_tender_not_submitted_when_multiple_transporters_and_none_picked(self):
+        # Ambiguous: with more than one configured transport company, the poster must
+        # choose one. No shared/company-link fallback is used.
+        OdooCompany.objects.create(name='LAKE TRANS', base_url='https://lake.example.com')
+        OdooCompany.objects.create(name='SECOND TRANS', base_url='https://second.example.com')
+        with patch('tenders.views.submit_tender') as m:
+            response = self.client.post(
+                reverse('tenders:api_tender_create'), json.dumps(self._payload()),
+                content_type='application/json',
+            )
+        self.assertTrue(response.json()['ok'])
+        self.assertTrue(response.json()['needs_settings'])
+        m.assert_not_called()
+
+    def test_tender_not_submitted_without_configured_transport_company(self):
+        # A shared platform ApiSetting row is NOT a tender target.
+        ApiSetting.objects.create(base_url='https://shared.example.com/')
+        with patch('tenders.views.submit_tender') as m:
             response = self.client.post(
                 reverse('tenders:api_tender_create'), json.dumps(self._payload()),
                 content_type='application/json',
@@ -1648,8 +1685,6 @@ class PerTransporterTenderTest(TestCase):
         m.assert_not_called()
 
     def test_tender_saved_locally_when_no_target(self):
-        # No shared setting and no linked company -> saved locally, not submitted.
-        Company.objects.create(user=self.user, name='Transporter Ltd', odoo_company=None)
         with patch('tenders.views.submit_tender') as m:
             response = self.client.post(
                 reverse('tenders:api_tender_create'), json.dumps(self._payload()),
@@ -1676,7 +1711,6 @@ class PendingPushTest(TestCase):
         self.odoo = OdooCompany.objects.create(
             name='Queue Transporter', base_url='https://queue.example.com/', auth_type='bearer',
         )
-        Company.objects.create(user=self.user, name='Queue Ltd', odoo_company=self.odoo)
 
     def _payload(self):
         return {

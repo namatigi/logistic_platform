@@ -63,6 +63,10 @@ class Tender(models.Model):
         'PaymentTerm', null=True, blank=True, on_delete=models.SET_NULL,
         related_name='tenders', help_text='Payment terms chosen by the posting user for this tender.',
     )
+    odoo_company = models.ForeignKey(
+        'OdooCompany', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='tenders', help_text='Transport company (Odoo instance) the tender is submitted to.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -307,7 +311,7 @@ class ApiSetting(models.Model):
         return self._path_url(self.order_invoice_path, self.DEFAULT_ORDER_INVOICE_PATH)
 
     def __str__(self):
-        return f'Shared API settings ({self.base_url or "not configured"})'
+        return f'Platform settings ({self.base_url or "not configured"})'
 
 
 class OdooCompany(models.Model):
