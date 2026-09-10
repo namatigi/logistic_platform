@@ -45,6 +45,8 @@ class ApiSettingForm(forms.ModelForm):
         model = ApiSetting
         fields = (
             'base_url', 'auth_type', 'api_token', 'username', 'password',
+            'tenders_path', 'order_confirmation_path', 'partial_order_confirmation_path',
+            'order_invoice_path',
             'selcom_enabled', 'selcom_sandbox', 'selcom_base_url',
             'selcom_client_id', 'selcom_client_secret', 'selcom_sales_channel',
             'selcom_currency', 'selcom_payment_methods', 'selcom_webhook_secret',
@@ -55,10 +57,18 @@ class ApiSettingForm(forms.ModelForm):
 class OdooCompanyForm(forms.ModelForm):
     class Meta:
         model = OdooCompany
-        fields = ('name', 'slug', 'base_url', 'auth_type', 'api_token', 'username', 'password', 'is_active')
+        fields = (
+            'name', 'slug', 'base_url', 'auth_type', 'api_token', 'username', 'password',
+            'tenders_path', 'order_confirmation_path', 'partial_order_confirmation_path',
+            'order_invoice_path', 'is_active',
+        )
         help_texts = {
             'slug': 'Optional. Leave blank to auto-generate from the name.',
             'is_active': 'Inactive companies stop accepting webhooks and are hidden from new tenders.',
+            'tenders_path': 'Leave blank to use /api/v1/tenders.',
+            'order_confirmation_path': 'Leave blank to use /api/v1/order-confirmation.',
+            'partial_order_confirmation_path': 'Leave blank to use /api/v1/partial-order-confirmation.',
+            'order_invoice_path': 'Leave blank to use /api/v1/order-invoice.',
         }
         widgets = {
             'password': forms.PasswordInput(render_value=True),

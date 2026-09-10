@@ -132,6 +132,34 @@
         </div>
 
         <div class="form-row" style="margin-bottom:18px;">
+          <label>Tenders path</label>
+          <input type="text" name="tenders_path" value="{{ form.tenders_path.value|default_if_none:'' }}" placeholder="/api/v1/tenders">
+          <span class="form-help">Leave blank for the default <code>/api/v1/tenders</code>.</span>
+          {% if form.tenders_path.errors %}<div class="field-error"><ul><li>{{ form.tenders_path.errors.0 }}</li></ul></div>{% endif %}
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Order confirmation path</label>
+          <input type="text" name="order_confirmation_path" value="{{ form.order_confirmation_path.value|default_if_none:'' }}" placeholder="/api/v1/order-confirmation">
+          <span class="form-help">Leave blank for the default <code>/api/v1/order-confirmation</code>.</span>
+          {% if form.order_confirmation_path.errors %}<div class="field-error"><ul><li>{{ form.order_confirmation_path.errors.0 }}</li></ul></div>{% endif %}
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Partial order confirmation path</label>
+          <input type="text" name="partial_order_confirmation_path" value="{{ form.partial_order_confirmation_path.value|default_if_none:'' }}" placeholder="/api/v1/partial-order-confirmation">
+          <span class="form-help">Used when only some order lines are awarded. Leave blank for the default.</span>
+          {% if form.partial_order_confirmation_path.errors %}<div class="field-error"><ul><li>{{ form.partial_order_confirmation_path.errors.0 }}</li></ul></div>{% endif %}
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Order invoice path</label>
+          <input type="text" name="order_invoice_path" value="{{ form.order_invoice_path.value|default_if_none:'' }}" placeholder="/api/v1/order-invoice">
+          <span class="form-help">Used when confirming an invoice as paid. Leave blank for the default.</span>
+          {% if form.order_invoice_path.errors %}<div class="field-error"><ul><li>{{ form.order_invoice_path.errors.0 }}</li></ul></div>{% endif %}
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
           <label style="flex-direction:row; align-items:center; gap:8px; display:flex;">
             <input type="checkbox" name="is_active" style="width:auto;"
               {% if form.is_active.value %}checked{% endif %}> Active

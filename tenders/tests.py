@@ -485,6 +485,59 @@ class SharedSettingTest(TestCase):
         self.client.get(reverse('tenders:api_settings_json'))
         self.assertEqual(ApiSetting.objects.count(), before)
 
+    def test_settings_expose_endpoint_paths(self):
+        self.client.login(email='user@example.com', password='pass1234')
+        data = self.client.get(reverse('tenders:api_settings_json')).json()
+        s = data['setting']
+        self.assertEqual(s['tenders_path'], '')
+        self.assertEqual(s['order_confirmation_path'], '')
+        self.assertEqual(s['partial_order_confirmation_path'], '')
+        self.assertEqual(s['order_invoice_path'], '')
+        self.assertEqual(s['tenders_endpoint'], 'https://odo.example.com/api/v1/tenders')
+        self.assertEqual(s['order_confirmation_endpoint'], 'https://odo.example.com/api/v1/order-confirmation')
+        self.assertEqual(s['partial_order_confirmation_endpoint'], 'https://odo.example.com/api/v1/partial-order-confirmation')
+        self.assertEqual(s['order_invoice_endpoint'], 'https://odo.example.com/api/v1/order-invoice')
+
+    def test_admin_can_save_endpoint_paths(self):
+        self.client.login(email='admin@example.com', password='pass1234')
+        response = self.client.post(
+            reverse('tenders:api_settings_json'),
+            {
+                'base_url': 'https://admin.example.com/',
+                'auth_type': 'bearer',
+                'tenders_path': '/tenders/v2',
+                'order_confirmation_path': 'confirm',
+                'partial_order_confirmation_path': '/partial-confirm',
+                'order_invoice_path': '/invoice/v2',
+            },
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['ok'])
+        self.setting.refresh_from_db()
+        self.assertEqual(self.setting.tenders_path, '/tenders/v2')
+        self.assertEqual(self.setting.order_confirmation_path, 'confirm')
+
+    def test_endpoint_paths_default_when_blank(self):
+        self.setting.base_url = 'https://odo.example.com/'
+        self.setting.save(update_fields=('base_url',))
+        self.assertEqual(self.setting.endpoint_url(), 'https://odo.example.com/api/v1/tenders')
+        self.assertEqual(self.setting.order_confirmation_url(), 'https://odo.example.com/api/v1/order-confirmation')
+        self.assertEqual(self.setting.partial_order_confirmation_url(), 'https://odo.example.com/api/v1/partial-order-confirmation')
+        self.assertEqual(self.setting.order_invoice_url(), 'https://odo.example.com/api/v1/order-invoice')
+
+    def test_endpoint_paths_use_custom_values(self):
+        self.setting.base_url = 'https://odo.example.com/'
+        self.setting.tenders_path = '/tenders/v2'
+        self.setting.order_confirmation_path = 'confirm/v2'
+        self.setting.partial_order_confirmation_path = '/partial/v2'
+        self.setting.order_invoice_path = 'invoice/v2'
+        self.setting.save()
+        self.assertEqual(self.setting.endpoint_url(), 'https://odo.example.com/tenders/v2')
+        self.assertEqual(self.setting.order_confirmation_url(), 'https://odo.example.com/confirm/v2')
+        self.assertEqual(self.setting.partial_order_confirmation_url(), 'https://odo.example.com/partial/v2')
+        self.assertEqual(self.setting.order_invoice_url(), 'https://odo.example.com/invoice/v2')
+
     def test_settings_page_admin_only(self):
         self.client.login(email='user@example.com', password='pass1234')
         self.assertEqual(self.client.get(reverse('tenders:api_settings')).status_code, 403)
@@ -1068,6 +1121,23 @@ class AdminConfigurationTest(TestCase):
         self.assertRedirects(response, reverse('tenders:config_odoo'))
         self.assertFalse(OdooCompany.objects.filter(pk=company.pk).exists())
 
+    def test_company_form_saves_endpoint_paths(self):
+        self.client.login(email='admin@example.com', password='pass1234')
+        response = self.client.post(
+            reverse('tenders:config_odoo'),
+            {
+                'name': 'Path Co', 'base_url': 'https://path.example.com/', 'auth_type': 'bearer',
+                'tenders_path': '/tenders' , 'order_confirmation_path': '/confirmed',
+                'partial_order_confirmation_path': '/part', 'order_invoice_path': '/invoice',
+            },
+        )
+        self.assertRedirects(response, reverse('tenders:config_odoo'))
+        company = OdooCompany.objects.get(name='Path Co')
+        self.assertEqual(company.tenders_path, '/tenders')
+        self.assertEqual(company.order_confirmation_path, '/confirmed')
+        self.assertEqual(company.partial_order_confirmation_path, '/part')
+        self.assertEqual(company.order_invoice_path, '/invoice')
+
     def test_odoo_page_shows_company_webhook_url(self):
         company = OdooCompany.objects.create(name='Webhook Co', base_url='https://wh.example.com')
         self.client.login(email='admin@example.com', password='pass1234')
@@ -1250,6 +1320,23 @@ class OdooCompanyRoutingTest(TestCase):
             auth_type='bearer', api_token='tok-route',
         )
         ApiSetting.objects.create(base_url='https://shared.example.com/')
+
+    def test_company_paths_default_when_blank(self):
+        self.assertEqual(self.company.endpoint_url(), 'https://routing.example.com/api/v1/tenders')
+        self.assertEqual(self.company.order_confirmation_url(), 'https://routing.example.com/api/v1/order-confirmation')
+        self.assertEqual(self.company.partial_order_confirmation_url(), 'https://routing.example.com/api/v1/partial-order-confirmation')
+        self.assertEqual(self.company.order_invoice_url(), 'https://routing.example.com/api/v1/order-invoice')
+
+    def test_company_paths_use_custom_values(self):
+        self.company.tenders_path = '/post/tenders'
+        self.company.order_confirmation_path = 'confirm'
+        self.company.partial_order_confirmation_path = '/partial'
+        self.company.order_invoice_path = '/paid-invoice'
+        self.company.save()
+        self.assertEqual(self.company.endpoint_url(), 'https://routing.example.com/post/tenders')
+        self.assertEqual(self.company.order_confirmation_url(), 'https://routing.example.com/confirm')
+        self.assertEqual(self.company.partial_order_confirmation_url(), 'https://routing.example.com/partial')
+        self.assertEqual(self.company.order_invoice_url(), 'https://routing.example.com/paid-invoice')
 
     def _order(self, order_id, ref, company=None):
         tender = self._tender(ref)

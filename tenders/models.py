@@ -240,6 +240,28 @@ class ApiSetting(models.Model):
     SELCOM_PRODUCTION_BASE = 'https://apigw.selcommobile.com/v1'
     SELCOM_DEFAULT_METHODS = 'MPESA,TIGOPESA,AIRTELMONEY,HALOPESA'
 
+    DEFAULT_TENDERS_PATH = '/api/v1/tenders'
+    DEFAULT_ORDER_CONFIRMATION_PATH = '/api/v1/order-confirmation'
+    DEFAULT_PARTIAL_ORDER_CONFIRMATION_PATH = '/api/v1/partial-order-confirmation'
+    DEFAULT_ORDER_INVOICE_PATH = '/api/v1/order-invoice'
+
+    tenders_path = models.CharField(
+        max_length=200, blank=True, default='',
+        help_text='Path tenders are posted to. Default: /api/v1/tenders',
+    )
+    order_confirmation_path = models.CharField(
+        max_length=200, blank=True, default='',
+        help_text='Path order confirmations are posted to. Default: /api/v1/order-confirmation',
+    )
+    partial_order_confirmation_path = models.CharField(
+        max_length=200, blank=True, default='',
+        help_text='Path partial order confirmations are posted to. Default: /api/v1/partial-order-confirmation',
+    )
+    order_invoice_path = models.CharField(
+        max_length=200, blank=True, default='',
+        help_text='Path order invoices are posted to. Default: /api/v1/order-invoice',
+    )
+
     @classmethod
     def get(cls):
         setting = cls.objects.first()
@@ -267,21 +289,22 @@ class ApiSetting(models.Model):
         methods = [m.strip() for m in self.selcom_payment_methods.split(',') if m.strip()]
         return methods or [m.strip() for m in self.SELCOM_DEFAULT_METHODS.split(',')]
 
-    def endpoint_url(self):
+    def _path_url(self, path, default):
         base = self.base_url.rstrip('/')
-        return f'{base}/api/v1/tenders'
+        path = (path or default).strip().lstrip('/')
+        return f'{base}/{path}'
+
+    def endpoint_url(self):
+        return self._path_url(self.tenders_path, self.DEFAULT_TENDERS_PATH)
 
     def order_confirmation_url(self):
-        base = self.base_url.rstrip('/')
-        return f'{base}/api/v1/order-confirmation'
+        return self._path_url(self.order_confirmation_path, self.DEFAULT_ORDER_CONFIRMATION_PATH)
 
     def partial_order_confirmation_url(self):
-        base = self.base_url.rstrip('/')
-        return f'{base}/api/v1/partial-order-confirmation'
+        return self._path_url(self.partial_order_confirmation_path, self.DEFAULT_PARTIAL_ORDER_CONFIRMATION_PATH)
 
     def order_invoice_url(self):
-        base = self.base_url.rstrip('/')
-        return f'{base}/api/v1/order-invoice'
+        return self._path_url(self.order_invoice_path, self.DEFAULT_ORDER_INVOICE_PATH)
 
     def __str__(self):
         return f'Shared API settings ({self.base_url or "not configured"})'
@@ -307,6 +330,22 @@ class OdooCompany(models.Model):
         default=True,
         help_text='Inactive companies do not appear on the webhook URL selectable list.',
     )
+    tenders_path = models.CharField(
+        max_length=200, blank=True, default='',
+        help_text='Path tenders are posted to. Default: /api/v1/tenders',
+    )
+    order_confirmation_path = models.CharField(
+        max_length=200, blank=True, default='',
+        help_text='Path order confirmations are posted to. Default: /api/v1/order-confirmation',
+    )
+    partial_order_confirmation_path = models.CharField(
+        max_length=200, blank=True, default='',
+        help_text='Path partial order confirmations are posted to. Default: /api/v1/partial-order-confirmation',
+    )
+    order_invoice_path = models.CharField(
+        max_length=200, blank=True, default='',
+        help_text='Path order invoices are posted to. Default: /api/v1/order-invoice',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -325,21 +364,22 @@ class OdooCompany(models.Model):
             self.slug = slug
         super().save(*args, **kwargs)
 
-    def endpoint_url(self):
+    def _path_url(self, path, default):
         base = self.base_url.rstrip('/')
-        return f'{base}/api/v1/tenders'
+        path = (path or default).strip().lstrip('/')
+        return f'{base}/{path}'
+
+    def endpoint_url(self):
+        return self._path_url(self.tenders_path, ApiSetting.DEFAULT_TENDERS_PATH)
 
     def order_confirmation_url(self):
-        base = self.base_url.rstrip('/')
-        return f'{base}/api/v1/order-confirmation'
+        return self._path_url(self.order_confirmation_path, ApiSetting.DEFAULT_ORDER_CONFIRMATION_PATH)
 
     def partial_order_confirmation_url(self):
-        base = self.base_url.rstrip('/')
-        return f'{base}/api/v1/partial-order-confirmation'
+        return self._path_url(self.partial_order_confirmation_path, ApiSetting.DEFAULT_PARTIAL_ORDER_CONFIRMATION_PATH)
 
     def order_invoice_url(self):
-        base = self.base_url.rstrip('/')
-        return f'{base}/api/v1/order-invoice'
+        return self._path_url(self.order_invoice_path, ApiSetting.DEFAULT_ORDER_INVOICE_PATH)
 
     def __str__(self):
         return self.name

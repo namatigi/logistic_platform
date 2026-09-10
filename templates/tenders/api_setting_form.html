@@ -59,6 +59,40 @@
       </div>
 
       <div class="card">
+        <div class="card-title">API endpoint paths (optional)</div>
+        <p class="form-help" style="margin-top:-4px; margin-bottom:16px;">
+          Override the paths HYPAX posts to. Leave blank to use the defaults below.
+        </p>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Tenders</label>
+          <input type="text" v-model.trim="form.tenders_path" placeholder="/api/v1/tenders">
+          <span class="form-help">Tenders are posted to <code>{{ baseUrl }}/{{ tendersPathOrDefault }}</code>.</span>
+          <div class="field-error" v-if="errors.tenders_path"><ul><li v-for="e in errors.tenders_path">{{ e }}</li></ul></div>
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Order confirmation</label>
+          <input type="text" v-model.trim="form.order_confirmation_path" placeholder="/api/v1/order-confirmation">
+          <div class="field-error" v-if="errors.order_confirmation_path"><ul><li v-for="e in errors.order_confirmation_path">{{ e }}</li></ul></div>
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Partial order confirmation</label>
+          <input type="text" v-model.trim="form.partial_order_confirmation_path" placeholder="/api/v1/partial-order-confirmation">
+          <span class="form-help">Used when only some order lines are awarded.</span>
+          <div class="field-error" v-if="errors.partial_order_confirmation_path"><ul><li v-for="e in errors.partial_order_confirmation_path">{{ e }}</li></ul></div>
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Order invoice</label>
+          <input type="text" v-model.trim="form.order_invoice_path" placeholder="/api/v1/order-invoice">
+          <span class="form-help">Used when confirming an invoice as paid.</span>
+          <div class="field-error" v-if="errors.order_invoice_path"><ul><li v-for="e in errors.order_invoice_path">{{ e }}</li></ul></div>
+        </div>
+      </div>
+
+      <div class="card">
         <div class="card-title">Selcom payment gateway</div>
         <p class="form-help" style="margin-top:-4px; margin-bottom:16px;">
           Accepts <strong>mobile money</strong> (M&ndash;Pesa, Tigo, Airtel, Halopesa) and
@@ -211,6 +245,7 @@
       data: function () {
         return {
           form: { base_url: '', auth_type: 'none', api_token: '', username: '', password: '',
+            tenders_path: '', order_confirmation_path: '', partial_order_confirmation_path: '', order_invoice_path: '',
             selcom_enabled: false, selcom_sandbox: true, selcom_base_url: '',
             selcom_client_id: '', selcom_client_secret: '', selcom_sales_channel: '',
             selcom_currency: 'TZS', selcom_payment_methods: '', selcom_webhook_secret: '',
@@ -220,6 +255,15 @@
           savedNotice: '',
           loading: false
         };
+      },
+      computed: {
+        baseUrl: function () {
+          return (this.form.base_url || '').replace(/\/+$/, '');
+        },
+        tendersPathOrDefault: function () {
+          var p = (this.form.tenders_path || '').trim();
+          return p ? p.replace(/^\/+/, '') : 'api/v1/tenders';
+        }
       },
       created: async function () {
         try {
@@ -231,6 +275,10 @@
             api_token: s.api_token || '',
             username: s.username || '',
             password: s.password || '',
+            tenders_path: s.tenders_path || '',
+            order_confirmation_path: s.order_confirmation_path || '',
+            partial_order_confirmation_path: s.partial_order_confirmation_path || '',
+            order_invoice_path: s.order_invoice_path || '',
             selcom_enabled: !!s.selcom_enabled,
             selcom_sandbox: s.selcom_sandbox !== false,
             selcom_base_url: s.selcom_base_url || '',
