@@ -115,6 +115,9 @@
         <li class="{% if request.resolver_match.url_name == 'admin_users' %}active{% endif %}">
           <a href="{% url 'tenders:admin_users' %}">Users</a>
         </li>
+        <li class="{% if request.resolver_match.url_name == 'admin_diagnostic' %}active{% endif %}">
+          <a href="{% url 'tenders:admin_diagnostic' %}">Diagnostics</a>
+        </li>
         {% endif %}
       </ul>
       {% endif %}

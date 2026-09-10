@@ -1402,3 +1402,162 @@ class OdooCompanyRoutingTest(TestCase):
         self.assertTrue(response.json()['ok'])
         url = m.call_args[0][1]
         self.assertEqual(url, 'https://shared.example.com/api/v1/order-invoice')
+
+
+class ApiDiagnosticsTest(TestCase):
+    """Every error response from the platform's API points is recorded for the admin Diagnostics page."""
+
+    def setUp(self):
+        self.admin = CustomUser.objects.create_user(
+            email='diag-admin@example.com', password='pass1234',
+            role=CustomUser.Role.ADMINISTRATOR,
+        )
+        self.user = CustomUser.objects.create_user(
+            email='diag-user@example.com', password='pass1234',
+        )
+
+    def _login(self, user):
+        self.client.force_login(user)
+
+    def test_admin_page_requires_admin(self):
+        self._login(self.user)
+        response = self.client.get(reverse('tenders:admin_diagnostic'))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], reverse('tenders:dashboard'))
+
+        self.client.logout()
+        response = self.client.get(reverse('tenders:admin_diagnostic'))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/accounts/login', response['Location'])
+
+    def test_admin_page_and_api(self):
+        from tenders.models import ApiDiagnostic
+        ApiDiagnostic.objects.create(
+            user=self.user, api_point='town_route', method='GET', path='/api/town-route/',
+            status_code=400, message='Both "from" and "to" parameters are required.',
+        )
+        self._login(self.admin)
+        response = self.client.get(reverse('tenders:admin_diagnostic'))
+        self.assertTemplateUsed(response, 'tenders/admin_diagnostics.html')
+
+        data = self.client.get(reverse('tenders:api_admin_diagnostic')).json()
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['total'], 1)
+        entry = data['diagnostics'][0]
+        self.assertEqual(entry['api_point'], 'town_route')
+        self.assertEqual(entry['status_code'], 400)
+        self.assertEqual(entry['user']['email'], self.user.email)
+        self.assertEqual(entry['message'], 'Both "from" and "to" parameters are required.')
+        self.assertEqual(data['api_points'], ['town_route'])
+        self.assertEqual(data['today_count'], 1)
+
+    def test_middleware_logs_api_error_response(self):
+        from tenders.models import ApiDiagnostic
+        self._login(self.user)
+        response = self.client.get(reverse('tenders:api_town_route'), {'from': 'Nairobi'})
+        self.assertEqual(response.status_code, 400)
+        entry = ApiDiagnostic.objects.get(api_point='town_route')
+        self.assertEqual(entry.user, self.user)
+        self.assertEqual(entry.status_code, 400)
+        self.assertEqual(entry.method, 'GET')
+        self.assertEqual(entry.path, reverse('tenders:api_town_route'))
+        self.assertEqual(entry.message, 'Both "from" and "to" parameters are required.')
+
+    def test_ok_false_response_logged_once(self):
+        from tenders.models import ApiDiagnostic
+        ApiSetting.objects.create(base_url='https://diag.example.com/')
+        order = Order.objects.create(
+            order_id=99001, order_name='ORD-99001', user=self.user, state='draft',
+            amount_total=0, currency='TZS', cargo_reference='',
+        )
+        self._login(self.user)
+        response = self.client.post(reverse('tenders:api_order_award', args=[order.pk]), {})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()['ok'])
+        entries = ApiDiagnostic.objects.filter(api_point='order.award')
+        self.assertEqual(entries.count(), 1)
+        self.assertEqual(entries[0].user, self.user)
+        self.assertEqual(entries[0].message, 'This order has no cargo reference to confirm.')
+
+    def test_award_confirmation_failure_logged(self):
+        from tenders.models import ApiDiagnostic
+        ApiSetting.objects.create(base_url='https://diag.example.com/')
+        tender = Tender.objects.create(
+            user=self.user, route_loading='Nairobi', route_delivery='Mombasa',
+            customer='DiagCo', cargo_type=Tender.CargoType.DRY_VAN,
+            truck_type=Tender.TruckType.TRUCK, weight=10.0, number_of_trucks=1,
+            distance_km=480, cargo_date=timezone.localdate(), cargo_reference='REF-DIAG',
+        )
+        order = Order.objects.create(
+            order_id=99002, order_name='ORD-99002', user=self.user, state='draft',
+            tender=tender, cargo_reference='REF-DIAG', amount_total=0, currency='TZS',
+        )
+        self._login(self.user)
+        with patch('tenders.views.submit_confirmation', return_value=(500, 'server boom', False)):
+            response = self.client.post(reverse('tenders:api_order_award', args=[order.pk]), {})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()['ok'])
+        entries = ApiDiagnostic.objects.filter(api_point='order.award')
+        self.assertEqual(entries.count(), 1)
+        self.assertIn('HTTP 500', entries[0].message)
+        self.assertEqual(entries[0].path, 'https://diag.example.com/api/v1/order-confirmation')
+        self.assertEqual(entries[0].status_code, 500)
+
+    def test_tender_submit_failure_logged(self):
+        from tenders.models import ApiDiagnostic
+        ApiSetting.objects.create(base_url='https://diag.example.com/')
+        self._login(self.user)
+        with patch('tenders.views.submit_tender', return_value=(500, 'external error', False)):
+            response = self.client.post(
+                reverse('tenders:api_tender_create'),
+                json.dumps({
+                    'route_loading': 'Nairobi',
+                    'route_delivery': 'Mombasa',
+                    'customer': 'DiagCo',
+                    'cargo_type': 'dry_van',
+                    'truck_type': 'truck',
+                    'weight': 10.0,
+                    'number_of_trucks': 1,
+                    'distance_km': 480.0,
+                    'cargo_date': timezone.localdate().isoformat(),
+                }),
+                content_type='application/json',
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['ok'])
+        entry = ApiDiagnostic.objects.get(api_point='tender.submit')
+        self.assertEqual(entry.user, self.user)
+        self.assertEqual(entry.status_code, 500)
+        self.assertEqual(entry.path, 'https://diag.example.com/api/v1/tenders')
+        self.assertIn('HTTP 500', entry.message)
+        self.assertEqual(entry.detail['response'], 'external error')
+
+    def test_webhook_error_logged_without_user(self):
+        from tenders.models import ApiDiagnostic
+        response = self.client.post(
+            reverse('tenders:webhook_order_company', kwargs={'slug': 'nope'}),
+            json.dumps({'order_id': 1}), content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 404)
+        entry = ApiDiagnostic.objects.get(status_code=404)
+        self.assertIsNone(entry.user)
+        self.assertEqual(entry.path, reverse('tenders:webhook_order_company', kwargs={'slug': 'nope'}))
+        self.assertEqual(entry.method, 'POST')
+
+    def test_api_diagnostic_filter_by_point_and_search(self):
+        from tenders.models import ApiDiagnostic
+        other = CustomUser.objects.create_user(email='other@example.com', password='pass1234')
+        ApiDiagnostic.objects.create(user=self.user, api_point='order.award', message='Awards boom')
+        ApiDiagnostic.objects.create(user=other, api_point='tender.submit', message='Submit boom')
+        self._login(self.admin)
+        data = self.client.get(
+            reverse('tenders:api_admin_diagnostic'), {'api_point': 'tender.submit'},
+        ).json()
+        self.assertEqual(data['total'], 1)
+        self.assertEqual(data['diagnostics'][0]['message'], 'Submit boom')
+
+        data = self.client.get(
+            reverse('tenders:api_admin_diagnostic'), {'q': 'diag-user@example.com'},
+        ).json()
+        self.assertEqual(data['total'], 1)
+        self.assertEqual(data['diagnostics'][0]['api_point'], 'order.award')

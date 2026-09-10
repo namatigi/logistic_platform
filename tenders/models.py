@@ -603,3 +603,29 @@ class Truck(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+
+class ApiDiagnostic(models.Model):
+    """A recorded error from one of the platform's API points."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='api_diagnostics',
+        help_text='The account that triggered the error (empty for webhook/system events).',
+    )
+    api_point = models.CharField(max_length=120, help_text='Endpoint or integration point that produced the error.')
+    method = models.CharField(max_length=10, default='GET', blank=True)
+    path = models.CharField(max_length=500, blank=True, default='', help_text='Request path or outgoing URL.')
+    status_code = models.PositiveSmallIntegerField(null=True, blank=True, help_text='HTTP status of the error response.')
+    message = models.TextField(blank=True, default='', help_text='Human-readable error message.')
+    detail = models.JSONField(null=True, blank=True, help_text='Extra context, e.g. the parsed error response body.')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    def __str__(self):
+        return f'{self.api_point} · {self.message[:80]}'
+
+    class Meta:
+        ordering = ['-created_at']

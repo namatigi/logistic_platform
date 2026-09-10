@@ -1,0 +1,158 @@
+{% extends 'base.html' %}
+{% block title %}Diagnostics &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Diagnostics</h1>
+      <p class="page-subtitle">Errors recorded from the platform's API points, with the account that triggered them.</p>
+    </div>
+  </div>
+
+  <div id="diagnostics-app"
+       data-url="{% url 'tenders:api_admin_diagnostic' %}"
+       v-cloak>
+    {% verbatim %}
+    <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
+
+    <div class="stat-row" v-if="loaded">
+      <div class="stat">
+        <div class="stat-value">{{ todayCount }}</div>
+        <div class="stat-label">Errors today</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">{{ total }}</div>
+        <div class="stat-label">Total recorded</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px;">
+      <div class="row" style="display:flex; gap:12px; flex-wrap:wrap; align-items:center; padding:14px 16px;">
+        <input type="text" v-model="search" placeholder="Search by account email" style="flex:1; min-width:200px;">
+        <select v-model="apiPoint">
+          <option value="">All API points</option>
+          <option v-for="p in apiPoints" v-bind:key="p" v-bind:value="p">{{ p }}</option>
+        </select>
+        <button class="btn" @click="load()">Refresh</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="table-wrap" v-if="diagnostics.length">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>API point</th>
+              <th>User</th>
+              <th>Path</th>
+              <th>Status</th>
+              <th>Error message</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="d in diagnostics" v-bind:key="d.id">
+              <td style="white-space:nowrap;">{{ fmtDate(d.created_at) }}</td>
+              <td>
+                <span class="badge badge-info">{{ d.api_point }}</span>
+                <div style="color:var(--muted); font-size:12px;">{{ d.method || '-' }}</div>
+              </td>
+              <td>
+                <template v-if="d.user">
+                  <strong>{{ d.user.full_name }}</strong>
+                  <div style="color:var(--muted); font-size:13px;">{{ d.user.email }}</div>
+                </template>
+                <span v-else style="color:var(--muted);">System / anonymous</span>
+              </td>
+              <td style="max-width:260px; word-break:break-word;">
+                <span style="color:var(--muted); font-size:13px;">{{ d.path || '-' }}</span>
+              </td>
+              <td>
+                <template v-if="d.status_code">
+                  <span class="badge" :class="d.status_code >= 500 ? 'badge-danger' : (d.status_code >= 400 ? 'badge-warning' : 'badge-muted')">{{ d.status_code }}</span>
+                </template>
+                <span v-else style="color:var(--muted);">-</span>
+              </td>
+              <td style="max-width:360px;">
+                <div style="word-break:break-word;">{{ d.message }}</div>
+                <div v-if="d.detail" class="detail-toggle" style="color:var(--primary); cursor:pointer; font-size:12px;" @click="toggleDetail(d)">
+                  {{ d.showDetail ? 'Hide details' : 'Show details' }}
+                </div>
+                <pre v-if="d.showDetail" style="margin-top:6px; font-size:12px; color:var(--muted);">{{ prettyDetail(d.detail) }}</pre>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="empty" v-else-if="loaded">
+        <p style="padding:24px;">No API errors recorded.</p>
+      </div>
+      <div class="empty" v-else>
+        <p style="padding:24px;">Loading diagnostics...</p>
+      </div>
+    </div>
+
+    <div class="pagination" v-if="pages > 1" style="display:flex; gap:8px; align-items:center; justify-content:center; margin-top:16px;">
+      <button class="btn" :disabled="!hasPrev" @click="goto(page - 1)">Prev</button>
+      <span style="color:var(--muted);">Page {{ page }} of {{ pages }}</span>
+      <button class="btn" :disabled="!hasNext" @click="goto(page + 1)">Next</button>
+    </div>
+    {% endverbatim %}
+  </div>
+</div>
+
+<script>
+  (function () {
+    var root = document.getElementById('diagnostics-app');
+    var HY = window.HYPAX;
+
+    Vue.createApp({
+      data: function () {
+        return {
+          diagnostics: [], apiPoints: [], search: '', apiPoint: '', page: 1,
+          total: 0, pages: 1, hasNext: false, hasPrev: false, todayCount: 0,
+          error: '', loaded: false, timer: null
+        };
+      },
+      created: function () {
+        this.load();
+        this.timer = setInterval(this.load, 30000);
+      },
+      beforeUnmount: function () {
+        if (this.timer) { clearInterval(this.timer); }
+      },
+      methods: {
+        fmtDate: function (v) { return HY.fmtDate(v); },
+        prettyDetail: function (d) { return JSON.stringify(d, null, 2); },
+        toggleDetail: function (d) { d.showDetail = !d.showDetail; },
+        goto: function (page) {
+          this.page = page > 0 ? page : 1;
+          this.load();
+        },
+        load: async function () {
+          var self = this;
+          var qs = '?page=' + encodeURIComponent(self.page);
+          if (self.search.trim()) { qs += '&q=' + encodeURIComponent(self.search.trim()); }
+          if (self.apiPoint) { qs += '&api_point=' + encodeURIComponent(self.apiPoint); }
+          try {
+            var res = await HY.api.get(root.dataset.url + qs);
+            if (res && res.ok === false) { self.error = res.error || 'Failed to load diagnostics.'; return; }
+            self.diagnostics = (res && res.diagnostics) || [];
+            self.apiPoints = (res && res.api_points) || [];
+            self.total = (res && res.total) || 0;
+            self.todayCount = (res && res.today_count) || 0;
+            self.page = (res && res.page) || 1;
+            self.pages = (res && res.pages) || 1;
+            self.hasNext = !!(res && res.hasNext);
+            self.hasPrev = !!(res && res.hasPrev);
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.loaded = true;
+          }
+        }
+      }
+    }).mount('#diagnostics-app');
+  })();
+</script>
+{% endblock %}

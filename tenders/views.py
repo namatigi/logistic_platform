@@ -33,6 +33,7 @@ from .forms import (
     TenderForm,
 )
 from .models import (
+    ApiDiagnostic,
     ApiSetting,
     EscrowAccount,
     Invoice,
@@ -62,6 +63,25 @@ def _admin_required(view):
             return redirect('tenders:dashboard')
         return view(request, *args, **kwargs)
     return wrapper
+
+
+def _record_diagnostic(request, api_point, message, status_code=None, path='', method='', detail=None):
+    """Persist an error produced by an API point so administrators can review it."""
+    user = request.user if request is not None and getattr(request.user, 'is_authenticated', False) else None
+    try:
+        ApiDiagnostic.objects.create(
+            user=user,
+            api_point=api_point,
+            method=str(method or ''),
+            path=str(path or ''),
+            status_code=status_code,
+            message='' if message is None else str(message),
+            detail=detail,
+        )
+        if request is not None:
+            request._api_diagnostic_logged = True
+    except Exception:
+        logger.exception('Failed to record API diagnostic for %s', api_point)
 
 
 def _shared_setting():
@@ -333,6 +353,8 @@ def perform_award(order, setting, line_ids, is_partial):
         return {
             'ok': False,
             'message': f'Order confirmation failed (HTTP {status_code}). Response: {body[:300]}',
+            'url': url,
+            'status_code': status_code,
         }
 
     order.award_response = parsed if isinstance(parsed, dict) else {}
@@ -375,6 +397,11 @@ def award_order(request, pk):
     line_ids = [int(v) for v in line_ids_raw if str(v).strip().isdigit()]
     is_partial = request.POST.get('partial') == '1'
     result = perform_award(order, setting, line_ids, is_partial)
+    if not result['ok']:
+        _record_diagnostic(
+            request, 'order.award', result['message'], status_code=result.get('status_code'), method='POST',
+            path=result.get('url', ''), detail={'order_id': order.order_id},
+        )
     (messages.success if result['ok'] else messages.error)(request, result['message'])
 
     if line_ids:
@@ -1106,6 +1133,10 @@ def api_tender_create(request):
         )
     else:
         result['message'] = f'Tender submission failed (HTTP {status_code}). Response: {body[:300]}'
+        _record_diagnostic(
+            request, 'tender.submit', result['message'], status_code=status_code, method='POST',
+            path=setting.endpoint_url(), detail={'response': body[:4000], 'api_setting': setting.pk},
+        )
     return JsonResponse(result)
 
 
@@ -1189,6 +1220,10 @@ def api_order_award(request, pk):
 
     result = perform_award(order, setting, line_ids, is_partial)
     if not result['ok']:
+        _record_diagnostic(
+            request, 'order.award', result['message'], status_code=result.get('status_code'), method='POST',
+            path=result.get('url', ''), detail={'order_id': order.order_id},
+        )
         return JsonResponse({'ok': False, 'error': result['message']})
     return JsonResponse({
         'ok': True,
@@ -1955,6 +1990,67 @@ def api_admin_users(request):
         'total_count': len(users),
         'users': users,
     })
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics (administrator)
+# ---------------------------------------------------------------------------
+
+@login_required
+@_admin_required
+def admin_diagnostic(request):
+    return render(request, 'tenders/admin_diagnostics.html', {'active_tab': 'diagnostics'})
+
+
+@login_required
+@_admin_required
+def api_admin_diagnostic(request):
+    if request.method != 'GET':
+        return JsonResponse({'ok': False, 'error': 'GET required.'}, status=405)
+
+    base = ApiDiagnostic.objects.select_related('user')
+    q = Q()
+
+    api_point = (request.GET.get('api_point') or '').strip()
+    if api_point:
+        q &= Q(api_point=api_point)
+    search = (request.GET.get('q') or '').strip()
+    if search:
+        q &= Q(user__email__icontains=search)
+
+    api_points = list(base.values_list('api_point', flat=True).distinct().order_by('api_point'))
+    if q:
+        base = base.filter(q)
+
+    per_page = 25
+    count = base.count()
+    page = max(_page_param(request), 1)
+    pages = max((count + per_page - 1) // per_page, 1)
+    page = min(page, pages)
+    diagnostics = [
+        {
+            'id': d.pk,
+            'user': _admin_user_dict(d.user, set(), request=request) if d.user else None,
+            'api_point': d.api_point,
+            'method': d.method,
+            'path': d.path,
+            'status_code': d.status_code,
+            'message': d.message,
+            'detail': d.detail,
+            'created_at': d.created_at.isoformat(),
+        }
+        for d in base.order_by('-created_at')[(page - 1) * per_page:page * per_page]
+    ]
+    data = _page_meta(page, pages, per_page, count)
+    today = timezone.localdate()
+    today_count = ApiDiagnostic.objects.filter(created_at__date=today).count()
+    data.update({
+        'ok': True,
+        'diagnostics': diagnostics,
+        'api_points': api_points,
+        'today_count': today_count,
+    })
+    return JsonResponse(data)
 
 
 # ---------------------------------------------------------------------------

@@ -4,11 +4,14 @@ A Django web platform for managing cargo logistics:
 
 - Email-based **user sign up / sign in** with three roles: **Administrator**, **Agent** and **User**
 - **Company registration** with full company details
-- **Tender submission** to an external system via `POST {base_url}/api/v1/tenders`, including **payment terms**
-- **Orders inbox** fed by a **webhook** from the external system, linked back to the originating tender
+- **Odoo integration** with one or more external Odoo instances/companies, each with its own base URL, auth and webhook URL
+- **Tender submission** to an external Odoo system via `POST {base_url}/api/v1/tenders`, including **payment terms**
+- **Orders inbox** fed by a **webhook** from the external Odoo instances, linked back to the originating tender
+- **Award confirmations** (`order-confirmation` / `partial-order-confirmation`) and **invoice confirmations** (`order-invoice`) sent back to the Odoo instance the order came from
+- **Configurable API endpoint paths** for every outgoing Odoo endpoint (defaults to `/api/v1/...`)
 - **Invoices paid online** through the Selcom payment gateway (mobile money &amp; bank transfer)
 - **Escrow accounts** per tender, tracking what was deposited against what was invoiced
-- **Administrator tools**: live user overview, escrow monitoring, and API/payment/file configuration pages
+- **Administrator tools**: live user overview, escrow monitoring, API diagnostics, and Odoo/payment/file configuration pages
 
 ## Tech stack
 
@@ -34,7 +37,7 @@ A Django web platform for managing cargo logistics:
 - Submit cargo tenders with:
   `route_loading`, `route_delivery`, `customer`, `cargo_type`, `truck_type`, `weight`, `number_of_trucks`, `distance_km`, `cargo_date`.
 - `route_loading` / `route_delivery` are selectable towns for **Tanzania, Zambia, Congo, Burundi, Rwanda, Kenya, South Sudan and Uganda** (`tenders/towns.py`).
-- On submit the form `POST`s the JSON payload to `{base_url}/api/v1/tenders` and records the response (HTTP status, body, and the returned `data.id` / `data.name` / `data.status`).
+- On submit the form `POST`s the JSON payload to `{base_url}/api/v1/tenders` (using the **shared API setting**, not a per-company endpoint) and records the response (HTTP status, body, and the returned `data.id` / `data.name` / `data.status`).
 
 #### Tender request payload
 ```json
@@ -96,7 +99,7 @@ Every user has a personal **Pay Term** library (`/payment-terms/`):
 - Selecting a Pay Term on the tender form includes it in the tender payload sent to the external system (see above).
 
 ### Escrow accounts
-An escrow account is created automatically for each tender once its cargo is awarded (invoice issued):
+An escrow account is created automatically for a tender **when its first invoice is confirmed** (i.e. at payment/checkout time — not when the order is awarded):
 - Virtual account number `EA-00001`, customer, transporter(s), amount, payment terms and status (**open** → **pending** → **paid**).
 - A cargo reference can have **multiple invoices** — one per transporter/order. All invoices and all their transporters are listed on the escrow account.
 - `deposited_amount` is summed from all invoices of the tender; confirming a Selcom payment marks the invoice paid and refreshes the escrow. The account is **paid** once every invoice is paid.
@@ -105,15 +108,26 @@ An escrow account is created automatically for each tender once its cargo is awa
 ### Administrator tools
 - **Users** (`/users/`) — number of users **online now** (derived from active sessions) and the full account list with role, phone, last activity and status, auto-refreshing every 30 seconds.
 - **Escrow** — see *Escrow accounts* above.
+- **Diagnostics** (`/diagnostics/`) — every **error response from the platform's API points** is recorded in the database and shown here: the **account** that triggered it, the **timestamp**, the API point, method, path, HTTP status and the **error message** (with expandable response details). Errors are captured automatically for any `/api/*` or `/webhook/*` response that is an HTTP error or returns `"ok": false`, plus explicit logging of **outgoing** Odoo failures (tender submission, order confirmations). Filter by API point, search by account email, paginated, auto-refreshing.
 - **Configuration** — API settings, Selcom gateway, incoming/outgoing email, and file storage (server volume vs S3).
 
 ### Configuration &gt; API Settings
-Per-user configuration for the outgoing tender endpoint:
-- `base_url` — root URL; tenders are posted to `{base_url}/api/v1/tenders`
+Global platform setting (shared by every user, administrator-only) for the **outgoing tender endpoint**:
+- `base_url` — root URL; tenders are posted to `{base_url}{tenders_path}` (default `/api/v1/tenders`)
 - `auth_type` — `none`, `bearer` (Bearer token) or `basic`
 - `api_token` / `username` / `password`
+- `tenders_path`, `order_confirmation_path`, `partial_order_confirmation_path`, `order_invoice_path` — override the four outgoing API paths (leave blank to use the defaults below)
 
 The page also shows the **incoming webhook URL** (with a copy button) to share with the external system.
+
+### Configuration &gt; Odoo companies
+Multiple Odoo instances/companies can be registered on the **Odoo** configuration page. Each company has:
+- `name` and auto-generated `slug` (customisable)
+- `base_url`, `auth_type`, `api_token`, `username`, `password`
+- its own configurable **four API endpoint paths** (default: `/api/v1/...`)
+- `is_active` — inactive companies reject webhooks with HTTP 403
+
+Every company gets its own incoming order webhook URL: `…/webhook/orders/<slug>/`. Orders posted to it are attributed to that company, and the **order/invoice confirmations are sent back to that company** (its `base_url` + configured paths). Companies can be added, edited, deleted, and each one's webhook URL is shown with a copy button.
 
 ### Configuration &gt; Selcom payment gateway
 The Setting page (administrator only) also configures **invoice payments** through [Selcom](https://selcom.net) APGW:
@@ -130,13 +144,19 @@ The Setting page (administrator only) also configures **invoice payments** throu
 The page shows the **Selcom payment callback URL** (with a copy button) to register as the callback/webhook URL when creating Selcom checkout orders.
 
 ### Invoices &amp; Selcom checkout
-- Invoices are created automatically for awarded orders and can be paid online from the **Invoices** page (and the agent invoices page).
-- **Pay now** creates a Selcom checkout order (`POST /checkout/create-order`) and opens the hosted checkout where the customer pays by mobile money (M-Pesa, Tigo, Airtel, Halopesa) or bank transfer (CRDB, NMB, …).
+- Invoices are created **lazily when the user pays or checks out** an awarded order (from the **Invoices** page or the agent invoices page); they do not exist until then. The invoices list shows awarded orders with a pending payment state even before an invoice row exists.
+- **Pay now** creates the invoice (and its escrow account) and a Selcom checkout order (`POST /checkout/create-order`), then opens the hosted checkout where the customer pays by mobile money (M-Pesa, Tigo, Airtel, Halopesa) or bank transfer (CRDB, NMB, …).
 - **Refresh / Check status** queries the payment status (`POST /checkout/get-order-status`); a successful payment marks the invoice as paid.
 - Selcom calls `POST /webhook/selcom/` (CSRF-exempt) with the payment result; the callback is signature-verified when a webhook secret is configured, then the invoice is marked paid.
 
 ### Orders (webhook)
-- The external system `POST`s order data to `/webhook/orders/` (CSRF-exempt, JSON).
+Orders are pushed by the Odoo instances to one of two (CSRF-exempt, JSON) webhook URLs:
+
+| URL | Behaviour |
+|-----|-----------|
+| `POST /webhook/orders/<slug>/` | Per-instance URL. The order is attributed to the Odoo company with that `slug`. Unknown slug → **404**, inactive company → **403**. |
+| `POST /webhook/orders/` | Legacy shared URL. Orders are **not** attributed to any company; their confirmations fall back to the shared API setting. |
+
 - Orders are upserted by `order_id`, storing every detail and the order lines.
 - If `cargo_reference` matches a tender reference, the order is linked to that tender and its owner.
 - Orders appear on the **Orders** page (list + detail) with all details and how much it totals.
@@ -169,6 +189,58 @@ The page shows the **Selcom payment callback URL** (with a copy button) to regis
   ]
 }
 ```
+
+### Outgoing order confirmations
+When an order is awarded, HYPAX confirms it back to the **order's own Odoo company** (shared settings when the order has no company), using that company's `base_url` + configured paths, with the same auth type (Bearer/basic).
+
+- **Full confirmation** → `POST {base_url}/api/v1/order-confirmation`
+  ```json
+  {
+    "order_id": 42,
+    "message": "Confirmed",
+    "cargo_name": "CAR00014"
+  }
+  ```
+- **Partial confirmation** (only some order lines are awarded) → `POST {base_url}/api/v1/partial-order-confirmation`
+  ```json
+  {
+    "order_id": 42,
+    "message": "Confirmed",
+    "cargo_name": "CAR00014",
+    "order_lines": [
+      { "line_id": 99 }
+    ]
+  }
+  ```
+
+A confirmation is treated as successful when the HTTP status is `2xx`, or the response body contains `"status": "success"`. A successful confirmation stores the award response and marks the selected lines as awarded.
+
+### Invoice confirmations
+When an invoice is confirmed as paid, HYPAX notifies the Odoo instance the order came from → `POST {base_url}/api/v1/order-invoice` (same auth as above):
+
+```json
+{
+  "order_id": 42,
+  "cargo_name": "CAR00014",
+  "customer_name": "HYPAX",
+  "tax_id": "TIN-123",
+  "country": "TZ"
+}
+```
+
+`tax_id` / `country` come from the posting user's registered company. The response's `data.name` (if present, e.g. an external invoice number) is stored as the invoice number.
+
+### API endpoint paths (configuration-backed)
+All four outgoing paths default to `/api/v1/...` and can be overridden **per Odoo company** or **globally in the shared settings**:
+
+| Purpose | Default path |
+|---------|--------------|
+| Tender submission | `/api/v1/tenders` |
+| Order confirmation | `/api/v1/order-confirmation` |
+| Partial order confirmation | `/api/v1/partial-order-confirmation` |
+| Invoice confirmation | `/api/v1/order-invoice` |
+
+Both `ApiSetting` and `OdooCompany` store these four path fields; leaving them blank uses the defaults. The settings API (`/api/settings/`) also exposes the computed full endpoint URLs.
 
 ## Getting started
 
@@ -225,7 +297,7 @@ DjangoProject/
 ├── DjangoProject/          # Project config (settings, urls, wsgi/asgi)
 ├── users/                  # CustomUser (email auth), roles, profiles, admin dashboard
 ├── companies/              # Company model + CRUD
-├── tenders/                # Tender, Pay Term, Escrow, ApiSetting, Order, OrderLine, Selcom, webhook
+├── tenders/                # Tender, Pay Term, Escrow, ApiSetting, OdooCompany, Order, OrderLine, Selcom, webhook
 ├── templates/              # Shared templates (base, auth, apps)
 └── static/                 # stylesheets
 ```
@@ -243,11 +315,14 @@ DjangoProject/
 | `/orders/`             | Orders received via webhook      |
 | `/tracker/`            | Cargo tracker                    |
 | `/invoices/`           | Invoices + pay online (Selcom)   |
-| `/settings/`           | API settings (URL + auth + webhook URL) |
+| `/settings/`           | Shared API settings (base URL, auth, endpoint paths, webhook URL) |
 | `/payment-terms/`      | Pay Term library                 |
 | `/escrow/`             | Escrow accounts (admin)          |
-| `/users/`              | Online users overview (admin)    |
-| `/configuration/*`     | Odoo / Selcom / Email / Files (admin) |
-| `/webhook/orders/`     | Incoming order webhook (POST)    |
+| `/users/`              | Online users overview (admin)          |
+| `/diagnostics/`        | API error diagnostics (admin)          |
+| `/api/admin/diagnostics/` | Diagnostics data (admin, JSON)      |
+| `/configuration/*`     | Odoo companies / Selcom / Email / Files (admin) |
+| `/webhook/orders/<slug>/` | Per-instance order webhook (POST, CSRF-exempt) |
+| `/webhook/orders/`     | Shared order webhook (POST, CSRF-exempt) |
 | `/webhook/selcom/`     | Selcom payment callback (POST)   |
 | `/admin/`              | Django admin                     |

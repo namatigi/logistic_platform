@@ -1,6 +1,20 @@
 from django.contrib import admin
 
-from .models import ApiSetting, Order, OrderLine, Tender, Town
+from .models import ApiDiagnostic, ApiSetting, Order, OrderLine, Tender, Town
+
+
+@admin.register(ApiDiagnostic)
+class ApiDiagnosticAdmin(admin.ModelAdmin):
+    list_display = ('api_point', 'method', 'status_code', 'user', 'message', 'created_at')
+    list_filter = ('api_point', 'status_code')
+    search_fields = ('message', 'path', 'user__email')
+    readonly_fields = ('user', 'api_point', 'method', 'path', 'status_code', 'message', 'detail', 'created_at')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Town)
