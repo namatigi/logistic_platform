@@ -1506,12 +1506,11 @@ def _escrow_dict(escrow):
         invoiced_company = escrow.transporter.company_name
     if not invoiced_company and order and order.company_name:
         invoiced_company = order.company_name
-    if not invoiced_company and tender and tender.customer:
-        invoiced_company = tender.customer
+    tender_customer = tender.customer if tender else ''
     return {
         'id': escrow.pk,
         'virtual_account': escrow.virtual_account or '',
-        'customer': invoiced_company or '-',
+        'customer': tender_customer or '-',
         'transporter': invoiced_company or '-',
         'amount': str(escrow.amount),
         'currency': invoice.currency if invoice else 'TZS',
