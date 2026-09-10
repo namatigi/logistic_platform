@@ -8,3 +8,4 @@ django-redis==7.0.0
 daphne==4.2.3
 Pillow==11.2.1
 GDAL==3.4.1
+django-storages[s3]==1.14.5

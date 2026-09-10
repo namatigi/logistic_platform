@@ -7,6 +7,7 @@ from decimal import Decimal
 
 import requests as http
 from channels.layers import get_channel_layer
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
@@ -21,7 +22,15 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
-from .forms import ApiSettingForm, IncomingEmailConfigForm, OdooConfigForm, OutgoingEmailConfigForm, SelcomConfigForm, TenderForm
+from .forms import (
+    ApiSettingForm,
+    IncomingEmailConfigForm,
+    MediaConfigForm,
+    OdooConfigForm,
+    OutgoingEmailConfigForm,
+    SelcomConfigForm,
+    TenderForm,
+)
 from .models import ApiSetting, Invoice, Order, OrderLine, Tender, Town, Transporter, generate_transporter_alias
 from . import selcom as selcom
 from .towns import TOWN_CHOICES
@@ -548,6 +557,7 @@ def _config_context(request, active):
             (reverse('tenders:config_odoo'), 'Odoo', active == 'odoo'),
             (reverse('tenders:config_selcom'), 'Selcom', active == 'selcom'),
             (reverse('tenders:config_email'), 'Email', active == 'email'),
+            (reverse('tenders:config_media'), 'Files', active == 'media'),
         ],
     }
 
@@ -613,6 +623,34 @@ def config_email(request):
     context['incoming_form'] = incoming_form
     context['outgoing_form'] = outgoing_form
     return render(request, 'tenders/config_email.html', context)
+
+
+@login_required
+@_admin_required
+def config_media(request):
+    setting = _shared_setting()
+    if request.method == 'POST':
+        form = MediaConfigForm(request.POST, instance=setting)
+        if form.is_valid():
+            form.save()
+            _flush_derived_caches()
+            messages.success(request, 'File storage configuration saved.')
+            return redirect('tenders:config_media')
+    else:
+        form = MediaConfigForm(instance=setting)
+    context = _config_context(request, 'media')
+    context['form'] = form
+    context['media_root'] = str(settings.MEDIA_ROOT)
+    context['s3'] = {
+        'configured': bool(settings.AWS_STORAGE_BUCKET_NAME.strip()),
+        'bucket': settings.AWS_STORAGE_BUCKET_NAME,
+        'region': settings.AWS_S3_REGION_NAME,
+        'endpoint': settings.AWS_S3_ENDPOINT_URL,
+        'custom_domain': settings.AWS_S3_CUSTOM_DOMAIN,
+        'access_key_set': bool(settings.AWS_ACCESS_KEY_ID.strip()),
+        'secret_key_set': bool(settings.AWS_SECRET_ACCESS_KEY.strip()),
+    }
+    return render(request, 'tenders/config_media.html', context)
 
 
 # ---------------------------------------------------------------------------

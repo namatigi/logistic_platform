@@ -935,7 +935,7 @@ class AdminConfigurationTest(TestCase):
 
     def test_non_admin_redirected_from_config_pages(self):
         self.client.login(email='user@example.com', password='pass1234')
-        for name in ('config_odoo', 'config_selcom', 'config_email'):
+        for name in ('config_odoo', 'config_selcom', 'config_email', 'config_media'):
             response = self.client.get(reverse(f'tenders:{name}'))
             self.assertEqual(response.status_code, 302)
 
@@ -1049,3 +1049,18 @@ class AdminConfigurationTest(TestCase):
         self.assertContains(response, '>Odoo<')
         self.assertContains(response, '>Selcom<')
         self.assertContains(response, '>Email<')
+        self.assertContains(response, '>Files<')
+
+    def test_media_page_renders_and_saves(self):
+        self.client.login(email='admin@example.com', password='pass1234')
+        response = self.client.get(reverse('tenders:config_media'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Option A')
+        self.assertContains(response, 'Option B')
+        response = self.client.post(
+            reverse('tenders:config_media'),
+            {'media_storage': 's3'},
+        )
+        self.assertRedirects(response, reverse('tenders:config_media'))
+        self.setting.refresh_from_db()
+        self.assertEqual(self.setting.media_storage, 's3')

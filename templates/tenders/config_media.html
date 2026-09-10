@@ -1,0 +1,100 @@
+{% extends 'base.html' %}
+{% block title %}Files &middot; Configuration &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container" style="max-width:720px;">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Configuration</h1>
+      <p class="page-subtitle">Integrations and endpoints used by the HYPAX platform.</p>
+    </div>
+  </div>
+
+  {% include 'tenders/config_tabs.html' %}
+
+  <div class="card">
+    <div class="card-title">File storage</div>
+    <p class="form-help" style="margin-top:-4px; margin-bottom:16px;">
+      Where uploaded files (<strong>profile pictures</strong>, etc.) are stored. Because hosting
+      services like Railway wipe the container filesystem on every build, uploads must live
+      <strong>outside</strong> the app disk so they survive redeploys.
+    </p>
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+
+      {% if form.media_storage.errors %}<div class="field-error"><ul><li>{{ form.media_storage.errors.0 }}</li></ul></div>{% endif %}
+
+      <label class="storage-option {% if form.media_storage.value == 'local' %}selected{% endif %}">
+        <input type="radio" name="media_storage" value="local"
+          {% if form.media_storage.value != 's3' %}checked{% endif %}>
+        <div>
+          <strong>Option A &mdash; Server volume</strong>
+          <span class="form-help" style="display:block; margin-top:2px;">
+            Files are stored on a persistent <strong>Railway Volume</strong> mounted at
+            <code>{{ media_root }}</code>. Uploads survive deploys as long as the Volume exists.
+            No external service needed.
+          </span>
+        </div>
+      </label>
+
+      <label class="storage-option {% if form.media_storage.value == 's3' %}selected{% endif %}">
+        <input type="radio" name="media_storage" value="s3"
+          {% if form.media_storage.value == 's3' %}checked{% endif %}>
+        <div>
+          <strong>Option B &mdash; S3-compatible object storage</strong>
+          <span class="form-help" style="display:block; margin-top:2px;">
+            Files are stored in a bucket (AWS S3, Cloudflare R2, DigitalOcean Spaces, &hellip;).
+            Survives any rebuild and scales globally. Credentials come from Railway variables
+            (<code>AWS_ACCESS_KEY_ID</code>, <code>AWS_SECRET_ACCESS_KEY</code>,
+            <code>AWS_STORAGE_BUCKET_NAME</code>, <code>AWS_S3_REGION_NAME</code>,
+            <code>AWS_S3_ENDPOINT_URL</code>, and optionally <code>AWS_S3_CUSTOM_DOMAIN</code>).
+          </span>
+        </div>
+      </label>
+
+      <div class="form-actions" style="margin-top:12px;">
+        <button type="submit" class="btn btn-primary">Save configuration</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" style="border-color:#bfdbfe; background:#fbfdff;">
+    <div class="card-title">Option B status</div>
+    {% if s3.configured %}
+      <p style="color:#475569; font-size:14px; margin-bottom:14px;">
+        Bucket <code>{{ s3.bucket }}</code> is configured via environment variables.
+        {% if not s3.access_key_set or not s3.secret_key_set %}<br><strong style="color:#b45309;">Warning:</strong>
+        access key or secret key is missing &mdash; uploads will fail until they are set.{% endif %}
+      </p>
+      <table class="meta-table">
+        <tr><th>Bucket</th><td>{{ s3.bucket|default:'&mdash;' }}</td></tr>
+        <tr><th>Region</th><td>{{ s3.region|default:'&mdash;' }}</td></tr>
+        <tr><th>Endpoint</th><td>{{ s3.endpoint|default:'AWS default' }}</td></tr>
+        <tr><th>Custom domain (CDN)</th><td>{{ s3.custom_domain|default:'&mdash;' }}</td></tr>
+        <tr><th>Access key</th><td>{% if s3.access_key_set %}set{% else %}not set{% endif %}</td></tr>
+        <tr><th>Secret key</th><td>{% if s3.secret_key_set %}set{% else %}not set{% endif %}</td></tr>
+      </table>
+      <p class="form-help" style="margin-top:12px;">
+        The bucket must be publicly readable (unsigned URLs), or set <code>AWS_QUERYSTRING_AUTH=true</code>.
+      </p>
+    {% else %}
+      <p style="color:#475569; font-size:14px; margin-bottom:14px;">
+        No S3 bucket is configured yet. Set the <code>AWS_*</code> variables on Railway, then this
+        section shows the connection details.
+      </p>
+    {% endif %}
+  </div>
+
+  <div class="card" style="border-color:#bbf7d0; background:#f7fef8;">
+    <div class="card-title">Option A setup (Railway Volume)</div>
+    <ol style="color:#475569; font-size:14px; margin:0; padding-left:20px; line-height:1.7;">
+      <li>In Railway, add a <strong>Volume</strong> to this service.</li>
+      <li>Set the <code>MEDIA_ROOT</code> variable to the volume mount path, e.g. <code>/mnt/media</code>.</li>
+      <li>Keep Option A selected and save &mdash; uploads will now land on the Volume and survive redeploys.</li>
+    </ol>
+    <p class="form-help" style="margin-top:12px;">
+      Current <code>MEDIA_ROOT</code>: <code>{{ media_root }}</code>
+    </p>
+  </div>
+</div>
+{% endblock %}

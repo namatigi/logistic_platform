@@ -98,6 +98,17 @@ class ApiSetting(models.Model):
         BEARER = 'bearer', 'Bearer Token'
         BASIC = 'basic', 'Basic Auth'
 
+    class MediaStorageOption(models.TextChoices):
+        LOCAL = 'local', 'Option A - Server volume'
+        S3 = 's3', 'Option B - S3 object storage'
+
+    media_storage = models.CharField(
+        max_length=20,
+        choices=MediaStorageOption.choices,
+        default=MediaStorageOption.LOCAL,
+        help_text='Where uploaded files (profile pictures, etc.) are stored. Select on Configuration > Files.',
+    )
+
     base_url = models.CharField(max_length=500, help_text='e.g. https://example.com')
     auth_type = models.CharField(max_length=20, choices=AuthType.choices, default=AuthType.BEARER)
     api_token = models.CharField(max_length=500, blank=True, help_text='Token used for Bearer authentication')

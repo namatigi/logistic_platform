@@ -268,9 +268,31 @@ STATICFILES_DIRS = [BASE_DIR / 'static']
 
 MEDIA_URL = 'media/'
 
-# Uploaded files (profile pictures etc.) must live on a persistent volume,
-# not the container filesystem (Railway wipes the filesystem on every build).
-# Point MEDIA_ROOT at a mounted Railway Volume so uploads survive redeploys.
+# Uploaded files (profile pictures etc.) are stored behind MediaStorage, which
+# is switched between a persistent server volume (Option A) and S3-compatible
+# object storage (Option B) by the administrator on Configuration > Files.
+# Option A/B survives Railway redeploys because the container filesystem is
+# wiped on every build - uploads must never live on the default local disk.
+
+AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID', '')
+AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY', '')
+AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME', '')
+AWS_S3_REGION_NAME = os.environ.get('AWS_S3_REGION_NAME', '')
+AWS_S3_ENDPOINT_URL = os.environ.get('AWS_S3_ENDPOINT_URL', '')
+AWS_S3_CUSTOM_DOMAIN = os.environ.get('AWS_S3_CUSTOM_DOMAIN', '')
+# Public bucket: no signed URLs, no server-side ACLs.
+AWS_QUERYSTRING_AUTH = os.environ.get('AWS_QUERYSTRING_AUTH', 'False').lower() in ('1', 'true', 'yes')
+AWS_S3_FILE_OVERWRITE = False
+AWS_DEFAULT_ACL = None
+AWS_S3_OBJECT_PARAMETERS = {'CacheControl': 'max-age=86400'}
+
+STORAGES = {
+    'default': {'BACKEND': 'DjangoProject.storage.MediaStorage'},
+    'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+}
+
+# Option A stores files under MEDIA_ROOT - point this at a mounted Railway
+# Volume so uploads survive redeploys.
 MEDIA_ROOT = Path(os.environ.get('MEDIA_ROOT', BASE_DIR / 'media'))
 
 

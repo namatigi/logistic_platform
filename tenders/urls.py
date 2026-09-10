@@ -23,6 +23,7 @@ urlpatterns = [
     path('configuration/odoo/', views.config_odoo, name='config_odoo'),
     path('configuration/selcom/', views.config_selcom, name='config_selcom'),
     path('configuration/email/', views.config_email, name='config_email'),
+    path('configuration/media/', views.config_media, name='config_media'),
     path('webhook/orders/', views.webhook_orders, name='webhook_orders'),
     path('webhook/selcom/', views.webhook_selcom, name='webhook_selcom'),
     path('api/dashboard/', views.api_dashboard, name='api_dashboard'),

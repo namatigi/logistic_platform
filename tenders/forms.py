@@ -79,3 +79,9 @@ class OutgoingEmailConfigForm(forms.ModelForm):
             'smtp_use_ssl': forms.CheckboxInput(),
             'smtp_password': forms.PasswordInput(render_value=True),
         }
+
+
+class MediaConfigForm(forms.ModelForm):
+    class Meta:
+        model = ApiSetting
+        fields = ('media_storage',)
