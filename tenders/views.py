@@ -26,7 +26,7 @@ from .forms import (
     ApiSettingForm,
     IncomingEmailConfigForm,
     MediaConfigForm,
-    OdooConfigForm,
+    OdooCompanyForm,
     OutgoingEmailConfigForm,
     PaymentTermForm,
     SelcomConfigForm,
@@ -36,6 +36,7 @@ from .models import (
     ApiSetting,
     EscrowAccount,
     Invoice,
+    OdooCompany,
     Order,
     OrderLine,
     PaymentTerm,
@@ -65,6 +66,13 @@ def _admin_required(view):
 
 def _shared_setting():
     return ApiSetting.get()
+
+
+def _order_endpoint(order):
+    """Return the Odoo company an order belongs to, falling back to the shared settings."""
+    if order is not None and order.odoo_company_id:
+        return order.odoo_company
+    return _shared_setting()
 
 
 class AdminRequiredMixin(UserPassesTestMixin):
@@ -358,9 +366,9 @@ def award_order(request, pk):
     if order is None:
         raise Http404()
 
-    setting = _shared_setting()
+    setting = _order_endpoint(order)
     if setting is None or not setting.base_url:
-        messages.warning(request, 'Configure your API base URL in Setting before awarding.')
+        messages.warning(request, 'Configure an API base URL for this order\'s Odoo company before awarding.')
         return redirect('tenders:api_settings')
 
     line_ids_raw = request.POST.getlist('line_ids')
@@ -407,7 +415,7 @@ def to_decimal(value):
 
 
 @csrf_exempt
-def webhook_orders(request):
+def webhook_orders(request, slug=None):
     if request.method != 'POST':
         return JsonResponse({'error': 'Only POST is allowed.'}, status=405)
     try:
@@ -416,6 +424,14 @@ def webhook_orders(request):
         return JsonResponse({'error': 'Invalid JSON payload.'}, status=400)
     if not isinstance(payload, dict) or 'order_id' not in payload:
         return JsonResponse({'error': "Missing required field 'order_id'."}, status=400)
+
+    company = None
+    if slug:
+        company = OdooCompany.objects.filter(slug=slug).first()
+        if company is None:
+            return JsonResponse({'error': f"Unknown company webhook '{slug}'."}, status=404)
+        if not company.is_active:
+            return JsonResponse({'error': f"Company webhook '{slug}' is disabled."}, status=403)
 
     cargo_reference = (payload.get('cargo_reference') or '').strip()
     tender = Tender.objects.filter(cargo_reference=cargo_reference).first() if cargo_reference else None
@@ -436,6 +452,7 @@ def webhook_orders(request):
             'cargo_id': payload.get('cargo_id'),
             'user': tender.user if tender else None,
             'tender': tender,
+            'odoo_company': company,
             'raw_payload': payload,
         },
     )
@@ -464,6 +481,7 @@ def webhook_orders(request):
         'order_id': order.order_id,
         'cargo_reference': cargo_reference,
         'linked_tender': tender.cargo_reference if tender else None,
+        'company_slug': getattr(company, 'slug', None) if company else None,
     })
 
 
@@ -647,19 +665,52 @@ def _config_context(request, active):
 @login_required
 @_admin_required
 def config_odoo(request):
-    setting = _shared_setting()
+    raw_pk = request.POST.get('id') or request.GET.get('edit') or ''
+    try:
+        edit_pk = int(raw_pk)
+    except ValueError:
+        edit_pk = None
+    delete_pk = None
+    try:
+        delete_pk = int(request.POST.get('delete', '') or '')
+    except ValueError:
+        delete_pk = None
+
+    if request.method == 'POST' and delete_pk:
+        OdooCompany.objects.filter(pk=delete_pk).delete()
+        _flush_derived_caches()
+        messages.success(request, 'Odoo company removed.')
+        return redirect('tenders:config_odoo')
+
+    editing = None
+    if edit_pk:
+        editing = OdooCompany.objects.filter(pk=edit_pk).first()
+
     if request.method == 'POST':
-        form = OdooConfigForm(request.POST, instance=setting)
-        if form.is_valid():
+        instance = editing
+        if instance is None and request.POST.get('name'):
+            instance = OdooCompany()
+        form = OdooCompanyForm(request.POST, instance=instance) if instance else None
+        if form is not None and form.is_valid():
             form.save()
             _flush_derived_caches()
-            messages.success(request, 'Odoo configuration saved.')
+            messages.success(request, 'Odoo company saved.')
             return redirect('tenders:config_odoo')
     else:
-        form = OdooConfigForm(instance=setting)
+        form = OdooCompanyForm(instance=editing) if editing else OdooCompanyForm()
+
+    companies = OdooCompany.objects.all()
+    for company in companies:
+        company.webhook_url = request.build_absolute_uri(
+            reverse('tenders:webhook_order_company', kwargs={'slug': company.slug})
+        )
+        company.orders_count = company.orders.count()
+
     context = _config_context(request, 'odoo')
+    context['companies'] = companies
     context['form'] = form
-    context['webhook_url'] = request.build_absolute_uri(reverse('tenders:webhook_orders'))
+    context['editing'] = editing
+    context['shared_webhook_url'] = request.build_absolute_uri(reverse('tenders:webhook_orders'))
     return render(request, 'tenders/config_odoo.html', context)
 
 
@@ -1114,11 +1165,11 @@ def api_order_award(request, pk):
     if order is None:
         return JsonResponse({'ok': False, 'error': 'Order not found.'})
 
-    setting = _shared_setting()
+    setting = _order_endpoint(order)
     if setting is None or not setting.base_url:
         return JsonResponse({
             'ok': False,
-            'error': 'Configure your API base URL in Setting before awarding.',
+            'error': 'Configure an API base URL for this order\'s company before awarding.',
             'redirect': reverse('tenders:api_settings'),
         })
 
@@ -1667,9 +1718,9 @@ def api_invoice_paid(request, pk):
 
 def _confirm_invoice_paid(invoice):
     order = invoice.order
-    setting = _shared_setting()
+    setting = _order_endpoint(order)
     if not setting.base_url:
-        return JsonResponse({'ok': False, 'error': 'Configure the shared API base URL in Setting before confirming an invoice.'})
+        return JsonResponse({'ok': False, 'error': 'Configure an API base URL for this order\'s company before confirming an invoice.'})
 
     payload = _invoice_payload(invoice)
     url = setting.order_invoice_url()

@@ -1,6 +1,6 @@
 from django import forms
 
-from .models import ApiSetting, PaymentTerm, Tender
+from .models import ApiSetting, OdooCompany, PaymentTerm, Tender
 
 
 class TenderForm(forms.ModelForm):
@@ -52,10 +52,17 @@ class ApiSettingForm(forms.ModelForm):
         )
 
 
-class OdooConfigForm(forms.ModelForm):
+class OdooCompanyForm(forms.ModelForm):
     class Meta:
-        model = ApiSetting
-        fields = ('base_url', 'auth_type', 'api_token', 'username', 'password')
+        model = OdooCompany
+        fields = ('name', 'slug', 'base_url', 'auth_type', 'api_token', 'username', 'password', 'is_active')
+        help_texts = {
+            'slug': 'Optional. Leave blank to auto-generate from the name.',
+            'is_active': 'Inactive companies stop accepting webhooks and are hidden from new tenders.',
+        }
+        widgets = {
+            'password': forms.PasswordInput(render_value=True),
+        }
 
 
 class SelcomConfigForm(forms.ModelForm):

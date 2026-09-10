@@ -36,6 +36,7 @@ urlpatterns = [
     path('configuration/email/', views.config_email, name='config_email'),
     path('configuration/media/', views.config_media, name='config_media'),
     path('webhook/orders/', views.webhook_orders, name='webhook_orders'),
+    path('webhook/orders/<slug:slug>/', views.webhook_orders, name='webhook_order_company'),
     path('webhook/selcom/', views.webhook_selcom, name='webhook_selcom'),
     path('api/dashboard/', views.api_dashboard, name='api_dashboard'),
     path('api/tenders/', views.api_tender_list, name='api_tender_list'),

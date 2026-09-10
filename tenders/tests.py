@@ -13,7 +13,7 @@ from django.utils import timezone
 from DjangoProject.mail_backend import ApiSettingEmailBackend
 from tenders import views as tenders_views
 from tenders import selcom
-from tenders.models import ApiSetting, Invoice, Order, OrderLine, Tender, Town
+from tenders.models import ApiSetting, Invoice, OdooCompany, Order, OrderLine, Tender, Town
 from companies.models import Company
 from users.models import CustomUser
 
@@ -999,27 +999,83 @@ class AdminConfigurationTest(TestCase):
     def test_non_admin_cannot_save_config(self):
         self.client.login(email='user@example.com', password='pass1234')
         response = self.client.post(
-            reverse('tenders:config_odoo'), {'base_url': 'https://hacked.example.com/'},
+            reverse('tenders:config_odoo'),
+            {'name': 'Hacked Corp', 'base_url': 'https://hacked.example.com/'},
         )
         self.assertEqual(response.status_code, 302)
-        self.setting.refresh_from_db()
-        self.assertEqual(self.setting.base_url, '')
+        self.assertFalse(OdooCompany.objects.filter(name='Hacked Corp').exists())
 
-    def test_odoo_page_renders_and_saves(self):
+    def test_odoo_page_renders_empty(self):
         self.client.login(email='admin@example.com', password='pass1234')
         response = self.client.get(reverse('tenders:config_odoo'))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Tender endpoint (outgoing)')
-        self.assertContains(response, 'Webhook (incoming)')
+        self.assertContains(response, 'No Odoo companies configured yet')
+        self.assertContains(response, 'Add an Odoo company')
+
+    def test_company_create_autogenerates_slug(self):
+        self.client.login(email='admin@example.com', password='pass1234')
         response = self.client.post(
             reverse('tenders:config_odoo'),
-            {'base_url': 'https://api.example.com/', 'auth_type': 'bearer', 'api_token': 'tok123'},
+            {'name': 'ACSC Ltd.', 'base_url': 'https://api.acsc.com/', 'auth_type': 'bearer', 'api_token': 'tok123'},
         )
         self.assertRedirects(response, reverse('tenders:config_odoo'))
-        self.setting.refresh_from_db()
-        self.assertEqual(self.setting.base_url, 'https://api.example.com/')
-        self.assertEqual(self.setting.auth_type, 'bearer')
-        self.assertEqual(self.setting.api_token, 'tok123')
+        company = OdooCompany.objects.get(name='ACSC Ltd.')
+        self.assertEqual(company.slug, 'acsc-ltd')
+        self.assertEqual(company.base_url, 'https://api.acsc.com/')
+        self.assertEqual(company.auth_type, 'bearer')
+        self.assertEqual(company.api_token, 'tok123')
+
+    def test_company_create_uses_provided_slug(self):
+        self.client.login(email='admin@example.com', password='pass1234')
+        response = self.client.post(
+            reverse('tenders:config_odoo'),
+            {'name': 'ACSC Ltd.', 'slug': 'acsc-prod', 'base_url': 'https://api.acsc.com/', 'auth_type': 'bearer'},
+        )
+        self.assertRedirects(response, reverse('tenders:config_odoo'))
+        self.assertTrue(OdooCompany.objects.filter(slug='acsc-prod').exists())
+
+    def test_company_slug_unique_with_suffix(self):
+        OdooCompany.objects.create(name='ACSC Ltd', base_url='https://a.com')
+        self.client.login(email='admin@example.com', password='pass1234')
+        self.client.post(
+            reverse('tenders:config_odoo'),
+            {'name': 'ACSC Ltd', 'base_url': 'https://b.com/', 'auth_type': 'bearer'},
+        )
+        slugs = [c.slug for c in OdooCompany.objects.filter(name='ACSC Ltd')]
+        self.assertEqual(len(slugs), 2)
+        self.assertEqual(len(set(slugs)), 2)
+        self.assertIn('acsc-ltd', slugs)
+
+    def test_company_edit(self):
+        company = OdooCompany.objects.create(name='First', base_url='https://first.com')
+        self.client.login(email='admin@example.com', password='pass1234')
+        response = self.client.post(
+            reverse('tenders:config_odoo'),
+            {'id': str(company.pk), 'name': 'Renamed', 'base_url': 'https://renamed.com/', 'auth_type': 'basic', 'username': 'u', 'password': 'p'},
+        )
+        self.assertRedirects(response, reverse('tenders:config_odoo'))
+        company.refresh_from_db()
+        self.assertEqual(company.name, 'Renamed')
+        self.assertEqual(company.base_url, 'https://renamed.com/')
+        self.assertEqual(company.auth_type, 'basic')
+
+    def test_company_delete(self):
+        company = OdooCompany.objects.create(name='Doomed', base_url='https://doomed.com')
+        self.client.login(email='admin@example.com', password='pass1234')
+        response = self.client.post(
+            reverse('tenders:config_odoo'), {'delete': str(company.pk)},
+        )
+        self.assertRedirects(response, reverse('tenders:config_odoo'))
+        self.assertFalse(OdooCompany.objects.filter(pk=company.pk).exists())
+
+    def test_odoo_page_shows_company_webhook_url(self):
+        company = OdooCompany.objects.create(name='Webhook Co', base_url='https://wh.example.com')
+        self.client.login(email='admin@example.com', password='pass1234')
+        response = self.client.get(reverse('tenders:config_odoo'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Webhook Co')
+        webhook = reverse('tenders:webhook_order_company', kwargs={'slug': company.slug})
+        self.assertContains(response, webhook)
 
     def test_selcom_page_renders_and_saves(self):
         self.client.login(email='admin@example.com', password='pass1234')
@@ -1121,3 +1177,141 @@ class AdminConfigurationTest(TestCase):
         self.assertRedirects(response, reverse('tenders:config_media'))
         self.setting.refresh_from_db()
         self.assertEqual(self.setting.media_storage, 's3')
+
+
+class OdooCompanyWebhookTest(TestCase):
+    def setUp(self):
+        self.owner = CustomUser.objects.create_user(
+            email='webhook-owner@example.com', password='pass1234',
+        )
+        self.company_a = OdooCompany.objects.create(name='Alpha Co', base_url='https://alpha.example.com')
+        self.company_b = OdooCompany.objects.create(name='Beta Co', base_url='https://beta.example.com', is_active=False)
+        self.client.login(email='webhook-owner@example.com', password='pass1234')
+
+    def _tender(self, ref):
+        return Tender.objects.create(
+            user=self.owner, route_loading='Nairobi', route_delivery='Mombasa',
+            customer=f'C-{ref}', cargo_type=Tender.CargoType.DRY_VAN,
+            truck_type=Tender.TruckType.TRUCK, weight=10.0, number_of_trucks=1,
+            distance_km=480, cargo_date=timezone.localdate(), cargo_reference=ref,
+        )
+
+    def _payload(self, order_id, ref):
+        return {
+            'order_id': order_id, 'order_name': f'ORD-{order_id}', 'state': 'done',
+            'company_id': 1, 'company_name': 'Alpha Co', 'cargo_reference': ref,
+            'date_order': '2026-09-01 10:00:00', 'amount_total': 150.0,
+            'order_lines': [{'line_id': 1, 'product_name': 'Sand', 'quantity': 1,
+                             'commission': 0, 'price_unit': 150, 'price_subtotal': 150, 'price_total': 150}],
+        }
+
+    def test_webhook_legacy_path_leaves_company_unset(self):
+        self._tender('REF-L')
+        response = self.client.post(
+            reverse('tenders:webhook_orders'),
+            json.dumps(self._payload(90001, 'REF-L')), content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        order = Order.objects.get(order_id=90001)
+        self.assertIsNone(order.odoo_company)
+
+    def test_webhook_company_path_attaches_company(self):
+        self._tender('REF-A')
+        url = reverse('tenders:webhook_order_company', kwargs={'slug': self.company_a.slug})
+        response = self.client.post(url, json.dumps(self._payload(90002, 'REF-A')), content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        order = Order.objects.get(order_id=90002)
+        self.assertEqual(order.odoo_company, self.company_a)
+
+    def test_webhook_unknown_slug_returns_404(self):
+        response = self.client.post(
+            reverse('tenders:webhook_order_company', kwargs={'slug': 'nope'}),
+            json.dumps(self._payload(90003, 'REF-X')), content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_webhook_inactive_company_return_403(self):
+        url = reverse('tenders:webhook_order_company', kwargs={'slug': self.company_b.slug})
+        response = self.client.post(url, json.dumps(self._payload(90004, 'REF-X')), content_type='application/json')
+        self.assertEqual(response.status_code, 403)
+
+
+class OdooCompanyRoutingTest(TestCase):
+    def setUp(self):
+        self.owner = CustomUser.objects.create_user(
+            email='route-owner@example.com', password='pass1234',
+        )
+        self.admin = CustomUser.objects.create_user(
+            email='route-admin@example.com', password='pass1234',
+            role=CustomUser.Role.ADMINISTRATOR,
+        )
+        self.company = OdooCompany.objects.create(
+            name='Routing Co', base_url='https://routing.example.com',
+            auth_type='bearer', api_token='tok-route',
+        )
+        ApiSetting.objects.create(base_url='https://shared.example.com/')
+
+    def _order(self, order_id, ref, company=None):
+        tender = self._tender(ref)
+        order = Order.objects.create(
+            order_id=order_id, order_name=f'ORD-{order_id}', user=self.owner, tender=tender,
+            company_id=2, company_name='Routing Co', cargo_reference=ref, state='confirmed',
+            amount_total=0, currency='TZS', odoo_company=company,
+        )
+        OrderLine.objects.create(
+            order=order, line_id=order_id, product_name='Sand', quantity=1,
+            price_unit=100, commission=0, price_subtotal=100, price_total=100, awarded=True,
+        )
+        return order
+
+    def _tender(self, ref):
+        return Tender.objects.create(
+            user=self.owner, route_loading='Nairobi', route_delivery='Mombasa',
+            customer=f'C-{ref}', cargo_type=Tender.CargoType.DRY_VAN,
+            truck_type=Tender.TruckType.TRUCK, weight=10.0, number_of_trucks=1,
+            distance_km=480, cargo_date=timezone.localdate(), cargo_reference=ref,
+        )
+
+    def test_award_confirmation_posts_to_order_company(self):
+        order = self._order(91001, 'REF-ROUTE', company=self.company)
+        self.client.login(email='route-owner@example.com', password='pass1234')
+        with patch('tenders.views.submit_confirmation',
+                   return_value=(200, '{"status":"success"}', True)) as m:
+            response = self.client.post(reverse('tenders:api_order_award', args=[order.pk]), {})
+        self.assertTrue(response.json()['ok'])
+        url = m.call_args[0][1]
+        self.assertEqual(url, self.company.order_confirmation_url())
+
+    def test_award_confirmation_falls_back_to_shared_setting(self):
+        order = self._order(91002, 'REF-FALLBACK', company=None)
+        self.client.login(email='route-owner@example.com', password='pass1234')
+        with patch('tenders.views.submit_confirmation',
+                   return_value=(200, '{"status":"success"}', True)) as m:
+            response = self.client.post(reverse('tenders:api_order_award', args=[order.pk]), {})
+        self.assertTrue(response.json()['ok'])
+        url = m.call_args[0][1]
+        self.assertEqual(url, 'https://shared.example.com/api/v1/order-confirmation')
+
+    def test_invoice_confirmation_posts_to_order_company(self):
+        from tenders.views import get_or_create_invoice
+        order = self._order(91003, 'REF-INV', company=self.company)
+        invite = get_or_create_invoice(order)
+        self.client.login(email='route-admin@example.com', password='pass1234')
+        with patch('tenders.views.submit_confirmation',
+                   return_value=(200, ('{"status":"success","data":{"name":"EXT-INV-1"}}'), True)) as m:
+            response = self.client.post(reverse('tenders:api_invoice_paid', args=[invite.pk]), {})
+        self.assertTrue(response.json()['ok'])
+        url = m.call_args[0][1]
+        self.assertEqual(url, self.company.order_invoice_url())
+
+    def test_invoice_confirmation_falls_back_to_shared_setting(self):
+        from tenders.views import get_or_create_invoice
+        order = self._order(91004, 'REF-INV-FALLBACK', company=None)
+        invite = get_or_create_invoice(order)
+        self.client.login(email='route-admin@example.com', password='pass1234')
+        with patch('tenders.views.submit_confirmation',
+                   return_value=(200, ('{"status":"success","data":{"name":"EXT-INV-2"}}'), True)) as m:
+            response = self.client.post(reverse('tenders:api_invoice_paid', args=[invite.pk]), {})
+        self.assertTrue(response.json()['ok'])
+        url = m.call_args[0][1]
+        self.assertEqual(url, 'https://shared.example.com/api/v1/order-invoice')

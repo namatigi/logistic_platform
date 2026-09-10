@@ -5,6 +5,7 @@ from django.conf import settings
 from django.contrib.gis.db import models as gis_models
 from django.contrib.gis.geos import Point
 from django.db import models
+from django.utils.text import slugify
 
 from .towns import TOWN_CHOICES
 
@@ -286,6 +287,64 @@ class ApiSetting(models.Model):
         return f'Shared API settings ({self.base_url or "not configured"})'
 
 
+class OdooCompany(models.Model):
+    class AuthType(models.TextChoices):
+        NONE = 'none', 'No Auth'
+        BEARER = 'bearer', 'Bearer Token'
+        BASIC = 'basic', 'Basic Auth'
+
+    name = models.CharField(max_length=200, help_text='Company / Odoo instance label, e.g. ACSC Ltd.')
+    slug = models.SlugField(
+        max_length=200, unique=True, blank=True,
+        help_text='URL-safe identifier used in the per-instance webhook URL.',
+    )
+    base_url = models.CharField(max_length=500, help_text='e.g. https://odoo.acsc.com')
+    auth_type = models.CharField(max_length=20, choices=AuthType.choices, default=AuthType.BEARER)
+    api_token = models.CharField(max_length=500, blank=True, help_text='Token used for Bearer authentication')
+    username = models.CharField(max_length=200, blank=True)
+    password = models.CharField(max_length=200, blank=True)
+    is_active = models.BooleanField(
+        default=True,
+        help_text='Inactive companies do not appear on the webhook URL selectable list.',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+        verbose_name = 'Odoo company'
+        verbose_name_plural = 'Odoo companies'
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base = slugify(self.name) or 'company'
+            slug, n = base, 2
+            while OdooCompany.objects.filter(slug=slug).exclude(pk=self.pk).exists():
+                slug = f'{base}-{n}'
+                n += 1
+            self.slug = slug
+        super().save(*args, **kwargs)
+
+    def endpoint_url(self):
+        base = self.base_url.rstrip('/')
+        return f'{base}/api/v1/tenders'
+
+    def order_confirmation_url(self):
+        base = self.base_url.rstrip('/')
+        return f'{base}/api/v1/order-confirmation'
+
+    def partial_order_confirmation_url(self):
+        base = self.base_url.rstrip('/')
+        return f'{base}/api/v1/partial-order-confirmation'
+
+    def order_invoice_url(self):
+        base = self.base_url.rstrip('/')
+        return f'{base}/api/v1/order-invoice'
+
+    def __str__(self):
+        return self.name
+
+
 class Order(models.Model):
     order_id = models.PositiveBigIntegerField(unique=True)
     order_name = models.CharField(max_length=255, blank=True, default='')
@@ -304,6 +363,10 @@ class Order(models.Model):
         on_delete=models.SET_NULL, related_name='orders',
     )
     tender = models.ForeignKey(Tender, null=True, blank=True, on_delete=models.SET_NULL, related_name='orders')
+    odoo_company = models.ForeignKey(
+        OdooCompany, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='orders', help_text='Odoo company/instance this order came from. Award and invoice confirmations are sent back to it.',
+    )
     raw_payload = models.JSONField(default=dict)
     award_response = models.JSONField(null=True, blank=True, default=dict)
     awarded_at = models.DateTimeField(null=True, blank=True)

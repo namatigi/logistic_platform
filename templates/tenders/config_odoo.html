@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Odoo &middot; Configuration &middot; HYPAX{% endblock %}
 {% block content %}
-<div class="container" style="max-width:720px;">
+<div class="container" style="max-width:860px;">
   <div class="page-header">
     <div>
       <h1 class="page-title">Configuration</h1>
@@ -12,71 +12,152 @@
   {% include 'tenders/config_tabs.html' %}
 
   <div class="card">
-    <div class="card-title">Odoo</div>
+    <div class="card-title">Odoo companies</div>
     <p class="form-help" style="margin-top:-4px; margin-bottom:16px;">
-      Configure the <strong>outgoing tender endpoint</strong> that HYPAX posts tenders to, and the
-      <strong>incoming webhook</strong> Odoo uses to send order data back.
+      Each entry is a separate Odoo company/instance or transporter of record. Every company gets its own
+      <strong>incoming webhook URL</strong> &mdash; orders posted to it are attributed to that company, and the
+      <strong>order confirmations and invoice confirmations</strong> are sent back to the same company.
     </p>
 
-    <form method="post" novalidate>
-      {% csrf_token %}
-
-      <div class="form-row" style="margin-bottom:18px;">
-        <label>Tender endpoint (outgoing)</label>
-        <input type="url" name="base_url" value="{{ form.base_url.value|default_if_none:'' }}">
-        <span class="form-help">Root URL, e.g. <code>https://api.example.com</code>. Tenders are posted to <code>/api/v1/tenders</code>.</span>
-        {% if form.base_url.errors %}<div class="field-error"><ul><li>{{ form.base_url.errors.0 }}</li></ul></div>{% endif %}
+    {% if companies %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Company</th>
+              <th>Base URL</th>
+              <th>Webhook URL</th>
+              <th>Orders</th>
+              <th>Active</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for company in companies %}
+              <tr>
+                <td>
+                  <strong>{{ company.name }}</strong>
+                  <div class="form-help" style="margin:2px 0 0;">/{{ company.slug }}</div>
+                </td>
+                <td style="max-width:220px; word-break:break-all;">{{ company.base_url|default:'-' }}</td>
+                <td>
+                  <div style="display:flex; gap:6px; align-items:stretch;">
+                    <input id="webhook-{{ company.id }}" type="text" readonly value="{{ company.webhook_url }}"
+                      style="flex:1; background:#f8fafc; color:#334155; font-size:12px;" title="{{ company.webhook_url }}">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="copyToClipboard('webhook-{{ company.id }}')">Copy</button>
+                  </div>
+                </td>
+                <td>{{ company.orders_count }}</td>
+                <td>{% if company.is_active %}&check;{% else %}&ndash;{% endif %}</td>
+                <td>
+                  <a class="btn btn-secondary btn-sm" href="{% url 'tenders:config_odoo' %}?edit={{ company.id }}">Edit</a>
+                  <form method="post" style="display:inline;" onsubmit="return confirm('Delete {{ company.name|escapejs }}? Orders already received keep their settings.')">
+                    {% csrf_token %}
+                    <input type="hidden" name="delete" value="{{ company.id }}">
+                    <button type="submit" class="btn btn-sm" style="color:#dc2626;">Delete</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
-
-      <div class="form-row" style="margin-bottom:18px;">
-        <label>Auth type</label>
-        <select name="auth_type">
-          {% for value, label in form.auth_type.field.choices %}
-            <option value="{{ value }}" {% if form.auth_type.value == value %}selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
-        <span class="form-help">How the endpoint authenticates requests.</span>
-        {% if form.auth_type.errors %}<div class="field-error"><ul><li>{{ form.auth_type.errors.0 }}</li></ul></div>{% endif %}
+    {% else %}
+      <div class="empty">
+        <div class="empty-icon">&#127970;</div>
+        <p>No Odoo companies configured yet. Add the first one below.</p>
       </div>
-
-      <div class="form-row" style="margin-bottom:18px;">
-        <label>API token</label>
-        <input type="text" name="api_token" value="{{ form.api_token.value|default_if_none:'' }}">
-        <span class="form-help">Token used for <strong>Bearer token</strong> auth. Ignored for other types.</span>
-        {% if form.api_token.errors %}<div class="field-error"><ul><li>{{ form.api_token.errors.0 }}</li></ul></div>{% endif %}
-      </div>
-
-      <div class="form-row" style="margin-bottom:18px;">
-        <label>Username</label>
-        <input type="text" name="username" value="{{ form.username.value|default_if_none:'' }}">
-        <span class="form-help">Required only for <strong>Basic auth</strong>.</span>
-        {% if form.username.errors %}<div class="field-error"><ul><li>{{ form.username.errors.0 }}</li></ul></div>{% endif %}
-      </div>
-
-      <div class="form-row" style="margin-bottom:18px;">
-        <label>Password</label>
-        <input type="password" name="password" value="{{ form.password.value|default_if_none:'' }}">
-        <span class="form-help">Required only for <strong>Basic auth</strong>.</span>
-        {% if form.password.errors %}<div class="field-error"><ul><li>{{ form.password.errors.0 }}</li></ul></div>{% endif %}
-      </div>
-
-      <div class="form-actions" style="margin-top:8px;">
-        <button type="submit" class="btn btn-primary">Save configuration</button>
-      </div>
-    </form>
+    {% endif %}
   </div>
 
+  <div class="card" style="background:{% if editing %}#fbfdff{% endif %};">
+    <div class="card-title">
+      {% if editing %}Edit &ldquo;{{ editing.name }}&rdquo;{% else %}Add an Odoo company{% endif %}
+    </div>
+
+      <form method="post" novalidate>
+        {% csrf_token %}
+        {% if editing %}<input type="hidden" name="id" value="{{ editing.pk }}">{% endif %}
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Company name</label>
+          <input type="text" name="name" required value="{{ form.name.value|default_if_none:'' }}" placeholder="e.g. ACSC Ltd.">
+          {% if form.name.errors %}<div class="field-error"><ul><li>{{ form.name.errors.0 }}</li></ul></div>{% endif %}
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Slug (webhook path)</label>
+          <input type="text" name="slug" value="{{ form.slug.value|default_if_none:'' }}" placeholder="auto-generated from the name">
+          <span class="form-help">Used in the company's webhook URL: <code>.../webhook/orders/&lt;slug&gt;/</code>. Leave blank to auto-generate.</span>
+          {% if form.slug.errors %}<div class="field-error"><ul><li>{{ form.slug.errors.0 }}</li></ul></div>{% endif %}
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Base URL (outgoing)</label>
+          <input type="url" name="base_url" required value="{{ form.base_url.value|default_if_none:'' }}">
+          <span class="form-help">Root URL, e.g. <code>https://odoo.acsc.com</code>. Order and invoice confirmations are posted to <code>/api/v1/order-confirmation</code> and <code>/api/v1/order-invoice</code>.</span>
+          {% if form.base_url.errors %}<div class="field-error"><ul><li>{{ form.base_url.errors.0 }}</li></ul></div>{% endif %}
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Auth type</label>
+          <select name="auth_type">
+            {% for value, label in form.auth_type.field.choices %}
+              <option value="{{ value }}" {% if form.auth_type.value == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          <span class="form-help">How the outgoing confirmation requests authenticate.</span>
+          {% if form.auth_type.errors %}<div class="field-error"><ul><li>{{ form.auth_type.errors.0 }}</li></ul></div>{% endif %}
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>API token</label>
+          <input type="text" name="api_token" value="{{ form.api_token.value|default_if_none:'' }}">
+          <span class="form-help">Token used for <strong>Bearer token</strong> auth. Ignored for other types.</span>
+          {% if form.api_token.errors %}<div class="field-error"><ul><li>{{ form.api_token.errors.0 }}</li></ul></div>{% endif %}
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Username</label>
+          <input type="text" name="username" value="{{ form.username.value|default_if_none:'' }}">
+          <span class="form-help">Required only for <strong>Basic auth</strong>.</span>
+          {% if form.username.errors %}<div class="field-error"><ul><li>{{ form.username.errors.0 }}</li></ul></div>{% endif %}
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label>Password</label>
+          <input type="password" name="password" value="{{ form.password.value|default_if_none:'' }}">
+          <span class="form-help">Required only for <strong>Basic auth</strong>.</span>
+          {% if form.password.errors %}<div class="field-error"><ul><li>{{ form.password.errors.0 }}</li></ul></div>{% endif %}
+        </div>
+
+        <div class="form-row" style="margin-bottom:18px;">
+          <label style="flex-direction:row; align-items:center; gap:8px; display:flex;">
+            <input type="checkbox" name="is_active" style="width:auto;"
+              {% if form.is_active.value %}checked{% endif %}> Active
+          </label>
+          <span class="form-help">Inactive companies stop accepting webhooks (HTTP 403).</span>
+          {% if form.is_active.errors %}<div class="field-error"><ul><li>{{ form.is_active.errors.0 }}</li></ul></div>{% endif %}
+        </div>
+
+        <div class="form-actions" style="margin-top:8px;">
+          <button type="submit" class="btn btn-primary">{% if editing %}Save changes{% else %}Add company{% endif %}</button>
+          {% if editing %}<a class="btn btn-secondary" href="{% url 'tenders:config_odoo' %}">Cancel</a>{% endif %}
+        </div>
+      </form>
+    </div>
+
   <div class="card" style="border-color:#bfdbfe; background:#fbfdff;">
-    <div class="card-title">Webhook (incoming)</div>
+    <div class="card-title">Legacy webhook (shared)</div>
     <p style="color:#475569; font-size:14px; margin-bottom:14px;">
-      Give this URL to Odoo. It will <code>POST</code> closing order data here, and the orders appear on the
-      <a href="{% url 'tenders:order_list' %}">Orders</a> page. Right-click &rarr; Copy the URL.
+      Orders posted to this shared URL are <strong>not</strong> attributed to any specific company; their
+      confirmations fall back to the shared settings. Use a company-specific URL above instead.
     </p>
     <div class="form-row" style="margin-bottom:10px;">
-      <label>Webhook URL</label>
+      <label>Shared webhook URL</label>
       <div style="display:flex; gap:8px; align-items:stretch;">
-        <input id="webhook-url" type="text" readonly value="{{ webhook_url }}" style="flex:1; background:#f8fafc; color:#334155;">
-        <button type="button" class="btn btn-secondary" onclick="copyToClipboard('webhook-url')">Copy</button>
+        <input id="webhook-shared" type="text" readonly value="{{ shared_webhook_url }}" style="flex:1; background:#f8fafc; color:#334155;">
+        <button type="button" class="btn btn-secondary" onclick="copyToClipboard('webhook-shared')">Copy</button>
       </div>
     </div>
     <p class="form-help" style="margin-top:8px;">
