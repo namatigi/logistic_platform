@@ -1,0 +1,109 @@
+{% extends 'base.html' %}
+{% block title %}Users &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Users</h1>
+      <p class="page-subtitle">Accounts on the platform and who is online right now.</p>
+    </div>
+  </div>
+
+  <div id="users-app"
+       data-url="{% url 'tenders:api_admin_users' %}"
+       v-cloak>
+    {% verbatim %}
+    <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
+
+    <div class="stat-row" v-if="loaded">
+      <div class="stat">
+        <div class="stat-value">{{ onlineCount }}</div>
+        <div class="stat-label">Online now</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">{{ users.length }}</div>
+        <div class="stat-label">Total users</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="table-wrap" v-if="users.length">
+        <table>
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Role</th>
+              <th>Phone</th>
+              <th>Last active</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="u in users" v-bind:key="u.id">
+              <td>
+                <strong>{{ u.full_name }}</strong>
+                <div style="color:var(--muted); font-size:13px;">{{ u.email }}</div>
+              </td>
+              <td><span class="badge badge-info">{{ u.role_label }}</span></td>
+              <td>{{ u.phone || '-' }}</td>
+              <td>{{ u.last_login ? fmtDate(u.last_login) : '-' }}</td>
+              <td>
+                <span class="badge" :class="u.is_online ? 'badge-success' : 'badge-muted'">
+                  {{ u.is_online ? 'Online' : (u.is_active ? 'Offline' : 'Disabled') }}
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="empty" v-else-if="loaded">
+        <p style="padding:24px;">No users yet.</p>
+      </div>
+      <div class="empty" v-else>
+        <p style="padding:24px;">Loading users...</p>
+      </div>
+    </div>
+    {% endverbatim %}
+  </div>
+</div>
+
+<script>
+  (function () {
+    var root = document.getElementById('users-app');
+    var HY = window.HYPAX;
+
+    Vue.createApp({
+      data: function () {
+        return { users: [], error: '', loaded: false, timer: null };
+      },
+      computed: {
+        onlineCount: function () {
+          return this.users.filter(function (u) { return u.is_online; }).length;
+        }
+      },
+      created: function () {
+        this.load();
+        this.timer = setInterval(this.load, 30000);
+      },
+      beforeUnmount: function () {
+        if (this.timer) { clearInterval(this.timer); }
+      },
+      methods: {
+        fmtDate: function (v) { return HY.fmtDate(v); },
+        load: async function () {
+          var self = this;
+          try {
+            var res = await HY.api.get(root.dataset.url);
+            if (res && res.ok === false) { self.error = res.error || 'Failed to load users.'; return; }
+            self.users = (res && res.users) || [];
+          } catch (e) {
+            self.error = e.message;
+          } finally {
+            self.loaded = true;
+          }
+        }
+      }
+    }).mount('#users-app');
+  })();
+</script>
+{% endblock %}

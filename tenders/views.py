@@ -1768,6 +1768,68 @@ def api_admin_escrow(request):
 
 
 # ---------------------------------------------------------------------------
+# Users overview (administrator)
+# ---------------------------------------------------------------------------
+
+def _online_user_ids():
+    from django.contrib.sessions.models import Session
+    ids = set()
+    now = timezone.now()
+    for session in Session.objects.filter(expire_date__gt=now).only('session_data'):
+        try:
+            data = session.get_decoded()
+        except Exception:
+            continue
+        uid = data.get('_auth_user_id')
+        if not uid:
+            continue
+        try:
+            ids.add(int(uid))
+        except (TypeError, ValueError):
+            continue
+    return ids
+
+
+@login_required
+@_admin_required
+def admin_users(request):
+    return render(request, 'tenders/admin_users.html', {'active_tab': 'users'})
+
+
+@login_required
+@_admin_required
+def api_admin_users(request):
+    online_ids = _online_user_ids()
+    users = []
+    for user in CustomUser.objects.select_related('profile').order_by('-last_login'):
+        is_online = user.pk in online_ids
+        if not is_online and user.pk == request.user.pk:
+            is_online = True
+        users.append({
+            'id': user.pk,
+            'email': user.email,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'full_name': user.get_full_name() or user.email,
+            'role': user.role,
+            'role_label': user.get_role_display(),
+            'phone': (user.profile.phone if hasattr(user, 'profile') else ''),
+            'avatar_initials': user.avatar_initials(),
+            'is_active': user.is_active,
+            'is_staff': user.is_staff,
+            'date_joined': user.date_joined.isoformat() if user.date_joined else None,
+            'last_login': user.last_login.isoformat() if user.last_login else None,
+            'is_online': is_online,
+        })
+    return JsonResponse({
+        'ok': True,
+        'online_count': len(online_ids),
+        'total_count': len(users),
+        'users': users,
+    })
+
+
+# ---------------------------------------------------------------------------
 # Selcom payment gateway
 # ---------------------------------------------------------------------------
 

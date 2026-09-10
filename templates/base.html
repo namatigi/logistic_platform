@@ -86,6 +86,9 @@
         <li class="{% if request.resolver_match.url_name == 'admin_escrow' %}active{% endif %}">
           <a href="{% url 'tenders:admin_escrow' %}">Escrow</a>
         </li>
+        <li class="{% if request.resolver_match.url_name == 'admin_users' %}active{% endif %}">
+          <a href="{% url 'tenders:admin_users' %}">Users</a>
+        </li>
         {% endif %}
       </ul>
       {% endif %}

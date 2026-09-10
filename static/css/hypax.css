@@ -723,6 +723,11 @@ tr:hover td {
   color: #075985;
 }
 
+.badge-muted {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
 /* ---------- Alerts (messages) ---------- */
 .messages {
   max-width: 1100px;

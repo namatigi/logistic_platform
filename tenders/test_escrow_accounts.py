@@ -45,6 +45,25 @@ class EscrowAccountsTest(TestCase):
         res = self.client.get(reverse('tenders:api_payment_terms'))
         self.assertEqual(res.json()['payment_terms'], [])
 
+    def test_admin_users_endpoint(self):
+        self.client.login(email='admin@example.com', password='pass1234')
+        res = self.client.get(reverse('tenders:api_admin_users'))
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        users = {u['email']: u for u in data['users']}
+        self.assertEqual(data['total_count'], len(users))
+        self.assertIn('user@example.com', users)
+        self.assertEqual(users['admin@example.com']['role_label'], 'Administrator')
+        self.assertTrue(users['admin@example.com']['is_online'])
+        self.assertEqual(users['user@example.com']['role_label'], 'User')
+
+    def test_admin_users_requires_admin(self):
+        res = self.client.get(reverse('tenders:admin_users'))
+        self.assertEqual(res.status_code, 302)
+        self.client.login(email='user@example.com', password='pass1234')
+        res = self.client.get(reverse('tenders:api_admin_users'))
+        self.assertEqual(res.status_code, 302)
+
     def test_payment_term_not_owned(self):
         other = CustomUser.objects.create_user(email='other@example.com', password='pass1234')
         from tenders.models import PaymentTerm
