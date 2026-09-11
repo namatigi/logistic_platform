@@ -2285,6 +2285,13 @@ def api_admin_diagnostic(request):
         q &= Q(user__email__icontains=search)
 
     api_points = list(base.values_list('api_point', flat=True).distinct().order_by('api_point'))
+    emails = list(
+        base.filter(user__isnull=False)
+        .order_by()
+        .values_list('user__email', flat=True)
+        .distinct()
+        .order_by('user__email')
+    )
     if q:
         base = base.filter(q)
 
@@ -2314,6 +2321,7 @@ def api_admin_diagnostic(request):
         'ok': True,
         'diagnostics': diagnostics,
         'api_points': api_points,
+        'emails': emails,
         'today_count': today_count,
     })
     return JsonResponse(data)

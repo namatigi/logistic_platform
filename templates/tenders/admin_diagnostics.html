@@ -90,7 +90,29 @@
 
     <div class="card" style="margin-bottom:16px;">
       <div class="row" style="display:flex; gap:12px; flex-wrap:wrap; align-items:center; padding:14px 16px;">
-        <input type="text" v-model="search" placeholder="Search by account email" style="flex:1; min-width:200px;">
+        <div class="search-box">
+          <svg class="search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+            <circle cx="7" cy="7" r="4.5"></circle>
+            <line x1="10.5" y1="10.5" x2="14" y2="14"></line>
+          </svg>
+          <input type="text" v-model="search" class="search-input"
+                 placeholder="Search by account email"
+                 autocomplete="off"
+                 @focus="comboOpen = true"
+                 @input="comboOpen = true; comboHighlight = 0"
+                 @blur="comboClose"
+                 @keydown.down.prevent="comboMove(1)"
+                 @keydown.up.prevent="comboMove(-1)"
+                 @keydown.enter.prevent="comboEnter">
+          <button v-if="search" type="button" class="search-clear" @mousedown.prevent="clearSearch()" aria-label="Clear search">&times;</button>
+          <div class="searchable-options" v-if="comboOpen && filteredEmails.length" style="position:absolute; z-index:30;">
+            <button type="button" v-for="(e, i) in filteredEmails" :key="e"
+                    class="searchable-option"
+                    :class="{ highlighted: comboHighlight === i }"
+                    @mousedown.prevent="comboPick(i)"
+                    v-html="highlight(e, search)"></button>
+          </div>
+        </div>
         <select v-model="apiPoint">
           <option value="">All API points</option>
           <option v-for="p in apiPoints" v-bind:key="p" v-bind:value="p">{{ p }}</option>
@@ -171,22 +193,105 @@
     Vue.createApp({
       data: function () {
         return {
-          diagnostics: [], apiPoints: [], search: '', apiPoint: '', page: 1,
+          diagnostics: [], apiPoints: [], emails: [], search: '', apiPoint: '', page: 1,
           total: 0, pages: 1, hasNext: false, hasPrev: false, todayCount: 0,
-          error: '', loaded: false, timer: null
+          error: '', loaded: false, timer: null,
+          comboOpen: false, comboHighlight: 0
         };
       },
+      computed: {
+        filteredEmails: function () {
+          var q = (this.search || '').trim().toLowerCase();
+          var list = this.emails;
+          if (q) {
+            list = list.filter(function (e) { return e.toLowerCase().indexOf(q) >= 0; });
+          }
+          return list.slice(0, 20);
+        }
+      },
       created: function () {
+        this._searchTimer = null;
         this.load();
         this.timer = setInterval(this.load, 30000);
       },
+      watch: {
+        search: function () {
+          var self = this;
+          clearTimeout(this._searchTimer);
+          this._searchTimer = setTimeout(function () {
+            self.page = 1;
+            self.load();
+          }, 400);
+        }
+      },
       beforeUnmount: function () {
         if (this.timer) { clearInterval(this.timer); }
+        if (this._searchTimer) { clearTimeout(this._searchTimer); }
       },
       methods: {
         fmtDate: function (v) { return HY.fmtDate(v); },
         prettyDetail: function (d) { return JSON.stringify(d, null, 2); },
         toggleDetail: function (d) { d.showDetail = !d.showDetail; },
+        clearSearch: function () {
+          var self = this;
+          this.search = '';
+          this.comboOpen = false;
+          this.comboHighlight = 0;
+          clearTimeout(self._searchTimer);
+          self.page = 1;
+          self.load();
+        },
+        comboMove: function (dir) {
+          var list = this.filteredEmails;
+          if (!list.length) return;
+          var next = this.comboHighlight + dir;
+          if (next < 0) next = list.length - 1;
+          if (next >= list.length) next = 0;
+          this.comboHighlight = next;
+        },
+        comboPick: function (i) {
+          var email = this.filteredEmails[i];
+          if (!email) return;
+          var self = this;
+          this.search = email;
+          this.comboOpen = false;
+          this.comboHighlight = 0;
+          clearTimeout(self._searchTimer);
+          self.page = 1;
+          self.load();
+        },
+        comboEnter: function () {
+          var self = this;
+          if (this.comboOpen && this.filteredEmails.length) {
+            this.comboPick(this.comboHighlight);
+          } else {
+            this.comboOpen = false;
+            clearTimeout(self._searchTimer);
+            self.page = 1;
+            self.load();
+          }
+        },
+        comboClose: function () {
+          var self = this;
+          setTimeout(function () {
+            self.comboOpen = false;
+          }, 120);
+        },
+        highlight: function (label, q) {
+          var query = (q || '').trim();
+          if (!query) return this.escapeHtml(label);
+          var idx = label.toLowerCase().indexOf(query.toLowerCase());
+          if (idx < 0) return this.escapeHtml(label);
+          var start = label.slice(0, idx);
+          var hit = label.slice(idx, idx + query.length);
+          var end = label.slice(idx + query.length);
+          return this.escapeHtml(start) + '<mark>' + this.escapeHtml(hit) + '</mark>' + this.escapeHtml(end);
+        },
+        escapeHtml: function (s) {
+          return String(s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+          });
+        },
         goto: function (page) {
           this.page = page > 0 ? page : 1;
           this.load();
@@ -201,6 +306,7 @@
             if (res && res.ok === false) { self.error = res.error || 'Failed to load diagnostics.'; return; }
             self.diagnostics = (res && res.diagnostics) || [];
             self.apiPoints = (res && res.api_points) || [];
+            self.emails = (res && res.emails) || [];
             self.total = (res && res.total) || 0;
             self.todayCount = (res && res.today_count) || 0;
             self.page = (res && res.page) || 1;

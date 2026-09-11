@@ -1519,6 +1519,9 @@ class ApiDiagnosticsTest(TestCase):
         ).json()
         self.assertEqual(data['total'], 1)
         self.assertEqual(data['diagnostics'][0]['api_point'], 'order.award')
+        self.assertEqual(
+            data['emails'], ['diag-user@example.com', 'other@example.com'],
+        )
 
 
 class SubmitRetryTest(TestCase):

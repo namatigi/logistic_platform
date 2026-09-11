@@ -1610,3 +1610,67 @@ html[data-theme='dark'] .callback-card {
 html[data-theme='dark'] .callback-text {
   color: #bbf7d0;
 }
+
+/* ---------- Search box / combobox ---------- */
+.search-box {
+  position: relative;
+  flex: 1;
+  min-width: 220px;
+}
+
+.search-box .search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.search-box input.search-input {
+  width: 100%;
+  padding: 9px 32px 9px 36px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.search-box input.search-input:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.15);
+}
+
+.search-box .search-clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.search-box .search-clear:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+html[data-theme='dark'] .search-box input.search-input {
+  background: #0f172a;
+}
