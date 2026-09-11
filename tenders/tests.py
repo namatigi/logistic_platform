@@ -708,6 +708,7 @@ class InvoicesPageTest(TestCase):
         self.assertIn('order_id', inv_data)
         self.assertIn('customer', inv_data)
         self.assertIsNotNone(inv_data['tender_id'])
+        self.assertEqual(inv_data['tender_reference'], 'REF-A')
         self.assertEqual(len(inv_data['lines']), 1)
         self.assertEqual(inv_data['lines'][0]['product_name'], 'Sand')
         self.assertEqual(inv_data['lines'][0]['price_subtotal'], '100.00')

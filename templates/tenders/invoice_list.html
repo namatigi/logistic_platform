@@ -32,6 +32,7 @@
               <th>Transporter</th>
               <th>Order</th>
               <th>Trans ref</th>
+              <th>Tender ref</th>
               <th>Invoice Date</th>
               <th>Amount</th>
               <th>Status</th>
@@ -47,6 +48,7 @@
               <td>{{ inv.transporter }}</td>
               <td>{{ inv.order_name }}</td>
               <td>{{ inv.cargo_reference || '-' }}</td>
+              <td>{{ inv.tender_reference || '-' }}</td>
               <td>{{ fmtDate(inv.created_at) }}</td>
               <td><strong>{{ money(inv.amount_total, inv.currency) }}</strong></td>
               <td v-if="inv.status === 'paid'"><span class="badge badge-success">{{ inv.status }}</span></td>
@@ -66,7 +68,7 @@
               </td>
             </tr>
             <tr v-if="expandedId === inv.order_pk" class="order-detail-row">
-              <td :colspan="selcomEnabled ? 9 : 8" style="padding:0;">
+              <td :colspan="selcomEnabled ? 10 : 9" style="padding:0;">
                 <div class="order-detail-summary">
                   <div>
                     <span class="detail-label">Invoice number</span>
@@ -83,6 +85,10 @@
                   <div>
                     <span class="detail-label">Cargo reference</span>
                     <div><strong>{{ inv.cargo_reference || '-' }}</strong></div>
+                  </div>
+                  <div>
+                    <span class="detail-label">Tender reference</span>
+                    <div><strong>{{ inv.tender_reference || '-' }}</strong></div>
                   </div>
                   <div>
                     <span class="detail-label">Cargo ID</span>
