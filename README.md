@@ -52,6 +52,8 @@ A Django web platform for managing cargo logistics:
   "number_of_trucks": 2,
   "distance_km": 850.0,
   "cargo_date": "2026-09-10",
+  "tender_reference": "HX-2609-000042",
+  "cargo_reference": "HX-2609-000042",
   "payment_terms": {
     "name": "On confirmation",
     "description": "Pay via Selcom before loading.",
@@ -62,6 +64,8 @@ A Django web platform for managing cargo logistics:
   }
 }
 ```
+
+`tender_reference` is the **canonical tender number** — the unique `HX-YYMM-<id>` reference assigned when the tender is created. It is always present in the payload (required). `cargo_reference` carries the same value and is kept for backward compatibility with earlier integrations.
 
 The optional `payment_terms` object repeats what the user picked from their **Pay Term** library on the tender form:
 - `name` — the term label (e.g. "Net 30", "On confirmation")
@@ -91,7 +95,7 @@ When no payment term is selected the field is sent as `null`.
   }
 }
 ```
-The returned `data.name` (`CAR00014`) is stored as the tender's **cargo reference** and used to match incoming webhook orders.
+The returned `data.name` (e.g. `CAR00014`) is stored on the tender as its **cargo reference**. The **canonical** tender number is the `tender_reference` (HX reference) sent in the payload. Incoming webhook orders are matched by `cargo_reference` against the tender's HX reference, its cargo reference, or a recorded submission, so both values link orders back to the originating tender.
 
 ### Payment terms (Pay Term)
 Every user has a personal **Pay Term** library (`/payment-terms/`):
@@ -154,8 +158,21 @@ Orders are pushed by the Odoo instances to the (CSRF-exempt, JSON) webhook URL:
 | `POST /webhook/orders/<slug>/` | Per-instance URL. The order is attributed to the Odoo company with that `slug`. Unknown slug → **404**, inactive company → **403**. |
 
 - Orders are upserted by `order_id`, storing every detail and the order lines.
-- If `cargo_reference` matches a tender reference, the order is linked to that tender and its owner.
+- If `cargo_reference` matches a tender's HX reference, its cargo reference, or a recorded submission, the order is linked to that tender and its owner.
 - Orders appear on the **Orders** page (list + detail) with all details and how much it totals.
+
+The webhook responds with:
+```json
+{
+  "status": "ok",
+  "created": true,
+  "order_id": 42,
+  "cargo_reference": "HX-2609-000042",
+  "linked_tender": "HX-2609-000042",
+  "company_slug": "lake-trans"
+}
+```
+`linked_tender` reports the **canonical tender number** of the matched tender (`HX-YYMM-<id>`, preferring the HX reference over the external cargo reference), or `null` when no tender matched.
 
 #### Webhook payload
 ```json
@@ -194,7 +211,8 @@ When an order is awarded, HYPAX confirms it back to the **order's own Odoo compa
   {
     "order_id": 42,
     "message": "Confirmed",
-    "cargo_name": "CAR00014"
+    "cargo_name": "HX-2609-000042",
+    "tender_reference": "HX-2609-000042"
   }
   ```
 - **Partial confirmation** (only some order lines are awarded) → `POST {base_url}/api/v1/partial-order-confirmation`
@@ -202,12 +220,15 @@ When an order is awarded, HYPAX confirms it back to the **order's own Odoo compa
   {
     "order_id": 42,
     "message": "Confirmed",
-    "cargo_name": "CAR00014",
+    "cargo_name": "HX-2609-000042",
+    "tender_reference": "HX-2609-000042",
     "order_lines": [
       { "line_id": 99 }
     ]
   }
   ```
+
+`cargo_name` and `tender_reference` both carry the order's **canonical tender number** (`HX-YYMM-<id>`); `cargo_name` falls back to the order's `cargo_reference` when the tender has no HX number yet.
 
 A confirmation is treated as successful when the HTTP status is `2xx`, or the response body contains `"status": "success"`. A successful confirmation stores the award response and marks the selected lines as awarded.
 
@@ -217,7 +238,8 @@ When an invoice is confirmed as paid, HYPAX notifies the Odoo instance the order
 ```json
 {
   "order_id": 42,
-  "cargo_name": "CAR00014",
+  "cargo_name": "HX-2609-000042",
+  "tender_reference": "HX-2609-000042",
   "customer_name": "HYPAX",
   "tax_id": "TIN-123",
   "country": "TZ"
@@ -237,6 +259,52 @@ All four outgoing paths default to `/api/v1/...` and can be overridden **per Odo
 | Invoice confirmation | `/api/v1/order-invoice` |
 
 `OdooCompany` stores these four path fields; leaving them blank uses the defaults.
+
+### Platform API endpoints (internal JSON)
+These endpoints power the platform's own UI and use the logged-in user's session:
+
+| Endpoint | Returns |
+|----------|---------|
+| `GET /api/tenders/` | Paginated tender list for the logged-in user |
+| `GET /api/orders/` | Order list grouped by **tender reference** (`groups[]`, each with a `grouper` = the canonical HX tender number when linked); every order carries `tender_ref` |
+| `GET /api/orders/<pk>/` | Order detail, including `tender_ref` (canonical tender number) and its lines |
+| `POST /api/orders/<pk>/award/` | Confirms an order (`order-confirmation` or `partial-order-confirmation`) — shipment includes `tender_reference` (see above) |
+| `GET /api/invoices/` | Awarded orders and their paid invoices |
+| `GET /api/tracker/` | Trucks grouped by **tender reference** as `{ "ok": true, "groups": [...], "now": "..." }` |
+| `GET /api/agents/tracker/` | Agent-scoped version of `/api/tracker/`, restricted to the agent's linked transporters |
+
+The tracker `groups[]` entries are keyed by the canonical tender reference and contain **all** of that tender's transporter orders and trucks together:
+
+```json
+{
+  "key": "HX-2609-000042",
+  "tender_ref": "HX-2609-000042",
+  "customer": "HYPAX",
+  "route": "Dar es Salaam \u2192 Mwanza",
+  "orders": [
+    {
+      "id": 12,
+      "order_id": 42,
+      "order_name": "S00042",
+      "company_name": "My Company",
+      "cargo_reference": "HX-2609-000042",
+      "state": "confirmed",
+      "awarded_amount": "200.00",
+      "awarded_lines_count": 1,
+      "total_lines_count": 1,
+      "fully_confirmed": true,
+      "partially_confirmed": false
+    }
+  ],
+  "origin":     { "name": "Dar es Salaam", "lat": -6.8, "lng": 39.2 },
+  "destination": { "name": "Mwanza", "lat": -2.5, "lng": 32.9 },
+  "distance_km": 850.0,
+  "trucks": [
+    { "label": "HX-2609-000042 \u00b7 T1", "lat": -6.2, "lng": 34.3,
+      "status": "En route", "progress": 0.42 }
+  ]
+}
+```
 
 ## Getting started
 
