@@ -1,4 +1,5 @@
 import random
+import re
 import string
 
 from django.conf import settings
@@ -203,7 +204,7 @@ class ApiSetting(models.Model):
         S3 = 's3', 'Option B - S3 object storage'
 
     class MapProvider(models.TextChoices):
-        CARTO = 'carto', 'CARTO (free, no key)'
+        CARTO = 'carto', 'CARTO (free with API key)'
         MAPTILER = 'maptiler', 'MapTiler'
         STADIA = 'stadia', 'Stadia Maps'
         THUNDERFOREST = 'thunderforest', 'Thunderforest'
@@ -268,7 +269,7 @@ class ApiSetting(models.Model):
     MAP_DEFAULT_MAX_ZOOM = 18
 
     MAP_PROVIDER_URLS = {
-        'carto': 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+        'carto': 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key={APIKEY}',
         'maptiler': 'https://api.maptiler.com/maps/streets/{z}/{x}/{y}.png?key={APIKEY}',
         'stadia': 'https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png?api_key={APIKEY}',
         'thunderforest': 'https://tile.thunderforest.com/transport/{z}/{x}/{y}.png?apikey={APIKEY}',
@@ -295,7 +296,7 @@ class ApiSetting(models.Model):
         'custom': '',
     }
 
-    MAP_PROVIDERS_NEEDING_KEY = ('maptiler', 'stadia', 'thunderforest')
+    MAP_PROVIDERS_NEEDING_KEY = ('carto', 'maptiler', 'stadia', 'thunderforest')
 
     map_provider = models.CharField(
         max_length=20,
@@ -305,7 +306,8 @@ class ApiSetting(models.Model):
     )
     map_api_key = models.CharField(
         max_length=300, blank=True,
-        help_text='API key for the chosen provider (MapTiler, Stadia, Thunderforest). Not needed for CARTO.',
+        help_text='API key for the chosen provider (CARTO, MapTiler, Stadia, Thunderforest). '
+                  'CARTO keys are free at carto.com/basemaps/apikey.',
     )
     map_tile_url = models.CharField(
         max_length=500, blank=True,
@@ -325,7 +327,14 @@ class ApiSetting(models.Model):
         raw = self.map_tile_url.strip() or self.MAP_PROVIDER_URLS.get(self.map_provider, '')
         if not raw:
             raw = self.MAP_PROVIDER_URLS['carto']
-        return raw.replace('{APIKEY}', self.map_api_key.strip())
+        key = self.map_api_key.strip()
+        if not key:
+            return re.sub(r'[?&]key=\{APIKEY\}', '', raw).replace('{APIKEY}', '')
+        if '{APIKEY}' in raw:
+            return raw.replace('{APIKEY}', key)
+        if 'key=' in raw:
+            return raw
+        return raw + ('&' if '?' in raw else '?') + 'key=' + key
 
     def map_resolved_attribution(self):
         if self.map_attribution.strip():

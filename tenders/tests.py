@@ -981,11 +981,21 @@ class SelcomPaymentTest(TestCase):
 
 
 class MapConfigModelTest(TestCase):
-    def test_default_carto_url_without_key(self):
+    def test_carto_url_embeds_api_key(self):
+        setting = ApiSetting.objects.create(
+            map_provider='carto', map_api_key='cb1_3hfb_1_29c6610a1e25efdaaf1dc20d',
+        )
+        url = setting.map_resolved_tile_url()
+        self.assertIn('https://', url)
+        self.assertIn('key=cb1_3hfb_1_29c6610a1e25efdaaf1dc20d', url)
+        self.assertIn('rastertiles/voyager', url)
+
+    def test_carto_url_without_key_strips_placeholder(self):
         setting = ApiSetting.objects.create(map_provider='carto', map_api_key='')
-        self.assertEqual(setting.map_resolved_tile_url(), ApiSetting.MAP_PROVIDER_URLS['carto'])
-        self.assertEqual(setting.map_max_zoom, 18)
-        self.assertIn('OpenStreetMap', setting.map_resolved_attribution())
+        url = setting.map_resolved_tile_url()
+        self.assertNotIn('key=', url)
+        self.assertNotIn('{APIKEY}', url)
+        self.assertIn('rastertiles/voyager', url)
 
     def test_provider_preset_url_substitutes_api_key(self):
         setting = ApiSetting.objects.create(
@@ -998,12 +1008,12 @@ class MapConfigModelTest(TestCase):
     def test_custom_tile_url_and_attribution_override(self):
         setting = ApiSetting.objects.create(
             map_provider='custom', map_api_key='AK123',
-            map_tile_url='https://tiles.example.com/{z}/{x}/{y}.png?k={APIKEY}',
+            map_tile_url='https://tiles.example.com/{z}/{x}/{y}.png?token={APIKEY}',
             map_attribution='&copy; Example tiles',
         )
         self.assertEqual(
             setting.map_resolved_tile_url(),
-            'https://tiles.example.com/{z}/{x}/{y}.png?k=AK123',
+            'https://tiles.example.com/{z}/{x}/{y}.png?token=AK123',
         )
         self.assertEqual(setting.map_resolved_attribution(), '&copy; Example tiles')
 

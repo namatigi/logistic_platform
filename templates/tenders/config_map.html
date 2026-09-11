@@ -14,9 +14,9 @@
   <div class="card">
     <div class="card-title">Map provider</div>
     <p class="form-help" style="margin-top:-4px; margin-bottom:16px;">
-      Choose which tile provider powers the tracking and route maps. The free
-      <strong>CARTO</strong> baseline needs no key; the others require your provider&rsquo;s
-      <strong>API key</strong>.
+      Choose which tile provider powers the tracking and route maps. All providers
+      require a free <strong>API key</strong> &mdash; CARTO keys are available instantly
+      at <a href="https://carto.com/basemaps/apikey" target="_blank" rel="noopener">carto.com/basemaps/apikey</a>.
     </p>
 
     <form method="post" novalidate>
@@ -91,9 +91,9 @@
   (function () {
     const PROVIDER_PRESETS = {
       'carto': {
-        url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+        url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key={APIKEY}',
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
-        needsKey: false,
+        needsKey: true,
       },
       'maptiler': {
         url: 'https://api.maptiler.com/maps/streets/{z}/{x}/{y}.png?key={APIKEY}',
