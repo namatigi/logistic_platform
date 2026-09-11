@@ -1,4 +1,39 @@
 import json
+import time
+
+from django.conf import settings
+
+
+class ActivityTrackingMiddleware:
+    """Record when each signed-in user last made a request.
+
+    A Django session stays valid for weeks, so a session existing is not proof
+    the user is still around. This writes a throttled ``last_activity``
+    timestamp into the session; the admin users page only treats sessions
+    active within ``ONLINE_WINDOW_SECONDS`` as online.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+        self._throttle = getattr(settings, 'ACTIVITY_THROTTLE_SECONDS', 60)
+
+    def __call__(self, request):
+        self._touch(request)
+        return self.get_response(request)
+
+    def _touch(self, request):
+        user = getattr(request, 'user', None)
+        session = getattr(request, 'session', None)
+        if session is None or user is None or not getattr(user, 'is_authenticated', False):
+            return
+        now = time.time()
+        last = session.get('last_activity')
+        try:
+            if last is not None and now - float(last) < self._throttle:
+                return
+        except (TypeError, ValueError):
+            pass
+        session['last_activity'] = now
 
 
 class ApiDiagnosticMiddleware:

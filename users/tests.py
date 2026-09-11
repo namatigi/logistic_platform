@@ -5,6 +5,7 @@ from unittest.mock import patch
 from PIL import Image
 from django.contrib.auth.models import Group
 from django.contrib.gis.geos import Point
+from django.contrib.sessions.backends.db import SessionStore
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core import mail
 from django.test import TestCase
@@ -12,6 +13,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from tenders.models import Invoice, Order, OrderLine, Tender, Town, Transporter, Truck, TruckModel
+from tenders.views import _online_user_ids
 from .models import Address, CustomUser, Profile
 
 
@@ -944,3 +946,35 @@ class LoginCsrfCookieTest(TestCase):
         data = response.json()
         self.assertTrue(data['ok'])
         self.assertEqual(data['redirect'], reverse('tenders:dashboard'))
+
+
+class OnlinePresenceTest(TestCase):
+    """Presence is driven by recent session activity, not unexpired sessions."""
+
+    def setUp(self):
+        self.user = CustomUser.objects.create_user(email='presence@example.com', password='pass1234')
+
+    def _session(self, last_activity):
+        session = SessionStore()
+        session['_auth_user_id'] = str(self.user.pk)
+        if last_activity is not None:
+            session['last_activity'] = last_activity
+        session.create()
+        return session
+
+    def test_recent_activity_is_online(self):
+        self._session(timezone.now().timestamp())
+        self.assertIn(self.user.pk, _online_user_ids())
+
+    def test_idle_unexpired_session_is_offline(self):
+        self._session(timezone.now().timestamp() - 3600)
+        self.assertNotIn(self.user.pk, _online_user_ids())
+
+    def test_session_without_activity_is_offline(self):
+        self._session(None)
+        self.assertNotIn(self.user.pk, _online_user_ids())
+
+    def test_authenticated_request_records_activity(self):
+        self.client.login(email='presence@example.com', password='pass1234')
+        self.client.get(reverse('tenders:dashboard'))
+        self.assertIn('last_activity', self.client.session)

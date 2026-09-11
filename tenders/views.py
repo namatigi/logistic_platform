@@ -2159,7 +2159,15 @@ def api_admin_escrow(request):
 # ---------------------------------------------------------------------------
 
 def _online_user_ids():
+    """User IDs with a session that has been active recently.
+
+    A live session is one whose ``last_activity`` (written by
+    ``ActivityTrackingMiddleware``) falls within ``ONLINE_WINDOW_SECONDS``.
+    Sessions that are merely unexpired but idle are treated as offline.
+    """
     from django.contrib.sessions.models import Session
+    window = getattr(settings, 'ONLINE_WINDOW_SECONDS', 300)
+    cutoff = timezone.now().timestamp() - window
     ids = set()
     now = timezone.now()
     for session in Session.objects.filter(expire_date__gt=now).only('session_data'):
@@ -2170,7 +2178,12 @@ def _online_user_ids():
         uid = data.get('_auth_user_id')
         if not uid:
             continue
+        last_activity = data.get('last_activity')
+        if last_activity is None:
+            continue
         try:
+            if float(last_activity) < cutoff:
+                continue
             ids.add(int(uid))
         except (TypeError, ValueError):
             continue
@@ -2215,7 +2228,7 @@ def api_admin_users(request):
     ]
     return JsonResponse({
         'ok': True,
-        'online_count': len(online_ids),
+        'online_count': sum(1 for user in users if user['is_online']),
         'total_count': len(users),
         'users': users,
     })

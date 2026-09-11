@@ -227,7 +227,7 @@ def api_admin_dashboard(request):
         'ok': True,
         'transporters': [_transporter_dict(t) for t in transporters],
         'agents': [_agent_dict(a) for a in agents],
-        'online_count': len(online_ids),
+        'online_count': len(online_users),
         'total_users': CustomUser.objects.count(),
         'online_users': online_users,
         'offline_users': offline_users,

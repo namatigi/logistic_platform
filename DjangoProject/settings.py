@@ -80,10 +80,17 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'DjangoProject.middleware.ActivityTrackingMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'DjangoProject.middleware.ApiDiagnosticMiddleware',
 ]
+
+# Presence: a signed-in user counts as online while they keep making requests.
+# Their session records a throttled `last_activity` timestamp; the admin users
+# page only shows sessions active within ONLINE_WINDOW_SECONDS.
+ONLINE_WINDOW_SECONDS = 300
+ACTIVITY_THROTTLE_SECONDS = 60
 
 ROOT_URLCONF = 'DjangoProject.urls'
 
