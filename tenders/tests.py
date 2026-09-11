@@ -1715,12 +1715,13 @@ class TenderBroadcastTest(TestCase):
             response = self._post_tender()
         self.assertTrue(response.json()['ok'])
         self.assertIn('1 of 2', response.json()['message'])
-        self.assertNotIn('queued', response.json())
+        self.assertTrue(response.json()['queued'])
         tender = Tender.objects.get(customer='TransCo')
         self.assertEqual(tender.status, Tender.Status.SUCCESS)
         self.assertEqual(tender.cargo_reference, 'CAR0009')
         self.assertTrue(tender.submissions.filter(odoo_company=up, success=True).exists())
         self.assertTrue(tender.submissions.filter(odoo_company__name='Down', success=False).exists())
+        self.assertEqual(tender.pending_pushes.filter(state='pending').count(), 1)
 
     def test_tender_not_submitted_without_configured_transport_company(self):
         # A shared platform ApiSetting row is NOT a tender target.
@@ -1862,6 +1863,102 @@ class PendingPushTest(TestCase):
         self.assertEqual(m.call_count, 2)
         queued.refresh_from_db()
         self.assertEqual(queued.state, self.pending_model.State.DELIVERED)
+
+    def _second_transporter(self, name='Queue Transporter 2'):
+        return OdooCompany.objects.create(
+            name=name, base_url='https://queue2.example.com/', auth_type='bearer',
+        )
+
+    def test_partial_transient_failure_is_queued(self):
+        """A tender accepted by one company but unreachable for another is still queued."""
+        self._second_transporter()
+
+        def send(setting, tender):
+            if setting.pk == self.odoo.pk:
+                return (200, '{"status":"success","data":{"id":1,"name":"CAR0001"}}', True)
+            return (None, '[Errno 111] Connection refused', False)
+
+        with patch('tenders.views.submit_tender', side_effect=send):
+            response = self._post_tender()
+        data = response.json()
+        self.assertTrue(data['queued'])
+        push = self.pending_model.objects.get()
+        self.assertEqual(push.state, self.pending_model.State.PENDING)
+        self.assertEqual(push.tender.submissions.filter(success=True).count(), 1)
+
+    def test_flush_retries_only_undelivered_targets(self):
+        second = self._second_transporter()
+
+        def send_down(setting, tender):
+            if setting.pk == self.odoo.pk:
+                return (200, '{"status":"success","data":{"id":1,"name":"CAR0001"}}', True)
+            return (None, '[Errno 111] Connection refused', False)
+
+        with patch('tenders.views.submit_tender', side_effect=send_down):
+            self._post_tender()
+        push = self.pending_model.objects.get()
+
+        calls = []
+
+        def send_up(setting, tender):
+            calls.append(setting.pk)
+            return (200, '{"status":"success","data":{"id":2,"name":"CAR0002"}}', True)
+
+        with patch('tenders.views.submit_tender', side_effect=send_up):
+            delivered, failed, skipped = tenders_views.flush_pending_pushes()
+        self.assertEqual((delivered, failed, skipped), (1, 0, 0))
+        self.assertEqual(calls, [second.pk])
+        push.refresh_from_db()
+        self.assertEqual(push.state, self.pending_model.State.DELIVERED)
+
+    def test_flush_stays_pending_until_every_target_delivered(self):
+        second = self._second_transporter()
+        third = self._second_transporter(name='Queue Transporter 3')
+        with patch('tenders.views.submit_tender', return_value=(None, '[Errno 111] Connection refused', False)):
+            self._post_tender()
+        push = self.pending_model.objects.get()
+
+        def send_partial(setting, tender):
+            if setting.pk == self.odoo.pk:
+                return (200, '{"status":"success","data":{"id":1,"name":"CAR0001"}}', True)
+            return (None, '[Errno 111] Connection refused', False)
+
+        with patch('tenders.views.submit_tender', side_effect=send_partial):
+            delivered, failed, skipped = tenders_views.flush_pending_pushes()
+        self.assertEqual((delivered, failed, skipped), (0, 0, 0))
+        push.refresh_from_db()
+        self.assertEqual(push.state, self.pending_model.State.PENDING)
+
+        with patch('tenders.views.submit_tender', return_value=(200, '{"status":"success","data":{"id":2,"name":"CAR0002"}}', True)):
+            delivered, failed, skipped = tenders_views.flush_pending_pushes()
+        self.assertEqual((delivered, failed, skipped), (1, 0, 0))
+        push.refresh_from_db()
+        self.assertEqual(push.state, self.pending_model.State.DELIVERED)
+        self.assertTrue(push.tender.submissions.filter(odoo_company=second, success=True).exists())
+        self.assertTrue(push.tender.submissions.filter(odoo_company=third, success=True).exists())
+
+    def test_permanently_rejected_target_is_not_retried(self):
+        second = self._second_transporter()
+
+        def send_mixed(setting, tender):
+            if setting.pk == self.odoo.pk:
+                return (400, '{"message":"bad"}', False)
+            return (None, '[Errno 111] Connection refused', False)
+
+        with patch('tenders.views.submit_tender', side_effect=send_mixed):
+            self._post_tender()
+        self.pending_model.objects.get()
+
+        calls = []
+
+        def send_up(setting, tender):
+            calls.append(setting.pk)
+            return (200, '{"status":"success","data":{"id":2,"name":"CAR0002"}}', True)
+
+        with patch('tenders.views.submit_tender', side_effect=send_up):
+            delivered, failed, skipped = tenders_views.flush_pending_pushes()
+        self.assertEqual((delivered, failed, skipped), (1, 0, 0))
+        self.assertEqual(calls, [second.pk])
 
     def test_admin_page_shows_pending_and_retries(self):
         self._enqueue()

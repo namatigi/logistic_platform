@@ -432,6 +432,19 @@ def _submit_tender_to_targets(tender, targets=None):
     }
 
 
+def _has_transient_failure(tender):
+    """True when any target failed with a connection error or 5xx.
+
+    Such a failure is worth retrying, even when another target already accepted
+    the tender (or permanently rejected it with a 4xx).
+    """
+    return any(
+        not submission.success
+        and (submission.status_code is None or submission.status_code >= 500)
+        for submission in tender.submissions.all()
+    )
+
+
 def _enqueue_tender(tender, error_message):
     """Queue a failed tender submission so it is re-sent when the API is back up."""
     existing = PendingPush.objects.filter(
@@ -445,26 +458,38 @@ def _enqueue_tender(tender, error_message):
 def _deliver_push(push, targets):
     """Attempt one delivery of a queued tender to the given transport companies.
 
-    Returns True when delivered (at least one target accepted it), False otherwise.
-    Marks the push FAILED when every target permanently rejected it (4xx).
+    The push is only resolved once every target has either accepted the tender or
+    permanently rejected it (4xx). Returns True when the tender has been delivered
+    to at least one target, False otherwise. While any target is still unreachable
+    (connection error / 5xx) the push stays PENDING and is retried later.
     """
     push.attempts += 1
     push.last_attempt_at = timezone.now()
-    succeeded = permanent = 0
+    transient = 0
     last_error = ''
+    last_code = None
     for company in targets:
         status_code, body, _ok = submit_tender(company, push.tender)
         _record_submission(push.tender, company, status_code, body)
         if _response_ok(status_code, body):
-            succeeded += 1
-            push.response_code = status_code
+            last_code = status_code
         elif status_code is not None and status_code < 500:
-            permanent += 1
+            last_code = status_code
         else:
+            transient += 1
+            last_code = status_code
             last_error = _submit_failure_message('Tender submission', status_code, body)
     _apply_aggregate_tender(push.tender)
+    if last_code is not None:
+        push.response_code = last_code
 
-    if succeeded:
+    if transient:
+        # Some targets are still unreachable — keep the push queued.
+        push.last_error = last_error or push.last_error
+        push.save()
+        return False
+
+    if push.tender.submissions.filter(success=True).exists():
         push.state = PendingPush.State.DELIVERED
         push.last_error = ''
         push.delivered_at = timezone.now()
@@ -472,18 +497,14 @@ def _deliver_push(push, targets):
         _flush_derived_caches()
         return True
 
-    if permanent and permanent == len(targets):
-        push.state = PendingPush.State.FAILED
-        push.last_error = last_error or _submit_failure_message('Tender submission', push.response_code, '')
-        _record_diagnostic(
-            None, 'tender.relay', push.last_error, status_code=push.response_code, method='POST',
-            path=targets[0].endpoint_url() if targets else '',
-            detail={'tender_id': push.tender_id, 'pending_push': push.pk},
-        )
-        push.save()
-        return False
-
-    push.last_error = last_error or push.last_error
+    # Every target permanently rejected it.
+    push.state = PendingPush.State.FAILED
+    push.last_error = last_error or _submit_failure_message('Tender submission', push.response_code, '')
+    _record_diagnostic(
+        None, 'tender.relay', push.last_error, status_code=push.response_code, method='POST',
+        path=targets[0].endpoint_url() if targets else '',
+        detail={'tender_id': push.tender_id, 'pending_push': push.pk},
+    )
     push.save()
     return False
 
@@ -500,6 +521,21 @@ def _response_ok(status_code, body):
     return is_ok
 
 
+def _undelivered_targets(tender, targets):
+    """Targets that have neither accepted the tender nor permanently rejected it."""
+    undelivered = []
+    for company in targets:
+        submissions = tender.submissions.filter(odoo_company=company)
+        if submissions.filter(success=True).exists():
+            continue
+        latest = submissions.order_by('-created_at').first()
+        if latest is not None and latest.status_code is not None and latest.status_code < 500:
+            # Permanently rejected on the latest attempt; retrying will not help.
+            continue
+        undelivered.append(company)
+    return undelivered
+
+
 def flush_pending_pushes(user=None):
     """Re-send queued tender submissions. Returns (delivered, permanently_failed, skipped)."""
     delivered = failed = skipped = 0
@@ -513,16 +549,18 @@ def flush_pending_pushes(user=None):
         if not targets:
             skipped += 1
             continue
-        pending_targets = [
-            t for t in targets
-            if not push.tender.submissions.filter(odoo_company=t, success=True).exists()
-        ]
+        pending_targets = _undelivered_targets(push.tender, targets)
         if not pending_targets:
-            # Everything was already delivered.
-            push.state = PendingPush.State.DELIVERED
-            push.delivered_at = timezone.now()
-            push.save()
-            delivered += 1
+            # Every target already accepted or permanently rejected the tender.
+            if push.tender.submissions.filter(success=True).exists():
+                push.state = PendingPush.State.DELIVERED
+                push.delivered_at = timezone.now()
+                push.save()
+                delivered += 1
+            else:
+                push.state = PendingPush.State.FAILED
+                push.save()
+                failed += 1
             continue
         with transaction.atomic():
             if _deliver_push(push, pending_targets):
@@ -830,7 +868,7 @@ class TenderCreate(TenderCreatorRequiredMixin, LoginRequiredMixin, CreateView):
         else:
             message = f'Tender could not be sent to any transport company (0 of {total}).'
             messages.error(self.request, message)
-            if all(s.status_code is None or s.status_code >= 500 for s in tender.submissions.all()):
+            if _has_transient_failure(tender):
                 _enqueue_tender(tender, message)
         return redirect('tenders:list')
 
@@ -1306,13 +1344,14 @@ def api_tender_create(request):
                 path=sub.odoo_company.endpoint_url(),
                 detail={'response': sub.response_body, 'transport_company': sub.odoo_company_id},
             )
-        if all(s.status_code is None or s.status_code >= 500 for s in tender.submissions.all()):
-            _enqueue_tender(tender, result['message'])
-            result['queued'] = True
-            result['message'] += (
-                ' The submission has been queued and will be sent automatically when the '
-                'Odoo instance is reachable again.'
-            )
+
+    if _has_transient_failure(tender):
+        _enqueue_tender(tender, result['message'])
+        result['queued'] = True
+        result['message'] += (
+            ' The submission has been queued and will be sent automatically when the '
+            'Odoo instance is reachable again.'
+        )
     return JsonResponse(result)
 
 
