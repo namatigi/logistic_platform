@@ -1589,3 +1589,24 @@ html[data-theme='dark'] .users-summary {
 html[data-theme='dark'] .webhook-box {
   background: #0f172a;
 }
+
+/* ---------- Payment callback card ---------- */
+.callback-card {
+  border-color: #bbf7d0;
+  background: #f7fef8;
+}
+
+.callback-text {
+  color: #475569;
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+
+html[data-theme='dark'] .callback-card {
+  border-color: #166534;
+  background: #052e16;
+}
+
+html[data-theme='dark'] .callback-text {
+  color: #bbf7d0;
+}
