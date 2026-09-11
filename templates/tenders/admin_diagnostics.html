@@ -113,10 +113,29 @@
                     v-html="highlight(e, search)"></button>
           </div>
         </div>
-        <select v-model="apiPoint">
-          <option value="">All API points</option>
-          <option v-for="p in apiPoints" v-bind:key="p" v-bind:value="p">{{ p }}</option>
-        </select>
+        <div class="search-box search-box-point">
+          <svg class="search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+            <line x1="1" y1="8" x2="15" y2="8"></line>
+            <path d="M11 4 L15 8 L11 12"></path>
+          </svg>
+          <input type="text" v-model="apiPoint" class="search-input"
+                 placeholder="All API points"
+                 autocomplete="off"
+                 @focus="apiComboOpen = true"
+                 @input="apiComboOpen = true; apiComboHighlight = 0"
+                 @blur="apiComboClose"
+                 @keydown.down.prevent="apiComboMove(1)"
+                 @keydown.up.prevent="apiComboMove(-1)"
+                 @keydown.enter.prevent="apiComboEnter">
+          <button v-if="apiPoint" type="button" class="search-clear" @mousedown.prevent="clearApiPoint()" aria-label="Clear API point filter">&times;</button>
+          <div class="searchable-options" v-if="apiComboOpen && filteredApiPoints.length" style="position:absolute; z-index:30;">
+            <button type="button" v-for="(p, i) in filteredApiPoints" :key="p"
+                    class="searchable-option"
+                    :class="{ highlighted: apiComboHighlight === i }"
+                    @mousedown.prevent="apiComboPick(i)"
+                    v-html="highlight(p, apiPoint)"></button>
+          </div>
+        </div>
         <button class="btn" @click="load()">Refresh</button>
       </div>
     </div>
@@ -196,7 +215,8 @@
           diagnostics: [], apiPoints: [], emails: [], search: '', apiPoint: '', page: 1,
           total: 0, pages: 1, hasNext: false, hasPrev: false, todayCount: 0,
           error: '', loaded: false, timer: null,
-          comboOpen: false, comboHighlight: 0
+          comboOpen: false, comboHighlight: 0,
+          apiComboOpen: false, apiComboHighlight: 0
         };
       },
       computed: {
@@ -207,10 +227,19 @@
             list = list.filter(function (e) { return e.toLowerCase().indexOf(q) >= 0; });
           }
           return list.slice(0, 20);
+        },
+        filteredApiPoints: function () {
+          var q = (this.apiPoint || '').trim().toLowerCase();
+          var list = this.apiPoints;
+          if (q) {
+            list = list.filter(function (p) { return p.toLowerCase().indexOf(q) >= 0; });
+          }
+          return list.slice(0, 20);
         }
       },
       created: function () {
         this._searchTimer = null;
+        this._apiTimer = null;
         this.load();
         this.timer = setInterval(this.load, 30000);
       },
@@ -222,11 +251,20 @@
             self.page = 1;
             self.load();
           }, 400);
+        },
+        apiPoint: function () {
+          var self = this;
+          clearTimeout(this._apiTimer);
+          this._apiTimer = setTimeout(function () {
+            self.page = 1;
+            self.load();
+          }, 400);
         }
       },
       beforeUnmount: function () {
         if (this.timer) { clearInterval(this.timer); }
         if (this._searchTimer) { clearTimeout(this._searchTimer); }
+        if (this._apiTimer) { clearTimeout(this._apiTimer); }
       },
       methods: {
         fmtDate: function (v) { return HY.fmtDate(v); },
@@ -275,6 +313,51 @@
           var self = this;
           setTimeout(function () {
             self.comboOpen = false;
+          }, 120);
+        },
+        clearApiPoint: function () {
+          var self = this;
+          this.apiPoint = '';
+          this.apiComboOpen = false;
+          this.apiComboHighlight = 0;
+          clearTimeout(self._apiTimer);
+          self.page = 1;
+          self.load();
+        },
+        apiComboMove: function (dir) {
+          var list = this.filteredApiPoints;
+          if (!list.length) return;
+          var next = this.apiComboHighlight + dir;
+          if (next < 0) next = list.length - 1;
+          if (next >= list.length) next = 0;
+          this.apiComboHighlight = next;
+        },
+        apiComboPick: function (i) {
+          var point = this.filteredApiPoints[i];
+          if (!point) return;
+          var self = this;
+          this.apiPoint = point;
+          this.apiComboOpen = false;
+          this.apiComboHighlight = 0;
+          clearTimeout(self._apiTimer);
+          self.page = 1;
+          self.load();
+        },
+        apiComboEnter: function () {
+          var self = this;
+          if (this.apiComboOpen && this.filteredApiPoints.length) {
+            this.apiComboPick(this.apiComboHighlight);
+          } else {
+            this.apiComboOpen = false;
+            clearTimeout(self._apiTimer);
+            self.page = 1;
+            self.load();
+          }
+        },
+        apiComboClose: function () {
+          var self = this;
+          setTimeout(function () {
+            self.apiComboOpen = false;
           }, 120);
         },
         highlight: function (label, q) {
