@@ -59,7 +59,7 @@
         <li class="{% if request.resolver_match.url_name == 'agent_transporters' %}active{% endif %}">
           <a href="{% url 'users:agent_transporters' %}">My Transporters</a>
         </li>
-        <li class="{% if request.resolver_match.url_name in 'agent_trucks agent_truck_track' %}active{% endif %}">
+        <li class="{% if request.resolver_match.url_name == 'agent_trucks' or request.resolver_match.url_name == 'agent_truck_track' %}active{% endif %}">
           <a href="{% url 'users:agent_trucks' %}">My Trucks</a>
         </li>
         <li class="{% if request.resolver_match.url_name == 'agent_tracker' %}active{% endif %}">
@@ -71,10 +71,10 @@
         <li class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
           <a href="{% url 'tenders:dashboard' %}">Dashboard</a>
         </li>
-        <li class="{% if request.resolver_match.url_name in 'list create' %}active{% endif %}">
+        <li class="{% if request.resolver_match.url_name == 'list' or request.resolver_match.url_name == 'create' %}active{% endif %}">
           <a href="{% url 'tenders:list' %}">Tenders</a>
         </li>
-        <li class="{% if request.resolver_match.url_name in 'order_list order_detail' %}active{% endif %}">
+        <li class="{% if request.resolver_match.url_name == 'order_list' or request.resolver_match.url_name == 'order_detail' %}active{% endif %}">
           <a href="{% url 'tenders:order_list' %}">Orders</a>
         </li>
         <li class="{% if request.resolver_match.url_name == 'invoices' %}active{% endif %}">
@@ -92,7 +92,7 @@
           <a href="{% url 'tenders:tracker' %}">Tracker</a>
         </li>
         {% if user.role == 'administrator' %}
-        <li class="nav-dropdown {% if request.resolver_match.url_name in 'config_odoo config_selcom config_email config_media' %}active{% endif %}">
+        <li class="nav-dropdown {% if request.resolver_match.url_name == 'config_odoo' or request.resolver_match.url_name == 'config_selcom' or request.resolver_match.url_name == 'config_email' or request.resolver_match.url_name == 'config_media' %}active{% endif %}">
           <a href="{% url 'tenders:config_odoo' %}" class="nav-dropdown-toggle">Configuration</a>
           <ul class="nav-dropdown-menu">
             <li class="{% if request.resolver_match.url_name == 'config_odoo' %}active{% endif %}">

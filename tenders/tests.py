@@ -2014,3 +2014,27 @@ class PendingPushTest(TestCase):
         second.refresh_from_db()
         self.assertEqual(first.state, self.pending_model.State.DELIVERED)
         self.assertEqual(second.state, self.pending_model.State.PENDING)
+
+
+class NavActiveStateTest(TestCase):
+    """Only the matching nav link is highlighted (no substring false-positives)."""
+
+    def setUp(self):
+        self.user = CustomUser.objects.create_user(email='nav@example.com', password='pass1234')
+        self.client.login(email='nav@example.com', password='pass1234')
+
+    def _active(self, response, href, label):
+        self.assertContains(response, f'<li class="active">\n          <a href="{href}">{label}</a>')
+
+    def _not_active(self, response, href, label):
+        self.assertNotContains(response, f'<li class="active">\n          <a href="{href}">{label}</a>')
+
+    def test_tenders_active_not_orders(self):
+        response = self.client.get(reverse('tenders:list'))
+        self._active(response, reverse('tenders:list'), 'Tenders')
+        self._not_active(response, reverse('tenders:order_list'), 'Orders')
+
+    def test_orders_active_not_tenders(self):
+        response = self.client.get(reverse('tenders:order_list'))
+        self._active(response, reverse('tenders:order_list'), 'Orders')
+        self._not_active(response, reverse('tenders:list'), 'Tenders')
