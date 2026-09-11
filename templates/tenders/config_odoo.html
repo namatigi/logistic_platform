@@ -41,10 +41,9 @@
                 </td>
                 <td style="max-width:220px; word-break:break-all;">{{ company.base_url|default:'-' }}</td>
                 <td>
-                  <div style="display:flex; gap:6px; align-items:stretch;">
-                    <input id="webhook-{{ company.id }}" type="text" readonly value="{{ company.webhook_url }}"
-                      style="flex:1; background:#f8fafc; color:#334155; font-size:12px;" title="{{ company.webhook_url }}">
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="copyToClipboard('webhook-{{ company.id }}')">Copy</button>
+                  <div class="webhook-box">
+                    <input id="webhook-{{ company.id }}" class="webhook-url" type="text" readonly value="{{ company.webhook_url }}" title="{{ company.webhook_url }}">
+                    <button type="button" class="btn-copy" onclick="copyToClipboard('webhook-{{ company.id }}')">Copy</button>
                   </div>
                 </td>
                 <td>{{ company.orders_count }}</td>

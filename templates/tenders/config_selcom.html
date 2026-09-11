@@ -98,9 +98,9 @@
     </p>
     <div class="form-row" style="margin-bottom:10px;">
       <label>Callback URL</label>
-      <div style="display:flex; gap:8px; align-items:stretch;">
-        <input id="selcom-callback-url" type="text" readonly value="{{ selcom_webhook_url }}" style="flex:1; background:#f8fafc; color:#334155;">
-        <button type="button" class="btn btn-secondary" onclick="copyToClipboard('selcom-callback-url')">Copy</button>
+      <div class="webhook-box">
+        <input id="selcom-callback-url" class="webhook-url" type="text" readonly value="{{ selcom_webhook_url }}">
+        <button type="button" class="btn-copy" onclick="copyToClipboard('selcom-callback-url')">Copy</button>
       </div>
     </div>
   </div>

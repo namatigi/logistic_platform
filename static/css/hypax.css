@@ -1531,3 +1531,61 @@ html[data-theme='dark'] .users-summary {
 .payterm-items li:last-child {
   border-bottom: 0;
 }
+
+/* ---------- Webhook URL box ---------- */
+.webhook-box {
+  display: flex;
+  align-items: stretch;
+  min-width: 240px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  overflow: hidden;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.webhook-box:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.15);
+}
+
+.webhook-box .webhook-url {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 10px 18px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  color: var(--text);
+  text-overflow: ellipsis;
+}
+
+.webhook-box .webhook-url:focus {
+  outline: none;
+}
+
+.webhook-box .btn-copy {
+  flex-shrink: 0;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  padding: 0 20px;
+  background: var(--card);
+  color: var(--brand);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+
+.webhook-box .btn-copy:hover {
+  background: var(--brand);
+  color: #fff;
+}
+
+html[data-theme='dark'] .webhook-box {
+  background: #0f172a;
+}
