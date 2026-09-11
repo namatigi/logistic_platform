@@ -36,7 +36,7 @@
       </div>
 
       <div class="terms-builder">
-        <div style="font-size:13px; font-weight:700; color:#334155; margin-bottom:8px;">Term details</div>
+        <div style="font-size:13px; font-weight:700; color:var(--text); margin-bottom:8px;">Term details</div>
         <div v-for="(item, idx) in form.items" v-bind:key="idx" class="terms-builder-row">
           <input type="text" v-model.trim="item.text" :placeholder="'Term ' + (idx + 1) + ' e.g. 50% advance on confirmation'">
           <button type="button" class="btn btn-secondary btn-sm" v-if="form.items.length > 1" @click="removeBlank(idx)" title="Remove">&#215;</button>
@@ -65,7 +65,7 @@
               <button type="button" class="btn btn-danger btn-sm" @click="remove(t)">Delete</button>
             </div>
           </div>
-          <div v-if="t.description" style="color:#64748b; font-size:14px; margin-top:4px;">{{ t.description }}</div>
+          <div v-if="t.description" style="color:var(--muted); font-size:14px; margin-top:4px;">{{ t.description }}</div>
 
           <ul class="payterm-items" v-if="t.items.length">
             <li v-for="it in t.items" v-bind:key="it.id">
@@ -79,7 +79,7 @@
                    @keydown.enter.prevent="addItem(t)">
             <button type="button" class="btn btn-secondary btn-sm" @click="addItem(t)">+ Add</button>
           </div>
-          <div style="color:#94a3b8; font-size:12px; margin-top:6px;">Created {{ fmtDate(t.created_at) }}</div>
+          <div style="color:var(--muted); font-size:12px; margin-top:6px;">Created {{ fmtDate(t.created_at) }}</div>
         </div>
       </div>
     </div>
