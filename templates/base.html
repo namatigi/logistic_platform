@@ -92,26 +92,6 @@
           <a href="{% url 'tenders:tracker' %}">Tracker</a>
         </li>
         {% if user.role == 'administrator' %}
-        <li class="nav-dropdown {% if request.resolver_match.url_name == 'config_odoo' or request.resolver_match.url_name == 'config_selcom' or request.resolver_match.url_name == 'config_email' or request.resolver_match.url_name == 'config_media' or request.resolver_match.url_name == 'config_map' %}active{% endif %}">
-          <a href="{% url 'tenders:config_odoo' %}" class="nav-dropdown-toggle">Configuration</a>
-          <ul class="nav-dropdown-menu">
-            <li class="{% if request.resolver_match.url_name == 'config_odoo' %}active{% endif %}">
-              <a href="{% url 'tenders:config_odoo' %}">Odoo</a>
-            </li>
-            <li class="{% if request.resolver_match.url_name == 'config_selcom' %}active{% endif %}">
-              <a href="{% url 'tenders:config_selcom' %}">Selcom</a>
-            </li>
-            <li class="{% if request.resolver_match.url_name == 'config_email' %}active{% endif %}">
-              <a href="{% url 'tenders:config_email' %}">Email</a>
-            </li>
-            <li class="{% if request.resolver_match.url_name == 'config_media' %}active{% endif %}">
-              <a href="{% url 'tenders:config_media' %}">Files</a>
-            </li>
-            <li class="{% if request.resolver_match.url_name == 'config_map' %}active{% endif %}">
-              <a href="{% url 'tenders:config_map' %}">Map</a>
-            </li>
-          </ul>
-        </li>
         <li class="{% if request.resolver_match.url_name == 'admin_dashboard' %}active{% endif %}">
           <a href="{% url 'users:admin_dashboard' %}">Admin</a>
         </li>
@@ -126,17 +106,31 @@
       {% endif %}
 
       <div class="nav-user">
-        <a href="{% url 'users:profile' %}" class="nav-avatar" title="Your profile">
-          {% if user.avatar_picture %}
-            <img src="{{ user.avatar_picture }}" alt="Profile photo">
-          {% else %}
-            <span class="nav-avatar-placeholder">{{ user.avatar_initials }}</span>
-          {% endif %}
-        </a>
-        <form method="post" action="{% url 'users:logout' %}">
-          {% csrf_token %}
-          <button type="submit" class="btn-logout">Logout</button>
-        </form>
+        <div class="nav-user-dropdown" data-user-dropdown>
+          <button type="button" class="nav-avatar" data-dropdown-toggle aria-haspopup="true" aria-expanded="false" title="Account menu">
+            {% if user.avatar_picture %}
+              <img src="{{ user.avatar_picture }}" alt="Profile photo">
+            {% else %}
+              <span class="nav-avatar-placeholder">{{ user.avatar_initials }}</span>
+            {% endif %}
+          </button>
+          <ul class="nav-dropdown-menu user-menu" role="menu">
+            <li class="{% if request.resolver_match.url_name == 'profile' %}active{% endif %}" role="none">
+              <a href="{% url 'users:profile' %}" role="menuitem" tabindex="-1">Profile</a>
+            </li>
+            {% if user.role == 'administrator' %}
+            <li class="{% if request.resolver_match.url_name == 'config_odoo' or request.resolver_match.url_name == 'config_selcom' or request.resolver_match.url_name == 'config_email' or request.resolver_match.url_name == 'config_media' or request.resolver_match.url_name == 'config_map' %}active{% endif %}" role="none">
+              <a href="{% url 'tenders:config_odoo' %}" role="menuitem" tabindex="-1">Configuration</a>
+            </li>
+            {% endif %}
+            <li role="none">
+              <form method="post" action="{% url 'users:logout' %}" class="user-menu-form">
+                {% csrf_token %}
+                <button type="submit" role="menuitem" tabindex="-1">Logout</button>
+              </form>
+            </li>
+          </ul>
+        </div>
       </div>
     </div>
   </nav>
