@@ -181,6 +181,7 @@ class EscrowAccountsTest(TestCase):
         self.assertIn(',', data['transporter'])
         self.assertEqual(data['cargo_reference'], 'CAR9001')
         self.assertEqual(data['status'], 'open')
+        self.assertEqual(data['trucks'], ['Freight'])
 
         invoice_a.status = Invoice.Status.PAID
         invoice_a.save(update_fields=('status',))

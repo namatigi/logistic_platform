@@ -145,7 +145,7 @@
                           <tbody>
                             <tr v-for="line in detail(o).lines" v-bind:key="line.line_id">
                               <td>
-                                {{ line.product_name }}
+                                {{ line.truck_alias }}
                                 <span class="award-flag" v-if="line.awarded">Awarded</span>
                               </td>
                               <td style="text-align:right;">{{ fmtQty(line.quantity) }}</td>

@@ -1,5 +1,6 @@
 import random
 import re
+import secrets
 import string
 
 from django.conf import settings
@@ -615,6 +616,12 @@ class OrderLine(models.Model):
     line_id = models.PositiveBigIntegerField()
     product_id = models.PositiveBigIntegerField(null=True, blank=True)
     product_name = models.CharField(max_length=255)
+    truck_alias = models.CharField(
+        max_length=40,
+        blank=True,
+        default='',
+        help_text='Random alias for the truck number, generated when the order is received.',
+    )
     quantity = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     price_unit = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     commission = models.DecimalField(max_digits=14, decimal_places=2, default=0)
@@ -630,6 +637,12 @@ class OrderLine(models.Model):
 
     def __str__(self):
         return f'{self.product_name} x {self.quantity}'
+
+    @classmethod
+    def make_truck_alias(cls):
+        """Random unique-aligned alias (TRK-<6>), generated when an order is received."""
+        alphabet = string.ascii_uppercase + string.digits
+        return f"TRK-{''.join(secrets.choice(alphabet) for _ in range(6))}"
 
 
 class Invoice(models.Model):

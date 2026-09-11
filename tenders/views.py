@@ -806,6 +806,7 @@ def webhook_orders(request, slug):
         },
     )
 
+    existing_aliases = dict(order.lines.values_list('line_id', 'truck_alias'))
     order.lines.all().delete()
     for line in payload.get('order_lines') or []:
         OrderLine.objects.create(
@@ -813,6 +814,7 @@ def webhook_orders(request, slug):
             line_id=line.get('line_id', 0),
             product_id=line.get('product_id'),
             product_name=line.get('product_name', '') or '',
+            truck_alias=existing_aliases.get(line.get('line_id', 0)) or OrderLine.make_truck_alias(),
             quantity=to_decimal(line.get('quantity')),
             price_unit=to_decimal(line.get('price_unit')),
             commission=to_decimal(line.get('commission')),
@@ -1219,7 +1221,7 @@ def _order_dict(order, include_lines=False):
             {
                 'line_id': line.line_id,
                 'product_id': line.product_id,
-                'product_name': line.product_name,
+                'truck_alias': line.truck_alias or f'TRK-{line.line_id}',
                 'quantity': str(line.quantity),
                 'price_unit': str(line.price_unit),
                 'price_subtotal': str(line.price_subtotal),
@@ -1845,6 +1847,7 @@ def _invoice_lines(order):
 def _invoice_dict(invoice):
     order = invoice.order
     tender = order.tender
+    lines = _invoice_lines(order)
     return {
         'id': invoice.pk,
         'order_pk': order.pk,
@@ -1872,12 +1875,14 @@ def _invoice_dict(invoice):
         'selcom_pay_link': invoice.selcom_pay_link,
         'selcom_status': invoice.selcom_status,
         'selcom_updated_at': invoice.selcom_updated_at.isoformat() if invoice.selcom_updated_at else None,
-        'lines': _invoice_lines(order),
+        'lines': lines,
+        'trucks': [l['product_name'] for l in lines],
     }
 
 
 def _synthetic_invoice_dict(order):
     tender = order.tender
+    lines = _invoice_lines(order)
     awarded_amount = order.awarded_amount
     if awarded_amount is None:
         awarded_amount = order.amount_total or 0
@@ -1908,7 +1913,8 @@ def _synthetic_invoice_dict(order):
         'selcom_pay_link': None,
         'selcom_status': None,
         'selcom_updated_at': None,
-        'lines': _invoice_lines(order),
+        'lines': lines,
+        'trucks': [l['product_name'] for l in lines],
     }
 
 
@@ -1939,6 +1945,11 @@ def _escrow_dict(escrow):
         transporter_names = [order.company_name]
     tender_customer = tender.customer if tender else ''
     pending_tokens = [i.selcom_order_token for i in invoices if i.selcom_order_token]
+    trucks = []
+    for inv in invoices:
+        for line in inv.order.lines.filter(awarded=True).order_by('line_id'):
+            if line.product_name and line.product_name not in trucks:
+                trucks.append(line.product_name)
     return {
         'id': escrow.pk,
         'virtual_account': escrow.virtual_account or '',
@@ -1960,6 +1971,7 @@ def _escrow_dict(escrow):
         'selcom_order_token': pending_tokens[0] if pending_tokens else '',
         'selcom_pay_link': invoices[0].selcom_pay_link if invoices else '',
         'selcom_status': invoices[0].selcom_status if invoices else '',
+        'trucks': trucks,
     }
 
 

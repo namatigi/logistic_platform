@@ -104,7 +104,7 @@
             </thead>
             <tbody>
               <tr v-for="line in order.lines" v-bind:key="line.line_id">
-                <td>{{ line.product_name }}<span class="award-flag" v-if="line.awarded">Awarded</span></td>
+                <td>{{ line.truck_alias }}<span class="award-flag" v-if="line.awarded">Awarded</span></td>
                 <td style="text-align:right;">{{ fmtQty(line.quantity) }}</td>
                 <td style="text-align:right;">{{ fmtQty(line.price_subtotal) }}</td>
                 <td style="text-align:right;"><strong>{{ fmtQty(line.price_total) }}</strong></td>

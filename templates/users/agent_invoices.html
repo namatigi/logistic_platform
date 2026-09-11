@@ -29,6 +29,7 @@
               <th>Transporter</th>
               <th>Order</th>
               <th>Trans ref</th>
+              <th>Trucks</th>
               <th>Route</th>
               <th>Date</th>
               <th>Amount</th>
@@ -42,6 +43,10 @@
               <td>{{ inv.transporter }}</td>
               <td>{{ inv.order_name }}</td>
               <td>{{ inv.cargo_reference || '-' }}</td>
+              <td>
+                <div v-for="t in inv.trucks" v-bind:key="t">{{ t }}</div>
+                <span v-if="!inv.trucks || !inv.trucks.length">-</span>
+              </td>
               <td>{{ inv.route || '-' }}</td>
               <td>{{ fmtDate(inv.created_at) }}</td>
               <td><strong>{{ money(inv.amount_total, inv.currency) }}</strong></td>

@@ -713,6 +713,7 @@ class InvoicesPageTest(TestCase):
         self.assertEqual(inv_data['lines'][0]['price_subtotal'], '100.00')
         self.assertEqual(inv_data['lines'][0]['tax'], '0.00')
         self.assertEqual(inv_data['lines'][0]['price_total'], '100.00')
+        self.assertEqual(inv_data['trucks'], ['Sand'])
 
     def test_invoices_page_renders(self):
         self.client.login(email='invoice-a@example.com', password='pass1234')
@@ -1387,6 +1388,39 @@ class OdooCompanyWebhookTest(TestCase):
         order = Order.objects.get(order_id=90005)
         self.assertEqual(order.tender, tender)
         self.assertEqual(order.cargo_reference, 'HYPAX-000777')
+
+    def test_webhook_aliases_truck_numbers(self):
+        self._tender('REF-AL')
+        url = reverse('tenders:webhook_order_company', kwargs={'slug': self.company_a.slug})
+        response = self.client.post(
+            url, json.dumps(self._payload(90101, 'REF-AL')), content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        line = Order.objects.get(order_id=90101).lines.first()
+        self.assertIsNotNone(line.truck_alias)
+        self.assertRegex(line.truck_alias, r'^TRK-[A-Z0-9]{6}$')
+        self.assertNotEqual(line.truck_alias, line.product_name)
+
+    def test_webhook_preserves_truck_alias_on_repost(self):
+        self._tender('REF-AL')
+        url = reverse('tenders:webhook_order_company', kwargs={'slug': self.company_a.slug})
+        payload = self._payload(90102, 'REF-AL')
+        self.client.post(url, json.dumps(payload), content_type='application/json')
+        first_alias = Order.objects.get(order_id=90102).lines.first().truck_alias
+        self.client.post(url, json.dumps(payload), content_type='application/json')
+        self.assertEqual(Order.objects.get(order_id=90102).lines.first().truck_alias, first_alias)
+
+    def test_order_detail_hides_true_truck_number(self):
+        self._tender('REF-AL')
+        url = reverse('tenders:webhook_order_company', kwargs={'slug': self.company_a.slug})
+        self.client.post(url, json.dumps(self._payload(90103, 'REF-AL')), content_type='application/json')
+        order = Order.objects.get(order_id=90103)
+        self.client.login(email='webhook-owner@example.com', password='pass1234')
+        response = self.client.get(reverse('tenders:api_order_detail', args=[order.pk]))
+        line = response.json()['order']['lines'][0]
+        self.assertIn('truck_alias', line)
+        self.assertNotIn('product_name', line)
+        self.assertEqual(line['truck_alias'], order.lines.first().truck_alias)
 
 
 class OdooCompanyRoutingTest(TestCase):

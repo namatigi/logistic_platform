@@ -27,6 +27,7 @@
               <th>Payment terms</th>
               <th>Created</th>
               <th>Cargo reference</th>
+              <th>Trucks</th>
               <th>Invoice</th>
               <th>Bank</th>
               <th>Deposited</th>
@@ -51,6 +52,10 @@
               </td>
               <td>{{ fmtDate(a.created_at) }}</td>
               <td>{{ a.cargo_reference || '-' }}</td>
+              <td>
+                <div v-for="t in a.trucks" v-bind:key="t">{{ t }}</div>
+                <span v-if="!a.trucks.length">-</span>
+              </td>
               <td>
                 <div v-for="n in a.invoice_numbers" v-bind:key="n">{{ n }}</div>
                 <span v-if="!a.invoice_numbers.length">-</span>
