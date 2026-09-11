@@ -1964,10 +1964,50 @@ class PendingPushTest(TestCase):
         self._enqueue()
         self.client.login(email='queueadmin@example.com', password='pass1234')
         response = self.client.get(reverse('tenders:admin_diagnostic'))
-        self.assertContains(response, 'Pending tender submissions')
+        self.assertContains(response, 'Pending &amp; failed tender submissions')
         with patch('tenders.views.submit_tender',
                    return_value=(200, '{"status":"success","data":{"id":10,"name":"CAR0010"}}', True)):
-            response = self.client.post(reverse('tenders:admin_diagnostic'), {'action': 'retry_pending'})
+            response = self.client.post(reverse('tenders:admin_diagnostic'), {'action': 'force_retry'})
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.pending_model.objects.filter(state=self.pending_model.State.DELIVERED).count(), 1)
         self.assertEqual(self.pending_model.objects.filter(state=self.pending_model.State.PENDING).count(), 0)
+
+    def test_admin_page_lists_failed_pushes(self):
+        push = self._enqueue()
+        push.state = self.pending_model.State.FAILED
+        push.last_error = 'HTTP 400'
+        push.save(update_fields=('state', 'last_error'))
+        self.client.login(email='queueadmin@example.com', password='pass1234')
+        response = self.client.get(reverse('tenders:admin_diagnostic'))
+        self.assertContains(response, '1 failed')
+        self.assertContains(response, 'HTTP 400')
+
+    def test_admin_force_retry_reruns_failed_push(self):
+        push = self._enqueue()
+        push.state = self.pending_model.State.FAILED
+        push.last_error = 'HTTP 400'
+        push.save(update_fields=('state', 'last_error'))
+        self.client.login(email='queueadmin@example.com', password='pass1234')
+        with patch('tenders.views.submit_tender',
+                   return_value=(200, '{"status":"success","data":{"id":11,"name":"CAR0011"}}', True)):
+            response = self.client.post(reverse('tenders:admin_diagnostic'), {'action': 'force_retry'})
+        self.assertEqual(response.status_code, 302)
+        push.refresh_from_db()
+        self.assertEqual(push.state, self.pending_model.State.DELIVERED)
+        self.assertEqual(push.last_error, '')
+
+    def test_admin_retry_single_push(self):
+        first = self._enqueue()
+        second = self._enqueue()
+        self.client.login(email='queueadmin@example.com', password='pass1234')
+        with patch('tenders.views.submit_tender',
+                   return_value=(200, '{"status":"success","data":{"id":12,"name":"CAR0012"}}', True)):
+            response = self.client.post(
+                reverse('tenders:admin_diagnostic'),
+                {'action': 'retry_push', 'push_id': first.pk},
+            )
+        self.assertEqual(response.status_code, 302)
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.state, self.pending_model.State.DELIVERED)
+        self.assertEqual(second.state, self.pending_model.State.PENDING)

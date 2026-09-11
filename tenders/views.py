@@ -536,6 +536,30 @@ def _undelivered_targets(tender, targets):
     return undelivered
 
 
+def _attempt_push(push):
+    """Try to deliver one queued push. Returns (delivered, failed, skipped)."""
+    targets = _available_transporters()
+    if not targets:
+        return 0, 0, 1
+    pending_targets = _undelivered_targets(push.tender, targets)
+    if not pending_targets:
+        # Every target already accepted or permanently rejected the tender.
+        if push.tender.submissions.filter(success=True).exists():
+            push.state = PendingPush.State.DELIVERED
+            push.delivered_at = timezone.now()
+            push.save()
+            return 1, 0, 0
+        push.state = PendingPush.State.FAILED
+        push.save()
+        return 0, 1, 0
+    with transaction.atomic():
+        if _deliver_push(push, pending_targets):
+            return 1, 0, 0
+        if push.state == PendingPush.State.FAILED:
+            return 0, 1, 0
+    return 0, 0, 0
+
+
 def flush_pending_pushes(user=None):
     """Re-send queued tender submissions. Returns (delivered, permanently_failed, skipped)."""
     delivered = failed = skipped = 0
@@ -545,28 +569,36 @@ def flush_pending_pushes(user=None):
     if user is not None:
         queryset = queryset.filter(tender__user=user)
     for push in queryset.order_by('created_at'):
-        targets = _available_transporters()
-        if not targets:
-            skipped += 1
-            continue
-        pending_targets = _undelivered_targets(push.tender, targets)
-        if not pending_targets:
-            # Every target already accepted or permanently rejected the tender.
-            if push.tender.submissions.filter(success=True).exists():
-                push.state = PendingPush.State.DELIVERED
-                push.delivered_at = timezone.now()
-                push.save()
-                delivered += 1
-            else:
-                push.state = PendingPush.State.FAILED
-                push.save()
-                failed += 1
-            continue
-        with transaction.atomic():
-            if _deliver_push(push, pending_targets):
-                delivered += 1
-            elif push.state == PendingPush.State.FAILED:
-                failed += 1
+        attempt_delivered, attempt_failed, attempt_skipped = _attempt_push(push)
+        delivered += attempt_delivered
+        failed += attempt_failed
+        skipped += attempt_skipped
+    return delivered, failed, skipped
+
+
+def force_retry_pushes(push_ids=None, user=None):
+    """Manually force pending and permanently failed pushes to be re-sent now.
+
+    Failed pushes are re-queued first so they are retried even after a 4xx.
+    Returns (delivered, failed_again, skipped).
+    """
+    queryset = PendingPush.objects.select_related('tender', 'tender__user').filter(
+        state__in=(PendingPush.State.PENDING, PendingPush.State.FAILED),
+    )
+    if push_ids is not None:
+        queryset = queryset.filter(pk__in=push_ids)
+    if user is not None:
+        queryset = queryset.filter(tender__user=user)
+    delivered = failed = skipped = 0
+    for push in queryset.order_by('created_at'):
+        if push.state == PendingPush.State.FAILED:
+            push.state = PendingPush.State.PENDING
+            push.last_error = ''
+            push.save(update_fields=('state', 'last_error'))
+        attempt_delivered, attempt_failed, attempt_skipped = _attempt_push(push)
+        delivered += attempt_delivered
+        failed += attempt_failed
+        skipped += attempt_skipped
     return delivered, failed, skipped
 
 
@@ -2196,19 +2228,30 @@ def api_admin_users(request):
 @login_required
 @_admin_required
 def admin_diagnostic(request):
-    if request.method == 'POST' and request.POST.get('action') == 'retry_pending':
-        delivered, failed, skipped = flush_pending_pushes()
+    if request.method == 'POST':
+        action = request.POST.get('action')
+        push_ids = None
+        if action == 'retry_push':
+            try:
+                push_ids = [int(request.POST.get('push_id'))]
+            except (TypeError, ValueError):
+                messages.error(request, 'That submission could not be found.')
+                return redirect('tenders:admin_diagnostic')
+        delivered, failed, skipped = force_retry_pushes(push_ids=push_ids)
         messages.success(
             request,
-            f'Re-sent {delivered} queued submission(s), {failed} permanently failed, {skipped} skipped '
+            f'Re-sent {delivered} submission(s), {failed} failed again, {skipped} skipped '
             '(no base URL configured).',
         )
         return redirect('tenders:admin_diagnostic')
-    pending_pushes = PendingPush.objects.select_related('tender').filter(state=PendingPush.State.PENDING)
+    pushes = PendingPush.objects.select_related('tender', 'tender__user').filter(
+        state__in=(PendingPush.State.PENDING, PendingPush.State.FAILED),
+    ).order_by('-created_at')
     return render(request, 'tenders/admin_diagnostics.html', {
         'active_tab': 'diagnostics',
-        'pending_pushes': pending_pushes,
-        'pending_count': pending_pushes.count(),
+        'pending_pushes': pushes,
+        'pending_count': pushes.filter(state=PendingPush.State.PENDING).count(),
+        'failed_count': pushes.filter(state=PendingPush.State.FAILED).count(),
     })
 
 
