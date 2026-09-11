@@ -45,6 +45,7 @@ from .models import (
     PaymentTerm,
     PendingPush,
     Tender,
+    TenderSubmission,
     Town,
     Transporter,
     generate_transporter_alias,
@@ -106,31 +107,20 @@ def _order_endpoint(order):
 
 
 def _available_transporters():
-    return [c for c in OdooCompany.objects.filter(is_active=True) if c.base_url]
-
-
-def _resolve_transporter(choice=None):
-    """Resolve the transport company (Odoo instance) a tender is submitted to.
+    """Transport companies (Odoo instances) with a configured base URL.
 
     Registering a company on the Companies page adds a *customer* company (who we
-    ship cargo for) — it has no transporter link. Tenders always go to an Odoo
-    company (transport company): the explicitly chosen one, or, when exactly one
-    active transport company with a base URL is configured (e.g. "LAKE TRANS"),
-    that one automatically. Returns None when the target is ambiguous/missing.
+    ship cargo for) — it has no transporter link. Every tender is therefore sent to
+    ALL configured transport companies.
     """
-    if choice is not None:
-        company = choice if isinstance(choice, OdooCompany) else OdooCompany.objects.filter(pk=choice, is_active=True).first()
-        if company is not None and company.base_url:
-            return company
-        return None
-    active = _available_transporters()
-    if len(active) == 1:
-        return active[0]
-    return None
+    return list(OdooCompany.objects.filter(is_active=True, base_url__gt=''))
 
 
 def _tender_submission_setting(user):
-    return _resolve_transporter()
+    """Return a configured transport company, or None. Used only to tell the form
+    whether any tender target exists — submissions go to all of them."""
+    available = _available_transporters()
+    return available[0] if available else None
 
 
 class AdminRequiredMixin(UserPassesTestMixin):
@@ -381,21 +371,65 @@ def submit_confirmation(setting, url, payload):
     return _post_with_retry(url, payload, headers, auth)
 
 
-def _parse_tender_result(tender, status_code, body):
-    """Extract the external system's response into the tender and decide success."""
+def _record_submission(tender, company, status_code, body):
+    """Store one transport company's result for a tender. Returns (is_ok, parsed_data)."""
     parsed = {}
     try:
         parsed = json.loads(body) if body else {}
     except (ValueError, TypeError):
         pass
-    data = parsed.get('data') or {} if isinstance(parsed, dict) else {}
-    tender.external_id = data.get('id') if isinstance(data, dict) else None
-    tender.cargo_reference = data.get('name', '') if isinstance(data, dict) else ''
-    tender.external_status = data.get('status', '') if isinstance(data, dict) else ''
+    data = parsed.get('data') if isinstance(parsed, dict) else None
+    if not isinstance(data, dict):
+        data = {}
     is_ok = status_code is not None and 200 <= status_code < 300
     if not is_ok and isinstance(parsed, dict) and parsed.get('status') == 'success':
         is_ok = True
-    return parsed, is_ok
+    TenderSubmission.objects.create(
+        tender=tender,
+        odoo_company=company,
+        status_code=status_code,
+        response_body=(body or '')[:4000],
+        external_id=data.get('id'),
+        cargo_reference=data.get('name', '') or '',
+        external_status=data.get('status', '') or '',
+        success=is_ok,
+    )
+    return is_ok, data
+
+
+def _apply_aggregate_tender(tender):
+    """Copy the best (first successful, else last) submission onto the tender."""
+    success_sub = tender.submissions.filter(success=True).order_by('created_at').first()
+    sub = success_sub or tender.submissions.order_by('-created_at').first()
+    if sub is not None:
+        tender.response_code = sub.status_code
+        tender.response_body = sub.response_body
+        tender.external_id = sub.external_id
+        tender.cargo_reference = sub.cargo_reference
+        tender.external_status = sub.external_status
+        tender.status = Tender.Status.SUCCESS if sub.success else Tender.Status.FAILED
+    else:
+        tender.status = Tender.Status.PENDING
+    tender.save()
+    return tender
+
+
+def _submit_tender_to_targets(tender, targets=None):
+    """Submit a tender to every configured transport company and record results.
+
+    Returns {'targets': [...], 'succeeded': int, 'failed': int}.
+    """
+    if targets is None:
+        targets = _available_transporters()
+    for company in targets:
+        status_code, body, _ok = submit_tender(company, tender)
+        _record_submission(tender, company, status_code, body)
+    _apply_aggregate_tender(tender)
+    return {
+        'targets': targets,
+        'succeeded': tender.submissions.filter(success=True).count(),
+        'failed': len(targets),
+    }
 
 
 def _enqueue_tender(tender, error_message):
@@ -408,19 +442,29 @@ def _enqueue_tender(tender, error_message):
     return PendingPush.objects.create(tender=tender, last_error=error_message)
 
 
-def _deliver_push(push, setting):
-    """Attempt one delivery of a queued tender. Returns True when delivered."""
-    status_code, body, _ok = submit_tender(setting, push.tender)
+def _deliver_push(push, targets):
+    """Attempt one delivery of a queued tender to the given transport companies.
+
+    Returns True when delivered (at least one target accepted it), False otherwise.
+    Marks the push FAILED when every target permanently rejected it (4xx).
+    """
     push.attempts += 1
     push.last_attempt_at = timezone.now()
-    push.response_code = status_code
+    succeeded = permanent = 0
+    last_error = ''
+    for company in targets:
+        status_code, body, _ok = submit_tender(company, push.tender)
+        _record_submission(push.tender, company, status_code, body)
+        if _response_ok(status_code, body):
+            succeeded += 1
+            push.response_code = status_code
+        elif status_code is not None and status_code < 500:
+            permanent += 1
+        else:
+            last_error = _submit_failure_message('Tender submission', status_code, body)
+    _apply_aggregate_tender(push.tender)
 
-    parsed, is_ok = _parse_tender_result(push.tender, status_code, body)
-    if is_ok:
-        push.tender.response_code = status_code
-        push.tender.response_body = (body or '')[:4000]
-        push.tender.status = Tender.Status.SUCCESS
-        push.tender.save()
+    if succeeded:
         push.state = PendingPush.State.DELIVERED
         push.last_error = ''
         push.delivered_at = timezone.now()
@@ -428,17 +472,32 @@ def _deliver_push(push, setting):
         _flush_derived_caches()
         return True
 
-    push.last_error = _submit_failure_message('Tender submission', status_code, body)
-    if status_code is not None and status_code < 500:
-        # Permanent rejection (4xx): retrying will never help, stop queuing it.
+    if permanent and permanent == len(targets):
         push.state = PendingPush.State.FAILED
+        push.last_error = last_error or _submit_failure_message('Tender submission', push.response_code, '')
         _record_diagnostic(
-            None, 'tender.relay', push.last_error, status_code=status_code, method='POST',
-            path=setting.endpoint_url(),
-            detail={'tender_id': push.tender_id, 'pending_push': push.pk, 'response': body[:4000]},
+            None, 'tender.relay', push.last_error, status_code=push.response_code, method='POST',
+            path=targets[0].endpoint_url() if targets else '',
+            detail={'tender_id': push.tender_id, 'pending_push': push.pk},
         )
+        push.save()
+        return False
+
+    push.last_error = last_error or push.last_error
     push.save()
     return False
+
+
+def _response_ok(status_code, body):
+    is_ok = status_code is not None and 200 <= status_code < 300
+    if not is_ok:
+        try:
+            parsed = json.loads(body) if body else {}
+        except (ValueError, TypeError):
+            parsed = {}
+        if isinstance(parsed, dict) and parsed.get('status') == 'success':
+            is_ok = True
+    return is_ok
 
 
 def flush_pending_pushes(user=None):
@@ -450,12 +509,23 @@ def flush_pending_pushes(user=None):
     if user is not None:
         queryset = queryset.filter(tender__user=user)
     for push in queryset.order_by('created_at'):
-        setting = push.tender.odoo_company or _resolve_transporter()
-        if setting is None or not setting.base_url:
+        targets = _available_transporters()
+        if not targets:
             skipped += 1
             continue
+        pending_targets = [
+            t for t in targets
+            if not push.tender.submissions.filter(odoo_company=t, success=True).exists()
+        ]
+        if not pending_targets:
+            # Everything was already delivered.
+            push.state = PendingPush.State.DELIVERED
+            push.delivered_at = timezone.now()
+            push.save()
+            delivered += 1
+            continue
         with transaction.atomic():
-            if _deliver_push(push, setting):
+            if _deliver_push(push, pending_targets):
                 delivered += 1
             elif push.state == PendingPush.State.FAILED:
                 failed += 1
@@ -625,7 +695,14 @@ def webhook_orders(request, slug):
         return JsonResponse({'error': f"Company webhook '{slug}' is disabled."}, status=403)
 
     cargo_reference = (payload.get('cargo_reference') or '').strip()
-    tender = Tender.objects.filter(cargo_reference=cargo_reference).first() if cargo_reference else None
+    tender = None
+    if cargo_reference:
+        tender = Tender.objects.filter(cargo_reference=cargo_reference).first()
+        if tender is None:
+            submission = TenderSubmission.objects.filter(cargo_reference=cargo_reference)\
+                .select_related('tender').first()
+            if submission is not None:
+                tender = submission.tender
 
     order, created = Order.objects.update_or_create(
         order_id=payload['order_id'],
@@ -730,49 +807,31 @@ class TenderCreate(TenderCreatorRequiredMixin, LoginRequiredMixin, CreateView):
         tender = form.save(commit=False)
         tender.user = self.request.user
 
-        setting = _resolve_transporter(form.cleaned_data.get('odoo_company'))
-        tender.odoo_company = setting
-        if setting is None:
+        targets = _available_transporters()
+        if not targets:
             messages.warning(
                 self.request,
-                'No target transport company is configured yet. An administrator must add an Odoo '
+                'No transport company is configured yet. An administrator must add an Odoo '
                 'company (Configuration > Odoo) with a base URL before tenders can be sent.',
             )
             tender.status = Tender.Status.PENDING
             tender.save()
             return redirect('tenders:create')
 
-        status_code, body, _ok = submit_tender(setting, tender)
-        tender.response_code = status_code
-        tender.response_body = body[:4000]
-
-        parsed = {}
-        try:
-            parsed = json.loads(body) if body else {}
-        except (ValueError, TypeError):
-            pass
-        data = parsed.get('data') or {} if isinstance(parsed, dict) else {}
-        tender.external_id = data.get('id') if isinstance(data, dict) else None
-        tender.cargo_reference = data.get('name', '') if isinstance(data, dict) else ''
-        tender.external_status = data.get('status', '') if isinstance(data, dict) else ''
-
-        is_ok = status_code is not None and 200 <= status_code < 300
-        if not is_ok and isinstance(parsed, dict) and parsed.get('status') == 'success':
-            is_ok = True
-        tender.status = Tender.Status.SUCCESS if is_ok else Tender.Status.FAILED
-        tender.save()
-
-        if is_ok:
+        outcome = _submit_tender_to_targets(tender, targets)
+        succeeded, total = outcome['succeeded'], len(targets)
+        if succeeded:
             messages.success(
                 self.request,
-                f'Tender sent successfully to {setting.endpoint_url()} (HTTP {status_code}).'
+                f'Tender sent to {succeeded} of {total} transport companies.'
                 + (f' Reference: {tender.cargo_reference}.' if tender.cargo_reference else ''),
             )
+            flush_pending_pushes(user=self.request.user)
         else:
-            messages.error(
-                self.request,
-                f'Tender submission failed (HTTP {status_code}). Response: {body[:300]}',
-            )
+            message = f'Tender could not be sent to any transport company (0 of {total}).'
+            messages.error(self.request, message)
+            if all(s.status_code is None or s.status_code >= 500 for s in tender.submissions.all()):
+                _enqueue_tender(tender, message)
         return redirect('tenders:list')
 
 
@@ -963,7 +1022,10 @@ def _json_body(request):
 
 
 def _tender_dict(tender):
-    odoo = tender.odoo_company
+    companies = [
+        {'id': s.odoo_company_id, 'name': s.odoo_company.name, 'base_url': s.odoo_company.base_url}
+        for s in tender.submissions.select_related('odoo_company').order_by('created_at')
+    ]
     return {
         'id': tender.id,
         'customer': tender.customer,
@@ -980,11 +1042,7 @@ def _tender_dict(tender):
         'response_code': tender.response_code,
         'payment_terms': tender.payment_terms.name if tender.payment_terms_id else '',
         'payment_term_id': tender.payment_terms_id,
-        'odoo_company': {
-            'id': odoo.pk,
-            'name': odoo.name,
-            'base_url': odoo.base_url,
-        } if odoo else None,
+        'odoo_companies': companies,
         'created_at': tender.created_at.isoformat() if tender.created_at else None,
     }
 
@@ -1206,16 +1264,15 @@ def api_tender_create(request):
 
     tender = form.save(commit=False)
     tender.user = request.user
-    tender.odoo_company = _resolve_transporter(form.cleaned_data.get('odoo_company'))
     tender.save()
     _flush_derived_caches()
 
-    setting = tender.odoo_company
-    if setting is None:
+    targets = _available_transporters()
+    if not targets:
         result = {
             'ok': True,
             'message': (
-                'Tender saved locally. No target transport company is configured yet — an administrator '
+                'Tender saved locally. No transport company is configured yet — an administrator '
                 'must add an Odoo company (Configuration > Odoo) with a base URL before tenders can be sent.'
             ),
             'tender': _tender_dict(tender),
@@ -1223,29 +1280,33 @@ def api_tender_create(request):
         }
         return JsonResponse(result)
 
-    status_code, body, _ok = submit_tender(setting, tender)
-    tender.response_code = status_code
-    tender.response_body = body[:4000]
-
-    parsed, is_ok = _parse_tender_result(tender, status_code, body)
-    tender.status = Tender.Status.SUCCESS if is_ok else Tender.Status.FAILED
-    tender.save()
+    _submit_tender_to_targets(tender, targets)
+    succeeded = tender.submissions.filter(success=True).count()
+    total = len(targets)
 
     result = {'ok': True, 'tender': _tender_dict(tender)}
-    if is_ok:
+    if succeeded:
         result['message'] = (
-            f'Tender sent successfully (HTTP {status_code}).'
+            f'Tender sent to {succeeded} of {total} transport companies.'
             + (f' Reference: {tender.cargo_reference}.' if tender.cargo_reference else '')
         )
         # The API is reachable right now, so try to flush any queued submissions.
         flush_pending_pushes(user=request.user)
     else:
-        result['message'] = _submit_failure_message('Tender submission', status_code, body)
-        _record_diagnostic(
-            request, 'tender.submit', result['message'], status_code=status_code, method='POST',
-            path=setting.endpoint_url(), detail={'response': body[:4000], 'api_setting': setting.pk},
-        )
-        if status_code is None or status_code >= 500:
+        failed_sub = tender.submissions.filter(success=False).order_by('-created_at').first()
+        base_message = f'Tender could not be sent to any transport company (0 of {total}).'
+        if failed_sub is not None:
+            base_message += ' ' + _submit_failure_message('Tender submission', failed_sub.status_code, failed_sub.response_body)
+        result['message'] = base_message
+        for sub in tender.submissions.filter(success=False):
+            _record_diagnostic(
+                request, 'tender.submit',
+                'Tender submission failed: ' + _submit_failure_message('HTTP error', sub.status_code, sub.response_body),
+                status_code=sub.status_code, method='POST',
+                path=sub.odoo_company.endpoint_url(),
+                detail={'response': sub.response_body, 'transport_company': sub.odoo_company_id},
+            )
+        if all(s.status_code is None or s.status_code >= 500 for s in tender.submissions.all()):
             _enqueue_tender(tender, result['message'])
             result['queued'] = True
             result['message'] += (

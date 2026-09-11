@@ -17,7 +17,6 @@ class TenderForm(forms.ModelForm):
             'distance_km',
             'cargo_date',
             'payment_terms',
-            'odoo_company',
         )
         widgets = {
             'cargo_date': forms.DateInput(attrs={'type': 'date'}),
@@ -30,8 +29,6 @@ class TenderForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         if user is not None:
             self.fields['payment_terms'].queryset = PaymentTerm.objects.filter(user=user)
-        self.fields['odoo_company'].queryset = OdooCompany.objects.filter(is_active=True).order_by('name')
-        self.fields['odoo_company'].empty_label = None
 
 
 class PaymentTermForm(forms.ModelForm):

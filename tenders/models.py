@@ -63,10 +63,6 @@ class Tender(models.Model):
         'PaymentTerm', null=True, blank=True, on_delete=models.SET_NULL,
         related_name='tenders', help_text='Payment terms chosen by the posting user for this tender.',
     )
-    odoo_company = models.ForeignKey(
-        'OdooCompany', null=True, blank=True, on_delete=models.SET_NULL,
-        related_name='tenders', help_text='Transport company (Odoo instance) the tender is submitted to.',
-    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -74,6 +70,29 @@ class Tender(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+
+class TenderSubmission(models.Model):
+    """A tender delivered to one transport company (Odoo instance)."""
+
+    tender = models.ForeignKey(Tender, on_delete=models.CASCADE, related_name='submissions')
+    odoo_company = models.ForeignKey(
+        'OdooCompany', on_delete=models.CASCADE, related_name='tender_submissions',
+        help_text='Transport company (Odoo instance) the tender was submitted to.',
+    )
+    status_code = models.IntegerField(null=True, blank=True)
+    response_body = models.TextField(blank=True, default='')
+    external_id = models.BigIntegerField(null=True, blank=True)
+    cargo_reference = models.CharField(max_length=200, blank=True, default='')
+    external_status = models.CharField(max_length=50, blank=True, default='')
+    success = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f'Tender #{self.tender_id} → {self.odoo_company} ({self.status_code})'
+
+    class Meta:
+        ordering = ['created_at']
 
 
 class PaymentTerm(models.Model):

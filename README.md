@@ -38,7 +38,7 @@ A Django web platform for managing cargo logistics:
 - Submit cargo tenders with:
   `route_loading`, `route_delivery`, `customer`, `cargo_type`, `truck_type`, `weight`, `number_of_trucks`, `distance_km`, `cargo_date`.
 - `route_loading` / `route_delivery` are selectable towns for **Tanzania, Zambia, Congo, Burundi, Rwanda, Kenya, South Sudan and Uganda** (`tenders/towns.py`).
-- On submit the form `POST`s the JSON payload to the **chosen transport company's Odoo base URL** (the sole configured Odoo company is used automatically; with several, the poster picks one) and records the response (HTTP status, body, and the returned `data.id` / `data.name` / `data.status`).
+- On submit the form `POST`s the JSON payload to **every configured transport company's Odoo base URL** (each active `OdooCompany` with a base URL) and records a per-company result (HTTP status, body, and the returned `data.id` / `data.name` / `data.status`).
 
 #### Tender request payload
 ```json
@@ -124,7 +124,7 @@ Each company uses the default four API paths (`/api/v1/tenders`, `/api/v1/order-
 
 Every company gets its own incoming order webhook URL: `…/webhook/orders/<slug>/`. Orders posted to it are attributed to that company, and the **order/invoice confirmations are sent back to that company** (its `base_url` + configured paths).
 
-An **Odoo company is a transport company** — the recipient of tenders. Tenders are submitted to the **chosen transport company** (or the sole configured one) via that instance's `base_url` + `tenders_path` with that instance's auth, and the chosen company is recorded on the tender. Each Odoo company's webhook URL is shown with a copy button.
+An **Odoo company is a transport company** — the recipient of tenders. Every tender is submitted to **all configured transport companies** (each with its own `base_url` + `tenders_path` and auth), and each company's result is recorded on the tender. Each Odoo company's webhook URL is shown with a copy button.
 
 ### Configuration &gt; Selcom payment gateway
 The Selcom page (administrator only) configures **invoice payments** through [Selcom](https://selcom.net) APGW:
