@@ -301,14 +301,15 @@ class TrackerTest(TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertTrue(data['ok'])
-        self.assertEqual([o['order_name'] for o in data['orders']], ['ORD-9001', 'ORD-9000'])
-        order = data['orders'][0]
-        self.assertEqual(order['origin']['name'], 'Nairobi')
-        self.assertEqual(order['destination']['name'], 'Mombasa')
-        self.assertAlmostEqual(order['distance_km'], 480, delta=60)
-        self.assertEqual(order['tender_ref'], self.tender.cargo_reference)
-        self.assertGreaterEqual(len(order['trucks']), 1)
-        for truck in order['trucks']:
+        self.assertEqual(len(data['groups']), 1)
+        group = data['groups'][0]
+        self.assertEqual([o['order_name'] for o in group['orders']], ['ORD-9001', 'ORD-9000'])
+        self.assertEqual(group['origin']['name'], 'Nairobi')
+        self.assertEqual(group['destination']['name'], 'Mombasa')
+        self.assertAlmostEqual(group['distance_km'], 480, delta=60)
+        self.assertEqual(group['tender_ref'], self.tender.tender_reference())
+        self.assertGreaterEqual(len(group['trucks']), 1)
+        for truck in group['trucks']:
             self.assertIn(truck['status'], ('En route', 'Delivered'))
             self.assertIn('lat', truck)
             self.assertIn('lng', truck)
@@ -319,7 +320,9 @@ class TrackerTest(TestCase):
         Order.objects.create(order_id=9004, order_name='ORD-9004', user=self.user)
         response = self.client.get(reverse('tenders:api_tracker'))
         self.assertEqual(response.status_code, 200)
-        names = [o['order_name'] for o in response.json()['orders']]
+        groups = response.json()['groups']
+        self.assertEqual(len(groups), 1)
+        names = [o['order_name'] for o in groups[0]['orders']]
         self.assertEqual(names, ['ORD-9002'])
 
     def test_api_tracker_only_shows_orders_of_own_tenders(self):
@@ -341,7 +344,8 @@ class TrackerTest(TestCase):
         )
         response = self.client.get(reverse('tenders:api_tracker'))
         self.assertEqual(response.status_code, 200)
-        names = [o['order_name'] for o in response.json()['orders']]
+        groups = response.json()['groups']
+        names = [o['order_name'] for g in groups for o in g['orders']]
         self.assertEqual(names, ['ORD-9010'])
 
     def test_api_tracker_admin_sees_all_companies_orders(self):
@@ -369,7 +373,8 @@ class TrackerTest(TestCase):
         self.client.force_login(admin)
         response = self.client.get(reverse('tenders:api_tracker'))
         self.assertEqual(response.status_code, 200)
-        names = sorted(o['order_name'] for o in response.json()['orders'])
+        groups = response.json()['groups']
+        names = [o['order_name'] for g in groups for o in g['orders']]
         self.assertIn('ORD-9013', names)
         self.assertIn('ORD-9012', names)
 
@@ -391,17 +396,20 @@ class TrackerTest(TestCase):
         self._create_awarded_order(9006, 'ORD-9006')
         response = self.client.get(reverse('tenders:api_tracker'))
         self.assertEqual(response.status_code, 200)
-        by_name = {o['order_name']: o for o in response.json()['orders']}
-        self.assertEqual(len(by_name['ORD-9005']['trucks']), 3)
-        self.assertEqual(len(by_name['ORD-9006']['trucks']), 2)
+        by_order = {}
+        for group in response.json()['groups']:
+            for o in group['orders']:
+                by_order[o['order_name']] = group
+        self.assertEqual(len(by_order['ORD-9005']['trucks']), 3)
+        self.assertEqual(len(by_order['ORD-9006']['trucks']), 2)
 
     def test_api_tracker_returns_route_points(self):
         self._create_awarded_order(9007, 'ORD-9007')
         response = self.client.get(reverse('tenders:api_tracker'))
-        order = response.json()['orders'][0]
-        self.assertEqual(order['route'][0], [order['origin']['lat'], order['origin']['lng']])
-        self.assertEqual(order['route'][-1], [order['destination']['lat'], order['destination']['lng']])
-        self.assertGreaterEqual(order['distance_km'], 0)
+        group = response.json()['groups'][0]
+        self.assertEqual(group['route'][0], [group['origin']['lat'], group['origin']['lng']])
+        self.assertEqual(group['route'][-1], [group['destination']['lat'], group['destination']['lng']])
+        self.assertGreaterEqual(group['distance_km'], 0)
 
     def test_get_route_uses_osrm_when_available(self):
         origin = Town.objects.get(name='Nairobi')
@@ -620,6 +628,7 @@ class InvoicesPageTest(TestCase):
         self.assertEqual(payload, {
             'order_id': 7006,
             'cargo_name': 'REF-A',
+            'tender_reference': 'REF-A',
             'customer_name': '',
             'tax_id': 'TIN-123',
             'country': 'TZ',
@@ -1858,6 +1867,7 @@ class TenderBroadcastTest(TestCase):
             status, body, ok = tenders_views.submit_tender(odoo, tender)
         self.assertTrue(ok)
         payload = m.call_args[0][1]
+        self.assertEqual(payload['tender_reference'], tender.reference)
         self.assertEqual(payload['cargo_reference'], tender.reference)
 
     def test_webhook_links_order_by_any_submission_reference(self):
@@ -1881,7 +1891,7 @@ class TenderBroadcastTest(TestCase):
             content_type='application/json',
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()['linked_tender'], 'CAR0001')
+        self.assertEqual(response.json()['linked_tender'], tender.reference)
         order = Order.objects.get(order_id=55001)
         self.assertEqual(order.tender, tender)
         self.assertEqual(order.cargo_reference, 'CAR0099')
@@ -1922,6 +1932,71 @@ class TenderBroadcastTest(TestCase):
         self.assertTrue(response.json()['ok'])
         self.assertTrue(response.json()['needs_settings'])
         m.assert_not_called()
+
+    def test_same_reference_sent_to_every_transporter(self):
+        OdooCompany.objects.create(name='Lake Trans', base_url='https://lake.example.com')
+        OdooCompany.objects.create(name='Second Trans', base_url='https://second.example.com')
+        with patch('tenders.views._post_with_retry',
+                   return_value=(200, '{"status":"success","data":{"id":6,"name":"CAR0002"}}', True)) as m:
+            response = self._post_tender()
+        self.assertTrue(response.json()['ok'])
+        tender = Tender.objects.get(customer='TransCo')
+        self.assertEqual(len(m.call_args_list), 2)
+        refs = {args[0][1]['cargo_reference'] for args in m.call_args_list}
+        self.assertEqual(refs, {tender.reference})
+
+    def test_order_confirmation_uses_canonical_tender_reference(self):
+        odoo = OdooCompany.objects.create(name='Lake Trans', base_url='https://lake.example.com')
+        tender = Tender.objects.create(
+            user=self.user, route_loading='Nairobi', route_delivery='Mombasa',
+            customer='ConfirmCo', cargo_type=Tender.CargoType.DRY_VAN,
+            truck_type=Tender.TruckType.TRUCK, weight=10.0, number_of_trucks=1,
+            distance_km=480, cargo_date=timezone.localdate(),
+        )
+        tender.ensure_reference()
+        order = Order.objects.create(
+            order_id=77001, order_name='ORD-77001', user=self.user, tender=tender,
+            company_id=1, company_name='Lake Trans', cargo_reference='CAR9999',
+            state='confirmed', amount_total=0, currency='USD', odoo_company=odoo,
+        )
+        self.assertNotEqual(tender.reference, order.cargo_reference)
+        with patch('tenders.views.submit_confirmation',
+                   return_value=(200, '{"status":"success"}', True)) as m:
+            response = self.client.post(reverse('tenders:api_order_award', args=[order.pk]), {})
+        self.assertTrue(response.json()['ok'])
+        payload = m.call_args[0][2]
+        self.assertEqual(payload['cargo_name'], tender.reference)
+        self.assertEqual(payload['tender_reference'], tender.reference)
+
+    def test_partial_order_confirmation_includes_tender_reference(self):
+        odoo = OdooCompany.objects.create(name='Lake Trans', base_url='https://lake.example.com')
+        tender = Tender.objects.create(
+            user=self.user, route_loading='Nairobi', route_delivery='Mombasa',
+            customer='PartialCo', cargo_type=Tender.CargoType.DRY_VAN,
+            truck_type=Tender.TruckType.TRUCK, weight=10.0, number_of_trucks=1,
+            distance_km=480, cargo_date=timezone.localdate(),
+        )
+        tender.ensure_reference()
+        order = Order.objects.create(
+            order_id=77002, order_name='ORD-77002', user=self.user, tender=tender,
+            company_id=1, company_name='Lake Trans', cargo_reference='CAR8888',
+            state='confirmed', amount_total=0, currency='USD', odoo_company=odoo,
+        )
+        OrderLine.objects.create(
+            order=order, line_id=1, product_name='Sand', quantity=1,
+            price_unit=100, commission=0, price_subtotal=100, price_total=100,
+        )
+        with patch('tenders.views.submit_confirmation',
+                   return_value=(200, '{"status":"success"}', True)) as m:
+            response = self.client.post(
+                reverse('tenders:api_order_award', args=[order.pk]),
+                json.dumps({'line_ids': [1]}), content_type='application/json',
+            )
+        self.assertTrue(response.json()['ok'])
+        payload = m.call_args[0][2]
+        self.assertEqual(payload['tender_reference'], tender.reference)
+        self.assertEqual(payload['cargo_name'], tender.reference)
+        self.assertEqual(payload['order_lines'], [{'line_id': 1}])
 
 
 class PendingPushTest(TestCase):

@@ -1296,6 +1296,14 @@ tr:hover td {
   margin: 2px 0 8px;
 }
 
+.tracker-item-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
 .tracker-progress {
   height: 6px;
   background: #e2e8f0;

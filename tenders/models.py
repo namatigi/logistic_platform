@@ -100,6 +100,11 @@ class Tender(models.Model):
         self.save(update_fields=('reference',))
         return self.reference
 
+    def tender_reference(self):
+        """The canonical tender number: the unique HX reference when present,
+        otherwise the legacy/external cargo reference."""
+        return self.reference or self.cargo_reference
+
     def __str__(self):
         return f'{self.customer} - {self.route_loading} to {self.route_delivery}'
 

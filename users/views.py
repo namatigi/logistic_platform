@@ -366,7 +366,7 @@ def api_agent_awarded(request):
             'order_id': order.order_id,
             'order_name': order.order_name or f'#{order.order_id}',
             'cargo_reference': order.cargo_reference or '',
-            'tender_ref': (tender.reference or tender.cargo_reference) if tender else '',
+            'tender_ref': tender.tender_reference() if tender else '',
             'customer': tender.customer if tender else order.customer,
             'route': f'{tender.route_loading} \u2192 {tender.route_delivery}' if tender else '',
             'cargo_type': tender.get_cargo_type_display() if tender else '',
@@ -390,7 +390,7 @@ def api_agent_tracker(request):
     now = timezone.now()
     q = _agent_match_q(request.user)
     if not q:
-        return JsonResponse({'ok': True, 'orders': []})
+        return JsonResponse({'ok': True, 'groups': []})
     towns_by_name = {t.name: t for t in Town.objects.all()}
     orders = (
         Order.objects.filter(q, lines__awarded=True)
@@ -398,52 +398,61 @@ def api_agent_tracker(request):
         .distinct()
         .order_by('-created_at')
     )
-    out = []
+    groups = {}
     for order in orders:
         tender = order.tender
-        entry = {
+        if tender is None:
+            continue
+        reference = tender.tender_reference() or f'T{tender.pk}'
+        group = groups.setdefault(reference, {
+            'key': reference,
+            'tender_ref': tender.tender_reference() or '',
+            'customer': tender.customer,
+            'route': f'{tender.route_loading} \u2192 {tender.route_delivery}',
+            'orders': [],
+            'origin': None,
+            'destination': None,
+            'distance_km': 0,
+            'trucks': [],
+        })
+        group['orders'].append({
             'id': order.pk,
             'order_id': order.order_id,
             'order_name': order.order_name,
             'customer': order.customer,
             'company_name': order.company_name,
             'cargo_reference': order.cargo_reference,
-            'tender_ref': (tender.reference or tender.cargo_reference) if tender else '',
             'state': order.state or '',
             'awarded_amount': str(order.awarded_amount),
-        }
-        trucks = []
-        if tender is not None:
-            origin = towns_by_name.get(tender.route_loading)
-            dest = towns_by_name.get(tender.route_delivery)
-            if origin is not None and dest is not None:
-                route_points, route_m = get_route(origin, dest)
-                route_km = route_m / 1000.0
-                if not route_km:
-                    route_km = float(tender.distance_km or 0)
-                sim_duration = max((route_km / SIM_SPEED_KMH) * 3600 / SIM_ACCELERATION, 3.0)
-                route_distances = _route_arrays(route_points)
-                for i in range(max(tender.number_of_trucks or 1, 1)):
-                    stagger = i * 120
-                    elapsed = max(0.0, (now - tender.created_at).total_seconds() - stagger)
-                    progress = min(1.0, elapsed / sim_duration)
-                    lat, lng = _position_at(route_points, route_distances, progress)
-                    trucks.append({
-                        'label': f"{(tender.reference or tender.cargo_reference) or f'T{tender.pk}'} \u00b7 T{i + 1}",
-                        'lat': lat,
-                        'lng': lng,
-                        'status': 'Delivered' if progress >= 1.0 else 'En route',
-                        'progress': round(progress, 4),
-                    })
-                entry.update({
-                    'origin': {'name': origin.name, 'lat': origin.lat, 'lng': origin.lng},
-                    'destination': {'name': dest.name, 'lat': dest.lat, 'lng': dest.lng},
-                    'route': route_points,
-                    'distance_km': round(route_km, 1),
-                    'trucks': trucks,
+        })
+        origin = towns_by_name.get(tender.route_loading)
+        dest = towns_by_name.get(tender.route_delivery)
+        if origin is not None and dest is not None:
+            route_points, route_m = get_route(origin, dest)
+            route_km = route_m / 1000.0
+            if not route_km:
+                route_km = float(tender.distance_km or 0)
+            sim_duration = max((route_km / SIM_SPEED_KMH) * 3600 / SIM_ACCELERATION, 3.0)
+            route_distances = _route_arrays(route_points)
+            trucks = []
+            for i in range(max(tender.number_of_trucks or 1, 1)):
+                stagger = i * 120
+                elapsed = max(0.0, (now - tender.created_at).total_seconds() - stagger)
+                progress = min(1.0, elapsed / sim_duration)
+                lat, lng = _position_at(route_points, route_distances, progress)
+                trucks.append({
+                    'label': f"{tender.tender_reference() or f'T{tender.pk}'} \u00b7 T{i + 1}",
+                    'lat': lat,
+                    'lng': lng,
+                    'status': 'Delivered' if progress >= 1.0 else 'En route',
+                    'progress': round(progress, 4),
                 })
-        out.append(entry)
-    return JsonResponse({'ok': True, 'orders': out, 'now': now.isoformat()})
+            group['origin'] = {'name': origin.name, 'lat': origin.lat, 'lng': origin.lng}
+            group['destination'] = {'name': dest.name, 'lat': dest.lat, 'lng': dest.lng}
+            group['route'] = route_points
+            group['distance_km'] = round(route_km, 1)
+            group['trucks'] = trucks
+    return JsonResponse({'ok': True, 'groups': list(groups.values()), 'now': now.isoformat()})
 
 
 @login_required
@@ -620,7 +629,7 @@ def _agent_truck_assignments(user, now):
                     'order_id': order.order_id,
                     'order_name': order.order_name or '',
                     'cargo_reference': order.cargo_reference or '',
-                    'tender_ref': (tender.reference or tender.cargo_reference) or '',
+                    'tender_ref': tender.tender_reference() or '',
                     'state': order.state or '',
                     'origin': {'name': origin.name, 'lat': origin.lat, 'lng': origin.lng},
                     'destination': {'name': dest.name, 'lat': dest.lat, 'lng': dest.lng},

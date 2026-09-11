@@ -274,6 +274,7 @@ def notify_order_update(order):
 
 def build_payload(tender):
     payment_term = tender.payment_terms if tender.payment_terms_id else None
+    reference = tender.tender_reference()
     payload = {
         'route_loading': tender.route_loading,
         'route_delivery': tender.route_delivery,
@@ -284,6 +285,7 @@ def build_payload(tender):
         'number_of_trucks': tender.number_of_trucks,
         'distance_km': tender.distance_km,
         'cargo_date': tender.cargo_date.isoformat(),
+        'tender_reference': reference,
     }
     if payment_term is not None:
         payload['payment_terms'] = {
@@ -293,7 +295,6 @@ def build_payload(tender):
         }
     else:
         payload['payment_terms'] = None
-    reference = tender.reference or tender.cargo_reference
     if reference:
         payload['cargo_reference'] = reference
     return payload
@@ -619,8 +620,8 @@ def perform_award(order, setting, line_ids, is_partial):
             return {'ok': False, 'message': 'Some selected order lines do not belong to this order.'}
 
     cargo_name = (
-        order.cargo_reference
-        or (order.tender.cargo_reference if order.tender else '')
+        (order.tender.tender_reference() if order.tender else '')
+        or order.cargo_reference
         or ''
     ).strip()
     if not cargo_name:
@@ -630,6 +631,7 @@ def perform_award(order, setting, line_ids, is_partial):
         'order_id': order.order_id,
         'message': 'Confirmed',
         'cargo_name': cargo_name,
+        'tender_reference': order.tender.tender_reference() if order.tender else '',
     }
     if line_ids:
         payload['order_lines'] = [{'line_id': lid} for lid in line_ids]
@@ -827,7 +829,7 @@ def webhook_orders(request, slug):
         'created': created,
         'order_id': order.order_id,
         'cargo_reference': cargo_reference,
-        'linked_tender': (tender.cargo_reference or tender.reference) if tender else None,
+        'linked_tender': tender.tender_reference() if tender else None,
         'company_slug': company.slug,
     })
 
@@ -905,7 +907,7 @@ class TenderCreate(TenderCreatorRequiredMixin, LoginRequiredMixin, CreateView):
             messages.success(
                 self.request,
                 f'Tender sent to {succeeded} of {total} transport companies.'
-                + (f' Reference: {tender.cargo_reference or tender.reference}.' if (tender.cargo_reference or tender.reference) else ''),
+                + (f' Reference: {tender.tender_reference()}.' if (tender.tender_reference()) else ''),
             )
             flush_pending_pushes(user=self.request.user)
         else:
@@ -1197,7 +1199,7 @@ def _order_dict(order, include_lines=False):
         'date_order': order.date_order.isoformat() if order.date_order else None,
         'created_at': order.created_at.isoformat() if order.created_at else None,
         'updated_at': order.updated_at.isoformat() if order.updated_at else None,
-        'tender_ref': (order.tender.reference or order.tender.cargo_reference) if order.tender else None,
+        'tender_ref': order.tender.tender_reference() if order.tender else None,
         'tender_route': f"{order.tender.route_loading} -> {order.tender.route_delivery}" if order.tender else '',
         'tender_loading': order.tender.route_loading if order.tender else '',
         'tender_delivery': order.tender.route_delivery if order.tender else '',
@@ -1393,7 +1395,7 @@ def api_tender_create(request):
     if succeeded:
         result['message'] = (
             f'Tender sent to {succeeded} of {total} transport companies.'
-            + (f' Reference: {tender.cargo_reference or tender.reference}.' if (tender.cargo_reference or tender.reference) else '')
+            + (f' Reference: {tender.tender_reference()}.' if (tender.tender_reference()) else '')
         )
         # The API is reachable right now, so try to flush any queued submissions.
         flush_pending_pushes(user=request.user)
@@ -1446,7 +1448,7 @@ def api_order_list(request):
         )
         grouped = {}
         for o in orders:
-            key = (o.tender.reference or o.tender.cargo_reference) if o.tender else None
+            key = o.tender.tender_reference() if o.tender else None
             grouped.setdefault(key, []).append(o)
         groups = [{
             'grouper': key or '',
@@ -1561,7 +1563,7 @@ def route_map(request):
     if truck_index and tender_id:
         tender = Tender.objects.filter(pk=tender_id).first()
         if tender is not None:
-            truck_label = f"{(tender.reference or tender.cargo_reference) or f'T{tender.pk}'} \u00b7 T{truck_index}"
+            truck_label = f"{tender.tender_reference() or f'T{tender.pk}'} \u00b7 T{truck_index}"
             origin = Town.objects.filter(name=tender.route_loading).first()
             dest = Town.objects.filter(name=tender.route_delivery).first()
             if origin is not None and dest is not None:
@@ -1739,11 +1741,16 @@ def api_tracker(request):
                 ),
             )
         )
-        pairs = {}
+        tenders = []
+        seen = set()
         for order in awarded_orders:
             tender = order.tender
-            if tender is None:
+            if tender is None or tender.pk in seen:
                 continue
+            seen.add(tender.pk)
+            tenders.append(tender)
+        pairs = {}
+        for tender in tenders:
             origin = towns_by_name.get(tender.route_loading)
             dest = towns_by_name.get(tender.route_delivery)
             if origin is not None and dest is not None:
@@ -1756,57 +1763,66 @@ def api_tracker(request):
                 ):
                     resolved[names] = result
 
-        orders_out = []
+        groups = {}
         for order in awarded_orders:
             tender = order.tender
-            entry = {
+            if tender is None:
+                continue
+            reference = tender.tender_reference() or f'T{tender.pk}'
+            group = groups.setdefault(reference, {
+                'key': reference,
+                'tender_ref': tender.tender_reference() or '',
+                'customer': tender.customer,
+                'route': f'{tender.route_loading} \u2192 {tender.route_delivery}',
+                'orders': [],
+                'origin': None,
+                'destination': None,
+                'distance_km': 0,
+                'trucks': [],
+            })
+            group['orders'].append({
                 'id': order.pk,
                 'order_id': order.order_id,
                 'order_name': order.order_name,
-                'customer': order.customer,
+                'company_name': order.company_name,
                 'cargo_reference': order.cargo_reference,
                 'state': order.state or '',
-                'tender_ref': (tender.reference or tender.cargo_reference) if tender else '',
                 'awarded_amount': str(order._awarded_amount_total or 0),
                 'awarded_lines_count': order._awarded_line_count,
                 'total_lines_count': order._line_count,
                 'fully_confirmed': order.fully_confirmed,
                 'partially_confirmed': order.partially_confirmed,
-            }
-            trucks = []
-            if tender is not None:
-                route = resolved.get((tender.route_loading, tender.route_delivery))
-                if route is not None:
-                    origin = towns_by_name[tender.route_loading]
-                    dest = towns_by_name[tender.route_delivery]
-                    route_points, route_m = route
-                    route_km = route_m / 1000.0
-                    if not route_km:
-                        route_km = float(tender.distance_km or 0)
-                    sim_duration = max((route_km / SIM_SPEED_KMH) * 3600 / SIM_ACCELERATION, 3.0)
-                    route_distances = _route_arrays(route_points)
-                    truck_count = max(tender.number_of_trucks or 1, 1)
-                    for i in range(truck_count):
-                        stagger = i * 120
-                        elapsed = max(0.0, (now - tender.created_at).total_seconds() - stagger)
-                        progress = min(1.0, elapsed / sim_duration)
-                        lat, lng = _position_at(route_points, route_distances, progress)
-                        trucks.append({
-                            'label': f"{(tender.reference or tender.cargo_reference) or f'T{tender.pk}'} · T{i + 1}",
-                            'lat': lat,
-                            'lng': lng,
-                            'status': 'Delivered' if progress >= 1.0 else 'En route',
-                            'progress': round(progress, 4),
-                        })
-                    entry.update({
-                        'origin': {'name': origin.name, 'lat': origin.lat, 'lng': origin.lng},
-                        'destination': {'name': dest.name, 'lat': dest.lat, 'lng': dest.lng},
-                        'route': route_points,
-                        'distance_km': round(route_km, 1),
-                        'trucks': trucks,
+            })
+            route = resolved.get((tender.route_loading, tender.route_delivery))
+            if route is not None:
+                origin = towns_by_name[tender.route_loading]
+                dest = towns_by_name[tender.route_delivery]
+                route_points, route_m = route
+                route_km = route_m / 1000.0
+                if not route_km:
+                    route_km = float(tender.distance_km or 0)
+                sim_duration = max((route_km / SIM_SPEED_KMH) * 3600 / SIM_ACCELERATION, 3.0)
+                route_distances = _route_arrays(route_points)
+                truck_count = max(tender.number_of_trucks or 1, 1)
+                trucks = []
+                for i in range(truck_count):
+                    stagger = i * 120
+                    elapsed = max(0.0, (now - tender.created_at).total_seconds() - stagger)
+                    progress = min(1.0, elapsed / sim_duration)
+                    lat, lng = _position_at(route_points, route_distances, progress)
+                    trucks.append({
+                        'label': f"{tender.tender_reference() or f'T{tender.pk}'} · T{i + 1}",
+                        'lat': lat,
+                        'lng': lng,
+                        'status': 'Delivered' if progress >= 1.0 else 'En route',
+                        'progress': round(progress, 4),
                     })
-            orders_out.append(entry)
-        return {'ok': True, 'orders': orders_out, 'now': now.isoformat()}
+                group['origin'] = {'name': origin.name, 'lat': origin.lat, 'lng': origin.lng}
+                group['destination'] = {'name': dest.name, 'lat': dest.lat, 'lng': dest.lng}
+                group['route'] = route_points
+                group['distance_km'] = round(route_km, 1)
+                group['trucks'] = trucks
+        return {'ok': True, 'groups': list(groups.values()), 'now': now.isoformat()}
 
     return _cached_json_bytes(_cache_key('trk', scope), 15, loader)
 
@@ -1915,11 +1931,9 @@ def _escrow_dict(escrow):
     transporters = list(escrow.transporters.all())
     order = invoices[0].order if invoices else None
     tender = escrow.tender
-    cargo_reference = ''
-    if order and order.cargo_reference:
+    cargo_reference = tender.tender_reference() if tender else ''
+    if not cargo_reference and order and order.cargo_reference:
         cargo_reference = order.cargo_reference
-    elif tender:
-        cargo_reference = tender.reference or tender.cargo_reference
     transporter_names = [t.company_name or t.alias for t in transporters if t.company_name or t.alias]
     if not transporter_names and order and order.company_name:
         transporter_names = [order.company_name]
@@ -1964,7 +1978,8 @@ def _invoice_payload(invoice):
     company = _company_for_order(order)
     return {
         'order_id': order.order_id,
-        'cargo_name': order.cargo_reference or '',
+        'cargo_name': (order.tender.tender_reference() if order.tender else '') or order.cargo_reference or '',
+        'tender_reference': order.tender.tender_reference() if order.tender else '',
         'customer_name': (order.customer or '').strip(),
         'tax_id': company.tin if company else '',
         'country': company.country if company else '',

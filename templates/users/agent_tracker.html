@@ -15,40 +15,43 @@
   <div id="agent-tracker-app" data-url="{% url 'users:api_agent_tracker' %}" v-cloak>
     {% verbatim %}
     <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
-    <div class="alert alert-warning" v-if="!error && orders.length === 0">
-      No awarded orders to track yet.
+    <div class="alert alert-warning" v-if="!error && groups.length === 0">
+      No awarded tenders to track yet.
     </div>
 
     <div class="tracker-layout">
       <div class="card tracker-sidebar">
-        <div class="card-title">Awarded orders</div>
+        <div class="card-title">Awarded tenders</div>
         <div class="tracker-list">
-          <div v-for="o in orders" v-bind:key="o.id" class="tracker-item"
-               v-bind:class="{ 'tracker-item-active': o.id === selected }"
-               @click="select(o.id)">
+          <div v-for="g in groups" v-bind:key="g.key" class="tracker-item"
+               v-bind:class="{ 'tracker-item-active': g.key === selected }"
+               @click="select(g.key)">
             <div class="tracker-item-head">
-              <strong>{{ o.order_name || ('#' + o.order_id) }}</strong>
-              <span class="badge" v-bind:class="stateBadge(o.state)">{{ o.state || '-' }}</span>
+              <strong>{{ g.tender_ref || g.key }}</strong>
             </div>
-            <div class="tracker-item-sub">{{ o.company_name || o.customer }} &middot; {{ o.tender_ref || 'no tender' }}</div>
-            <div class="tracker-item-sub tracker-item-route">{{ routeText(o) }}</div>
-            <div class="tracker-item-sub" v-if="o.route">
-              {{ o.distance_km }} km &middot; {{ o.trucks.length }} truck{{ o.trucks.length === 1 ? '' : 's' }}
+            <div class="tracker-item-sub">{{ g.customer }} &middot; {{ g.orders.length }} order{{ g.orders.length === 1 ? '' : 's' }}</div>
+            <div class="tracker-item-sub tracker-item-route">{{ routeText(g) }}</div>
+            <div class="tracker-item-sub" v-if="g.route">
+              {{ g.distance_km }} km &middot; {{ g.trucks.length }} truck{{ g.trucks.length === 1 ? '' : 's' }}
+              <span class="tracker-item-badges">
+                <span v-for="od in g.orders" v-bind:key="od.id" class="badge" v-bind:class="stateBadge(od.state)">{{ od.company_name }}</span>
+              </span>
             </div>
           </div>
-          <div class="tracker-empty" v-if="!orders.length">Loading orders...</div>
+          <div class="tracker-empty" v-if="!groups.length">Loading tenders...</div>
         </div>
       </div>
 
       <div class="card" style="padding:0; overflow:hidden; position:relative;">
         <div id="tracker-map" style="height: 620px; width: 100%;"></div>
         <div class="tracker-map-hint" v-if="selectedInfo && selectedInfo.route">
-          <strong>{{ selectedInfo.order_name || ('#' + selectedInfo.order_id) }}</strong> &mdash;
+          <strong>{{ selectedInfo.tender_ref || selectedInfo.key }}</strong> &mdash;
           {{ selectedInfo.origin.name }} &rarr; {{ selectedInfo.destination.name }}
           &middot; {{ selectedInfo.distance_km }} km
+          &middot; {{ transportersText(selectedInfo) }}
         </div>
         <div class="tracker-map-hint" v-if="selectedInfo && !selectedInfo.route">
-          <strong>{{ selectedInfo.order_name || ('#' + selectedInfo.order_id) }}</strong> &mdash; no route available
+          <strong>{{ selectedInfo.tender_ref || selectedInfo.key }}</strong> &mdash; no route available
         </div>
       </div>
     </div>
@@ -100,13 +103,13 @@
 
     Vue.createApp({
       data: function () {
-        return { orders: [], selected: null, error: '' };
+        return { groups: [], selected: null, error: '' };
       },
       computed: {
         selectedInfo: function () {
           var self = this;
-          for (var i = 0; i < self.orders.length; i++) {
-            if (self.orders[i].id === self.selected) return self.orders[i];
+          for (var i = 0; i < self.groups.length; i++) {
+            if (self.groups[i].key === self.selected) return self.groups[i];
           }
           return null;
         }
@@ -117,17 +120,22 @@
       },
       methods: {
         stateBadge: function (s) { return HY.stateBadgeClass(s); },
-        routeText: function (o) {
-          return o.origin && o.destination ? (o.origin.name + ' \u2192 ' + o.destination.name) : 'no route';
+        routeText: function (g) {
+          return g.origin && g.destination ? (g.origin.name + ' \u2192 ' + g.destination.name) : 'no route';
+        },
+        transportersText: function (g) {
+          var names = (g.orders || []).map(function (od) { return od.company_name; }).filter(Boolean);
+          if (!names.length) return (g.orders || []).length + ' transporter order' + ((g.orders || []).length === 1 ? '' : 's');
+          return names.join(', ');
         },
         load: async function () {
           var self = this;
           try {
             var res = await api.get(root.dataset.url);
             if (res && res.ok === false) { self.error = res.error || 'Failed to load tracker.'; return; }
-            self.orders = (res && res.orders) || [];
-            if (!self.selected && self.orders.length) {
-              self.select(self.orders[0].id);
+            self.groups = (res && res.groups) || [];
+            if (!self.selected && self.groups.length) {
+              self.select(self.groups[0].key);
             } else {
               self.drawSelected(false);
             }
@@ -135,8 +143,8 @@
             self.error = e.message;
           }
         },
-        select: function (id) {
-          this.selected = id;
+        select: function (key) {
+          this.selected = key;
           this.drawSelected(true);
         },
         drawSelected: function (fit) {

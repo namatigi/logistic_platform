@@ -468,7 +468,8 @@ class AgentPortalTest(TestCase):
         response = self.client.get(reverse('users:api_agent_tracker'))
         data = response.json()
         self.assertTrue(data['ok'])
-        self.assertEqual([o['company_name'] for o in data['orders']], ['TransFleet A'])
+        self.assertEqual(len(data['groups']), 1)
+        self.assertEqual([g['orders'][0]['company_name'] for g in data['groups']], ['TransFleet A'])
 
     def test_agent_invoices_scoped_and_mark_paid(self):
         self._login('agent.a@example.com')
