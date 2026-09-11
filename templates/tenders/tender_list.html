@@ -25,7 +25,7 @@
               <th>Customer</th>
               <th>Route</th>
               <th>Cargo</th>
-              <th>Cargo ref</th>
+              <th>Reference</th>
               <th>Weight</th>
               <th>Trucks</th>
               <th>Distance</th>
@@ -39,7 +39,7 @@
               <td><strong>{{ t.customer }}</strong></td>
               <td>{{ t.route }}</td>
               <td>{{ t.cargo_type }}<br><span style="color:#64748b; font-size:13px;">{{ t.truck_type }}</span></td>
-              <td>{{ t.cargo_reference || '-' }}</td>
+              <td>{{ t.reference || t.cargo_reference || '-' }}</td>
               <td>{{ t.weight }} t</td>
               <td>{{ t.number_of_trucks }}</td>
               <td>{{ t.distance_km }} km</td>

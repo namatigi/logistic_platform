@@ -48,6 +48,11 @@ class Tender(models.Model):
     route_loading = models.CharField(max_length=255, choices=TOWN_CHOICES)
     route_delivery = models.CharField(max_length=255, choices=TOWN_CHOICES)
     customer = models.CharField(max_length=200)
+    reference = models.CharField(
+        max_length=40, unique=True, null=True, blank=True,
+        help_text='Unique tender reference generated when the tender is sent. It identifies the '
+                  'cargo end-to-end (tender → order → invoice) and is used as the tender number.',
+    )
     cargo_type = models.CharField(max_length=50, choices=CargoType.choices)
     truck_type = models.CharField(max_length=50, choices=TruckType.choices)
     weight = models.FloatField()
@@ -65,6 +70,35 @@ class Tender(models.Model):
         related_name='tenders', help_text='Payment terms chosen by the posting user for this tender.',
     )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    REFERENCE_PREFIX = 'HX'
+
+    @classmethod
+    def make_reference(cls, pk, created_at):
+        """Build the unique human-readable tender number (e.g. HX-2609-000042).
+
+        YY = last two digits of the year, MM = the month, then the zero-padded
+        tender id. The id is unique per tender, so the reference never collides
+        even across year/month rollovers.
+        """
+        stamp = created_at or timezone.now()
+        return f'{cls.REFERENCE_PREFIX}-{stamp.year % 100:02d}{stamp.month:02d}-{pk:06d}'
+
+    def ensure_reference(self):
+        """Assign this tender its unique tender number (reference).
+
+        Generated at creation so every tender displays a stable number, and reused
+        on every send/retry so it stays constant end-to-end (tender → order →
+        invoice). The number travels to the transport company as `cargo_reference`
+        and is echoed back on orders, which is how orders are grouped.
+        """
+        if self.reference:
+            return self.reference
+        if self.pk is None:
+            self.save()
+        self.reference = self.make_reference(self.pk, self.created_at)
+        self.save(update_fields=('reference',))
+        return self.reference
 
     def __str__(self):
         return f'{self.customer} - {self.route_loading} to {self.route_delivery}'

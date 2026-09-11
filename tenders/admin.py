@@ -26,9 +26,9 @@ class TownAdmin(admin.ModelAdmin):
 
 @admin.register(Tender)
 class TenderAdmin(admin.ModelAdmin):
-    list_display = ('customer', 'route_loading', 'route_delivery', 'cargo_date', 'cargo_reference', 'status', 'response_code')
+    list_display = ('customer', 'reference', 'route_loading', 'route_delivery', 'cargo_date', 'cargo_reference', 'status', 'response_code')
     list_filter = ('status', 'cargo_type', 'truck_type')
-    search_fields = ('customer', 'route_loading', 'route_delivery', 'cargo_reference')
+    search_fields = ('reference', 'customer', 'route_loading', 'route_delivery', 'cargo_reference')
 
 
 @admin.register(ApiSetting)

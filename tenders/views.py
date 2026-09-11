@@ -293,6 +293,9 @@ def build_payload(tender):
         }
     else:
         payload['payment_terms'] = None
+    reference = tender.reference or tender.cargo_reference
+    if reference:
+        payload['cargo_reference'] = reference
     return payload
 
 
@@ -423,6 +426,7 @@ def _submit_tender_to_targets(tender, targets=None):
     """
     if targets is None:
         targets = _available_transporters()
+    tender.ensure_reference()
     for company in targets:
         status_code, body, _ok = submit_tender(company, tender)
         _record_submission(tender, company, status_code, body)
@@ -467,6 +471,7 @@ def _deliver_push(push, targets):
     """
     push.attempts += 1
     push.last_attempt_at = timezone.now()
+    push.tender.ensure_reference()
     transient = 0
     last_error = ''
     last_code = None
@@ -769,7 +774,9 @@ def webhook_orders(request, slug):
     cargo_reference = (payload.get('cargo_reference') or '').strip()
     tender = None
     if cargo_reference:
-        tender = Tender.objects.filter(cargo_reference=cargo_reference).first()
+        tender = Tender.objects.filter(
+            Q(reference=cargo_reference) | Q(cargo_reference=cargo_reference)
+        ).first()
         if tender is None:
             submission = TenderSubmission.objects.filter(cargo_reference=cargo_reference)\
                 .select_related('tender').first()
@@ -820,7 +827,7 @@ def webhook_orders(request, slug):
         'created': created,
         'order_id': order.order_id,
         'cargo_reference': cargo_reference,
-        'linked_tender': tender.cargo_reference if tender else None,
+        'linked_tender': (tender.cargo_reference or tender.reference) if tender else None,
         'company_slug': company.slug,
     })
 
@@ -878,6 +885,8 @@ class TenderCreate(TenderCreatorRequiredMixin, LoginRequiredMixin, CreateView):
     def form_valid(self, form):
         tender = form.save(commit=False)
         tender.user = self.request.user
+        tender.save()
+        tender.ensure_reference()
 
         targets = _available_transporters()
         if not targets:
@@ -896,7 +905,7 @@ class TenderCreate(TenderCreatorRequiredMixin, LoginRequiredMixin, CreateView):
             messages.success(
                 self.request,
                 f'Tender sent to {succeeded} of {total} transport companies.'
-                + (f' Reference: {tender.cargo_reference}.' if tender.cargo_reference else ''),
+                + (f' Reference: {tender.cargo_reference or tender.reference}.' if (tender.cargo_reference or tender.reference) else ''),
             )
             flush_pending_pushes(user=self.request.user)
         else:
@@ -1132,6 +1141,7 @@ def _tender_dict(tender):
         'cargo_date': tender.cargo_date.isoformat() if tender.cargo_date else None,
         'status': tender.status,
         'status_label': tender.get_status_display(),
+        'reference': tender.reference,
         'cargo_reference': tender.cargo_reference,
         'response_code': tender.response_code,
         'payment_terms': tender.payment_terms.name if tender.payment_terms_id else '',
@@ -1187,7 +1197,7 @@ def _order_dict(order, include_lines=False):
         'date_order': order.date_order.isoformat() if order.date_order else None,
         'created_at': order.created_at.isoformat() if order.created_at else None,
         'updated_at': order.updated_at.isoformat() if order.updated_at else None,
-        'tender_ref': order.tender.cargo_reference if order.tender else None,
+        'tender_ref': (order.tender.reference or order.tender.cargo_reference) if order.tender else None,
         'tender_route': f"{order.tender.route_loading} -> {order.tender.route_delivery}" if order.tender else '',
         'tender_loading': order.tender.route_loading if order.tender else '',
         'tender_delivery': order.tender.route_delivery if order.tender else '',
@@ -1359,6 +1369,7 @@ def api_tender_create(request):
     tender = form.save(commit=False)
     tender.user = request.user
     tender.save()
+    tender.ensure_reference()
     _flush_derived_caches()
 
     targets = _available_transporters()
@@ -1382,7 +1393,7 @@ def api_tender_create(request):
     if succeeded:
         result['message'] = (
             f'Tender sent to {succeeded} of {total} transport companies.'
-            + (f' Reference: {tender.cargo_reference}.' if tender.cargo_reference else '')
+            + (f' Reference: {tender.cargo_reference or tender.reference}.' if (tender.cargo_reference or tender.reference) else '')
         )
         # The API is reachable right now, so try to flush any queued submissions.
         flush_pending_pushes(user=request.user)
@@ -1435,7 +1446,7 @@ def api_order_list(request):
         )
         grouped = {}
         for o in orders:
-            key = o.tender.cargo_reference if o.tender else None
+            key = (o.tender.reference or o.tender.cargo_reference) if o.tender else None
             grouped.setdefault(key, []).append(o)
         groups = [{
             'grouper': key or '',
@@ -1550,7 +1561,7 @@ def route_map(request):
     if truck_index and tender_id:
         tender = Tender.objects.filter(pk=tender_id).first()
         if tender is not None:
-            truck_label = f'{tender.cargo_reference or f"T{tender.pk}"} \u00b7 T{truck_index}'
+            truck_label = f"{(tender.reference or tender.cargo_reference) or f'T{tender.pk}'} \u00b7 T{truck_index}"
             origin = Town.objects.filter(name=tender.route_loading).first()
             dest = Town.objects.filter(name=tender.route_delivery).first()
             if origin is not None and dest is not None:
@@ -1755,7 +1766,7 @@ def api_tracker(request):
                 'customer': order.customer,
                 'cargo_reference': order.cargo_reference,
                 'state': order.state or '',
-                'tender_ref': tender.cargo_reference if tender else '',
+                'tender_ref': (tender.reference or tender.cargo_reference) if tender else '',
                 'awarded_amount': str(order._awarded_amount_total or 0),
                 'awarded_lines_count': order._awarded_line_count,
                 'total_lines_count': order._line_count,
@@ -1781,7 +1792,7 @@ def api_tracker(request):
                         progress = min(1.0, elapsed / sim_duration)
                         lat, lng = _position_at(route_points, route_distances, progress)
                         trucks.append({
-                            'label': f'{tender.cargo_reference or f"T{tender.pk}"} · T{i + 1}',
+                            'label': f"{(tender.reference or tender.cargo_reference) or f'T{tender.pk}'} · T{i + 1}",
                             'lat': lat,
                             'lng': lng,
                             'status': 'Delivered' if progress >= 1.0 else 'En route',
@@ -1907,8 +1918,8 @@ def _escrow_dict(escrow):
     cargo_reference = ''
     if order and order.cargo_reference:
         cargo_reference = order.cargo_reference
-    elif tender and tender.cargo_reference:
-        cargo_reference = tender.cargo_reference
+    elif tender:
+        cargo_reference = tender.reference or tender.cargo_reference
     transporter_names = [t.company_name or t.alias for t in transporters if t.company_name or t.alias]
     if not transporter_names and order and order.company_name:
         transporter_names = [order.company_name]

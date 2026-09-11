@@ -366,7 +366,7 @@ def api_agent_awarded(request):
             'order_id': order.order_id,
             'order_name': order.order_name or f'#{order.order_id}',
             'cargo_reference': order.cargo_reference or '',
-            'tender_ref': tender.cargo_reference if tender else '',
+            'tender_ref': (tender.reference or tender.cargo_reference) if tender else '',
             'customer': tender.customer if tender else order.customer,
             'route': f'{tender.route_loading} \u2192 {tender.route_delivery}' if tender else '',
             'cargo_type': tender.get_cargo_type_display() if tender else '',
@@ -408,7 +408,7 @@ def api_agent_tracker(request):
             'customer': order.customer,
             'company_name': order.company_name,
             'cargo_reference': order.cargo_reference,
-            'tender_ref': tender.cargo_reference if tender else '',
+            'tender_ref': (tender.reference or tender.cargo_reference) if tender else '',
             'state': order.state or '',
             'awarded_amount': str(order.awarded_amount),
         }
@@ -429,7 +429,7 @@ def api_agent_tracker(request):
                     progress = min(1.0, elapsed / sim_duration)
                     lat, lng = _position_at(route_points, route_distances, progress)
                     trucks.append({
-                        'label': f'{tender.cargo_reference or f"T{tender.pk}"} \u00b7 T{i + 1}',
+                        'label': f"{(tender.reference or tender.cargo_reference) or f'T{tender.pk}'} \u00b7 T{i + 1}",
                         'lat': lat,
                         'lng': lng,
                         'status': 'Delivered' if progress >= 1.0 else 'En route',
@@ -620,7 +620,7 @@ def _agent_truck_assignments(user, now):
                     'order_id': order.order_id,
                     'order_name': order.order_name or '',
                     'cargo_reference': order.cargo_reference or '',
-                    'tender_ref': tender.cargo_reference or '',
+                    'tender_ref': (tender.reference or tender.cargo_reference) or '',
                     'state': order.state or '',
                     'origin': {'name': origin.name, 'lat': origin.lat, 'lng': origin.lng},
                     'destination': {'name': dest.name, 'lat': dest.lat, 'lng': dest.lng},

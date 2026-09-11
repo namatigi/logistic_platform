@@ -121,6 +121,25 @@ class OrderListPerformanceTest(TestCase):
             self.assertEqual(o['awarded_lines_count'], 0)
             self.assertEqual(o['awarded_amount'], '0')
 
+    def test_order_list_groups_by_tender_reference(self):
+        second = Tender.objects.create(
+            user=self.user, route_loading='Nairobi', route_delivery='Mombasa',
+            customer='Beta', cargo_type=Tender.CargoType.DRY_VAN,
+            truck_type=Tender.TruckType.TRUCK, weight=20.0, number_of_trucks=1,
+            distance_km=480, cargo_date=timezone.localdate(),
+            reference='HYPAX-000991', cargo_reference='LEGACY-CARGO-REF',
+        )
+        Order.objects.create(order_id=6001, order_name='ORD-6001', user=self.user, tender=self.tender)
+        Order.objects.create(order_id=6002, order_name='ORD-6002', user=self.user, tender=second)
+        response = self.client.get(reverse('tenders:api_order_list'))
+        groups = response.json()['groups']
+        keys = {g['grouper'] for g in groups}
+        self.assertEqual(keys, {'REF-X', 'HYPAX-000991'})
+        by_key = {g['grouper']: g for g in groups}
+        self.assertEqual(by_key['REF-X']['label'], 'REF-X')
+        self.assertEqual(len(by_key['HYPAX-000991']['orders']), 1)
+        self.assertNotIn('LEGACY-CARGO-REF', by_key['HYPAX-000991']['grouper'])
+
     def test_order_list_includes_unlinked_orders(self):
         Order.objects.create(order_id=7777, order_name='ORD-7777', user=None, tender=None)
         response = self.client.get(reverse('tenders:api_order_list'))
@@ -1342,6 +1361,24 @@ class OdooCompanyWebhookTest(TestCase):
         response = self.client.post(url, json.dumps(self._payload(90004, 'REF-X')), content_type='application/json')
         self.assertEqual(response.status_code, 403)
 
+    def test_webhook_links_order_by_tender_reference(self):
+        tender = Tender.objects.create(
+            user=self.owner, route_loading='Nairobi', route_delivery='Mombasa',
+            customer='RefCo', cargo_type=Tender.CargoType.DRY_VAN,
+            truck_type=Tender.TruckType.TRUCK, weight=10.0, number_of_trucks=1,
+            distance_km=480, cargo_date=timezone.localdate(),
+            reference='HYPAX-000777',
+        )
+        url = reverse('tenders:webhook_order_company', kwargs={'slug': self.company_a.slug})
+        response = self.client.post(
+            url, json.dumps(self._payload(90005, 'HYPAX-000777')), content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['linked_tender'], 'HYPAX-000777')
+        order = Order.objects.get(order_id=90005)
+        self.assertEqual(order.tender, tender)
+        self.assertEqual(order.cargo_reference, 'HYPAX-000777')
+
 
 class OdooCompanyRoutingTest(TestCase):
     def setUp(self):
@@ -1761,6 +1798,68 @@ class TenderBroadcastTest(TestCase):
         self.assertEqual(subs.filter(odoo_company=second).count(), 1)
         self.assertEqual(tender.cargo_reference, 'CAR0056')
 
+    def test_tender_reference_generated_at_creation(self):
+        with patch('tenders.views.submit_tender') as m:
+            response = self._post_tender()
+        self.assertTrue(response.json()['needs_settings'])
+        m.assert_not_called()
+        tender = Tender.objects.get(customer='TransCo')
+        self.assertEqual(tender.cargo_reference, '')
+        self.assertTrue(tender.reference.startswith(Tender.REFERENCE_PREFIX))
+        self.assertEqual(
+            tender.reference,
+            Tender.make_reference(tender.pk, tender.created_at),
+        )
+        self.assertRegex(tender.reference, r'^HX-\d{4}-\d{6}$')
+
+    def test_tender_reference_generated_when_sent(self):
+        OdooCompany.objects.create(name='Lake Trans', base_url='https://lake.example.com')
+        with patch('tenders.views.submit_tender',
+                   return_value=(200, '{"status":"success","data":{"id":5,"name":"CAR0001"}}', True)):
+            response = self._post_tender()
+        self.assertTrue(response.json()['ok'])
+        tender = Tender.objects.get(customer='TransCo')
+        self.assertTrue(tender.reference.startswith(Tender.REFERENCE_PREFIX))
+        self.assertEqual(
+            tender.reference,
+            Tender.make_reference(tender.pk, tender.created_at),
+        )
+
+    def test_tender_reference_is_unique_per_tender(self):
+        OdooCompany.objects.create(name='Lake Trans', base_url='https://lake.example.com')
+        with patch('tenders.views.submit_tender', return_value=(200, '{"status":"success"}', True)):
+            self._post_tender()
+            self._post_tender()
+        refs = list(Tender.objects.values_list('reference', flat=True))
+        self.assertTrue(all(refs))
+        self.assertEqual(len(refs), len(set(refs)))
+
+    def test_reference_is_stable_across_retries(self):
+        OdooCompany.objects.create(name='Lake Trans', base_url='https://lake.example.com')
+        with patch('tenders.views.submit_tender', return_value=(200, '{"status":"success"}', True)):
+            self._post_tender()
+        tender = Tender.objects.get(customer='TransCo')
+        first = tender.reference
+        tender.ensure_reference()
+        tender.refresh_from_db()
+        self.assertEqual(tender.reference, first)
+
+    def test_build_payload_sends_reference_as_cargo_reference(self):
+        odoo = OdooCompany.objects.create(name='Lake Trans', base_url='https://lake.example.com')
+        tender = Tender.objects.create(
+            user=self.user, route_loading='Nairobi', route_delivery='Mombasa',
+            customer='TransCo', cargo_type=Tender.CargoType.DRY_VAN,
+            truck_type=Tender.TruckType.TRUCK, weight=10.0, number_of_trucks=1,
+            distance_km=480, cargo_date=timezone.localdate(),
+        )
+        tender.ensure_reference()
+        with patch('tenders.views._post_with_retry',
+                   return_value=(200, '{"status":"success"}', True)) as m:
+            status, body, ok = tenders_views.submit_tender(odoo, tender)
+        self.assertTrue(ok)
+        payload = m.call_args[0][1]
+        self.assertEqual(payload['cargo_reference'], tender.reference)
+
     def test_webhook_links_order_by_any_submission_reference(self):
         first = OdooCompany.objects.create(name='Lake Trans', base_url='https://lake.example.com')
         second = OdooCompany.objects.create(name='Second Trans', base_url='https://second.example.com')
@@ -1907,6 +2006,11 @@ class PendingPushTest(TestCase):
         self.assertEqual(push.tender.status, Tender.Status.SUCCESS)
         self.assertEqual(push.tender.external_id, 9)
         self.assertEqual(push.tender.cargo_reference, 'CAR0009')
+        self.assertTrue(push.tender.reference)
+        self.assertEqual(
+            push.tender.reference,
+            Tender.make_reference(push.tender.pk, push.tender.created_at),
+        )
 
     def test_flush_keeps_pending_when_still_down(self):
         push = self._enqueue()
