@@ -11,6 +11,8 @@
   --danger: #dc2626;
   --warning: #d97706;
   --info: #0284c7;
+  --hover: #f1f5f9;
+  --row-hover: #f8fafc;
   --radius: 10px;
   --shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.05);
   color-scheme: light;
@@ -29,6 +31,8 @@ html[data-theme='dark'] {
   --danger: #f87171;
   --warning: #fbbf24;
   --info: #38bdf8;
+  --hover: #334155;
+  --row-hover: #3b4a63;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
   color-scheme: dark;
 }
@@ -44,6 +48,43 @@ html[data-theme='dark'] select,
 html[data-theme='dark'] textarea {
   background: #0f172a;
   color: #e2e8f0;
+}
+
+html[data-theme='dark'] .searchable-options {
+  background: #0f172a;
+}
+
+html[data-theme='dark'] .searchable-option mark {
+  background: #fef08a;
+  color: #1e293b;
+}
+
+html[data-theme='dark'] thead th {
+  background: #1e293b;
+}
+
+html[data-theme='dark'] .order-detail-row > td {
+  background: #1e293b;
+}
+
+html[data-theme='dark'] .order-detail-lines th {
+  background: #1e293b;
+}
+
+html[data-theme='dark'] .order-detail-heading {
+  color: #e2e8f0;
+}
+
+html[data-theme='dark'] .order-row.row-expanded {
+  background-color: #1e3a5f;
+}
+
+html[data-theme='dark'] .storage-option.selected {
+  background: #1e3a5f;
+}
+
+html[data-theme='dark'] .btn-logout:hover {
+  background: #450a0a;
 }
 
 * {
@@ -226,7 +267,7 @@ a:hover {
 }
 
 .storage-option:hover {
-  background: #f5f7ff;
+  background: var(--hover);
 }
 
 .storage-option.selected {
@@ -508,7 +549,7 @@ a:hover {
 }
 
 .order-row:hover {
-  background-color: #f1f5f9;
+  background-color: var(--hover);
 }
 
 .order-row.row-expanded {
@@ -666,7 +707,7 @@ a:hover {
 
 .searchable-option:hover,
 .searchable-option.highlighted {
-  background: #f1f5f9;
+  background: var(--hover);
 }
 
 .searchable-option.selected {
@@ -720,7 +761,7 @@ tr:last-child td {
 }
 
 tr:hover td {
-  background: #f8fafc;
+  background: var(--row-hover);
 }
 
 /* ---------- Badges ---------- */
