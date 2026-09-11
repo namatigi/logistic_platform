@@ -14,7 +14,7 @@
       <div class="page-header">
         <div>
           <h1 class="page-title">{{ order.order_name }}</h1>
-          <p class="page-subtitle">Order #{{ order.order_id }} &middot; updated {{ fmtDate(order.updated_at) }}</p>
+          <p class="page-subtitle">Updated {{ fmtDate(order.updated_at) }}</p>
         </div>
         <a class="btn btn-secondary" v-bind:href="listUrl">&larr; Back to orders</a>
       </div>
@@ -56,14 +56,6 @@
         <hr style="border:none; border-top:1px solid #e2e8f0; margin:20px 0;">
 
         <div style="display:flex; flex-wrap:wrap; gap:20px 40px;">
-          <div>
-            <div style="color:#64748b; font-size:13px;">Cargo reference</div>
-            <strong>{{ order.cargo_reference || '-' }}</strong>
-          </div>
-          <div>
-            <div style="color:#64748b; font-size:13px;">Cargo ID</div>
-            <strong>{{ order.cargo_id || '-' }}</strong>
-          </div>
           <div>
             <div style="color:#64748b; font-size:13px;">Linked tender</div>
             <template v-if="order.tender_ref">

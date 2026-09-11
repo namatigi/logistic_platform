@@ -34,10 +34,8 @@
             <table>
               <thead>
                 <tr>
-                  <th>Order</th>
                   <th>Customer</th>
                   <th>TRANSPORTER</th>
-                  <th>Trans ref</th>
                   <th>Tender</th>
                   <th>Date</th>
                   <th>Amount</th>
@@ -51,12 +49,8 @@
                 <tr
                     class="order-row" v-bind:class="{ 'row-expanded': expandedId === o.id }"
                     @click="toggle(o)">
-                  <td>
-                    <strong>{{ o.order_name }}</strong>
-                  </td>
                   <td>{{ o.customer || '-' }}</td>
                   <td>{{ o.transporter_alias || '-' }}</td>
-                  <td>{{ o.cargo_reference || '-' }}</td>
                   <td>
                     <a v-if="o.tender_ref" v-bind:href="tenderListUrl">{{ o.tender_ref }}</a>
                     <span v-else style="color:#94a3b8;">not linked</span>
@@ -92,13 +86,9 @@
                   </td>
                 </tr>
                 <tr v-if="expandedId === o.id" class="order-detail-row">
-                  <td colspan="10" style="padding:0;">
+                  <td colspan="8" style="padding:0;">
                     <div v-if="detail(o)">
                       <div class="order-detail-summary">
-                        <div>
-                          <span class="detail-label">Order ID</span>
-                          <div><strong>#{{ detail(o).order_id }}</strong></div>
-                        </div>
                         <div>
                           <span class="detail-label">Payment</span>
                           <div><span class="badge" v-bind:class="detail(o).payment_status === 'paid' ? 'badge-success' : 'badge-warning'">{{ detail(o).payment_status === 'paid' ? 'Paid' : (detail(o).invoice_id ? 'Not paid' : '-') }}</span></div>
@@ -106,14 +96,6 @@
                         <div>
                           <span class="detail-label">State</span>
                           <div><span class="badge" v-bind:class="stateBadge(detail(o).state)">{{ detail(o).state || '-' }}</span></div>
-                        </div>
-                        <div>
-                          <span class="detail-label">Cargo reference</span>
-                          <div><strong>{{ detail(o).cargo_reference || '-' }}</strong></div>
-                        </div>
-                        <div>
-                          <span class="detail-label">Cargo ID</span>
-                          <div><strong>{{ detail(o).cargo_id || '-' }}</strong></div>
                         </div>
                         <div>
                           <span class="detail-label">Linked tender</span>
