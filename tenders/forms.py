@@ -113,3 +113,16 @@ class MediaConfigForm(forms.ModelForm):
     class Meta:
         model = ApiSetting
         fields = ('media_storage',)
+
+
+class MapConfigForm(forms.ModelForm):
+    class Meta:
+        model = ApiSetting
+        fields = (
+            'map_provider', 'map_api_key', 'map_tile_url', 'map_attribution',
+            'map_max_zoom',
+        )
+        widgets = {
+            'map_api_key': forms.PasswordInput(render_value=True),
+            'map_max_zoom': forms.NumberInput(attrs={'min': 1, 'max': 22}),
+        }

@@ -980,6 +980,34 @@ class SelcomPaymentTest(TestCase):
         self.assertContains(response, 'webhook/selcom')
 
 
+class MapConfigModelTest(TestCase):
+    def test_default_carto_url_without_key(self):
+        setting = ApiSetting.objects.create(map_provider='carto', map_api_key='')
+        self.assertEqual(setting.map_resolved_tile_url(), ApiSetting.MAP_PROVIDER_URLS['carto'])
+        self.assertEqual(setting.map_max_zoom, 18)
+        self.assertIn('OpenStreetMap', setting.map_resolved_attribution())
+
+    def test_provider_preset_url_substitutes_api_key(self):
+        setting = ApiSetting.objects.create(
+            map_provider='maptiler', map_api_key='ak-123', map_tile_url='',
+        )
+        url = setting.map_resolved_tile_url()
+        self.assertTrue(url.startswith('https://api.maptiler.com/maps/streets/'))
+        self.assertIn('key=ak-123', url)
+
+    def test_custom_tile_url_and_attribution_override(self):
+        setting = ApiSetting.objects.create(
+            map_provider='custom', map_api_key='AK123',
+            map_tile_url='https://tiles.example.com/{z}/{x}/{y}.png?k={APIKEY}',
+            map_attribution='&copy; Example tiles',
+        )
+        self.assertEqual(
+            setting.map_resolved_tile_url(),
+            'https://tiles.example.com/{z}/{x}/{y}.png?k=AK123',
+        )
+        self.assertEqual(setting.map_resolved_attribution(), '&copy; Example tiles')
+
+
 class AdminConfigurationTest(TestCase):
     def setUp(self):
         self.admin = CustomUser.objects.create_user(
@@ -990,7 +1018,7 @@ class AdminConfigurationTest(TestCase):
 
     def test_non_admin_redirected_from_config_pages(self):
         self.client.login(email='user@example.com', password='pass1234')
-        for name in ('config_odoo', 'config_selcom', 'config_email', 'config_media'):
+        for name in ('config_odoo', 'config_selcom', 'config_email', 'config_media', 'config_map'):
             response = self.client.get(reverse(f'tenders:{name}'))
             self.assertEqual(response.status_code, 302)
 
@@ -1187,6 +1215,7 @@ class AdminConfigurationTest(TestCase):
         self.assertContains(response, '>Selcom<')
         self.assertContains(response, '>Email<')
         self.assertContains(response, '>Files<')
+        self.assertContains(response, '>Map<')
 
     def test_media_page_renders_and_saves(self):
         self.client.login(email='admin@example.com', password='pass1234')
@@ -1201,6 +1230,49 @@ class AdminConfigurationTest(TestCase):
         self.assertRedirects(response, reverse('tenders:config_media'))
         self.setting.refresh_from_db()
         self.assertEqual(self.setting.media_storage, 's3')
+
+    def test_map_page_renders(self):
+        self.client.login(email='admin@example.com', password='pass1234')
+        response = self.client.get(reverse('tenders:config_map'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Map provider')
+        self.assertContains(response, 'API key')
+
+    def test_map_page_saves_and_resolves_url(self):
+        self.client.login(email='admin@example.com', password='pass1234')
+        response = self.client.post(
+            reverse('tenders:config_map'),
+            {
+                'map_provider': 'maptiler', 'map_api_key': 'tile-key-1',
+                'map_tile_url': '', 'map_attribution': '', 'map_max_zoom': '20',
+            },
+        )
+        self.assertRedirects(response, reverse('tenders:config_map'))
+        self.setting.refresh_from_db()
+        self.assertEqual(self.setting.map_provider, 'maptiler')
+        self.assertEqual(self.setting.map_api_key, 'tile-key-1')
+        self.assertEqual(self.setting.map_max_zoom, 20)
+        url = self.setting.map_resolved_tile_url()
+        self.assertIn('https://api.maptiler.com/maps/streets/', url)
+        self.assertIn('key=tile-key-1', url)
+
+    def test_map_page_custom_url(self):
+        self.client.login(email='admin@example.com', password='pass1234')
+        response = self.client.post(
+            reverse('tenders:config_map'),
+            {
+                'map_provider': 'custom', 'map_api_key': 'k', 'map_max_zoom': '18',
+                'map_tile_url': 'https://cdngeo.example.com/{z}/{x}/{y}.png?token={APIKEY}',
+                'map_attribution': '&copy; CdnGeo',
+            },
+        )
+        self.assertRedirects(response, reverse('tenders:config_map'))
+        self.setting.refresh_from_db()
+        self.assertEqual(
+            self.setting.map_resolved_tile_url(),
+            'https://cdngeo.example.com/{z}/{x}/{y}.png?token=k',
+        )
+        self.assertEqual(self.setting.map_resolved_attribution(), '&copy; CdnGeo')
 
 
 class OdooCompanyWebhookTest(TestCase):

@@ -27,6 +27,7 @@ from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
 from .forms import (
     IncomingEmailConfigForm,
+    MapConfigForm,
     MediaConfigForm,
     OdooCompanyConfigForm,
     OutgoingEmailConfigForm,
@@ -34,6 +35,7 @@ from .forms import (
     SelcomConfigForm,
     TenderForm,
 )
+from .context_processors import MAP_CONFIG_CACHE_KEY
 from .models import (
     ApiDiagnostic,
     ApiSetting,
@@ -952,6 +954,7 @@ def _config_context(request, active):
             (reverse('tenders:config_selcom'), 'Selcom', active == 'selcom'),
             (reverse('tenders:config_email'), 'Email', active == 'email'),
             (reverse('tenders:config_media'), 'Files', active == 'media'),
+            (reverse('tenders:config_map'), 'Map', active == 'map'),
         ],
     }
 
@@ -1078,6 +1081,27 @@ def config_media(request):
         'secret_key_set': bool(settings.AWS_SECRET_ACCESS_KEY.strip()),
     }
     return render(request, 'tenders/config_media.html', context)
+
+
+@login_required
+@_admin_required
+def config_map(request):
+    setting = _platform_setting()
+    if request.method == 'POST':
+        form = MapConfigForm(request.POST, instance=setting)
+        if form.is_valid():
+            form.save()
+            _flush_derived_caches()
+            messages.success(request, 'Map configuration saved. Tracking maps will use the new tiles.')
+            return redirect('tenders:config_map')
+    else:
+        form = MapConfigForm(instance=setting)
+    context = _config_context(request, 'map')
+    context['form'] = form
+    context['map_default_url'] = setting.map_resolved_tile_url()
+    context['map_default_attribution'] = setting.map_resolved_attribution()
+    context['needs_key'] = setting.map_provider in ApiSetting.MAP_PROVIDERS_NEEDING_KEY
+    return render(request, 'tenders/config_map.html', context)
 
 
 # ---------------------------------------------------------------------------
@@ -1277,13 +1301,13 @@ def _cached_json_bytes(key, timeout, loader):
 
 
 def _flush_derived_caches():
-    if not hasattr(cache, 'delete_pattern'):
-        return
     try:
-        cache.delete_pattern('api:dash:*')
-        cache.delete_pattern('api:tl:*')
-        cache.delete_pattern('api:ol:*')
-        cache.delete_pattern('api:trk:*')
+        cache.delete(MAP_CONFIG_CACHE_KEY)
+        if hasattr(cache, 'delete_pattern'):
+            cache.delete_pattern('api:dash:*')
+            cache.delete_pattern('api:tl:*')
+            cache.delete_pattern('api:ol:*')
+            cache.delete_pattern('api:trk:*')
     except Exception as exc:
         logger.warning('Derived-cache flush failed: %s', exc)
 

@@ -202,6 +202,13 @@ class ApiSetting(models.Model):
         LOCAL = 'local', 'Option A - Server volume'
         S3 = 's3', 'Option B - S3 object storage'
 
+    class MapProvider(models.TextChoices):
+        CARTO = 'carto', 'CARTO (free, no key)'
+        MAPTILER = 'maptiler', 'MapTiler'
+        STADIA = 'stadia', 'Stadia Maps'
+        THUNDERFOREST = 'thunderforest', 'Thunderforest'
+        CUSTOM = 'custom', 'Custom tile URL'
+
     media_storage = models.CharField(
         max_length=20,
         choices=MediaStorageOption.choices,
@@ -257,6 +264,74 @@ class ApiSetting(models.Model):
     smtp_username = models.CharField(max_length=255, blank=True)
     smtp_password = models.CharField(max_length=255, blank=True)
     email_from = models.CharField(max_length=255, blank=True)
+
+    MAP_DEFAULT_MAX_ZOOM = 18
+
+    MAP_PROVIDER_URLS = {
+        'carto': 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+        'maptiler': 'https://api.maptiler.com/maps/streets/{z}/{x}/{y}.png?key={APIKEY}',
+        'stadia': 'https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png?api_key={APIKEY}',
+        'thunderforest': 'https://tile.thunderforest.com/transport/{z}/{x}/{y}.png?apikey={APIKEY}',
+        'custom': '',
+    }
+
+    MAP_PROVIDER_ATTRIBUTION = {
+        'carto': (
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> '
+            'contributors &copy; <a href="https://carto.com/">CARTO</a>'
+        ),
+        'maptiler': (
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> '
+            'contributors &copy; <a href="https://www.maptiler.com/copyright/">MapTiler</a>'
+        ),
+        'stadia': (
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> '
+            'contributors &copy; <a href="https://www.stadiamaps.com/">Stadia Maps</a>'
+        ),
+        'thunderforest': (
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> '
+            'contributors &copy; <a href="https://www.thunderforest.com/">Thunderforest</a>'
+        ),
+        'custom': '',
+    }
+
+    MAP_PROVIDERS_NEEDING_KEY = ('maptiler', 'stadia', 'thunderforest')
+
+    map_provider = models.CharField(
+        max_length=20,
+        choices=MapProvider.choices,
+        default=MapProvider.CARTO,
+        help_text='Map provider whose tiles are used on the tracking maps.',
+    )
+    map_api_key = models.CharField(
+        max_length=300, blank=True,
+        help_text='API key for the chosen provider (MapTiler, Stadia, Thunderforest). Not needed for CARTO.',
+    )
+    map_tile_url = models.CharField(
+        max_length=500, blank=True,
+        help_text='Optional custom tile URL template. {APIKEY} is replaced with the API key. '
+                  'Leaflet placeholders {z} {x} {y} {s} {r} stay as-is.',
+    )
+    map_attribution = models.CharField(
+        max_length=500, blank=True,
+        help_text='Optional copyright attribution shown on the maps. Leave blank to use the provider default.',
+    )
+    map_max_zoom = models.PositiveIntegerField(
+        default=18,
+        help_text='Maximum zoom level the tiles support.',
+    )
+
+    def map_resolved_tile_url(self):
+        raw = self.map_tile_url.strip() or self.MAP_PROVIDER_URLS.get(self.map_provider, '')
+        if not raw:
+            raw = self.MAP_PROVIDER_URLS['carto']
+        return raw.replace('{APIKEY}', self.map_api_key.strip())
+
+    def map_resolved_attribution(self):
+        if self.map_attribution.strip():
+            return self.map_attribution.strip()
+        return self.MAP_PROVIDER_ATTRIBUTION.get(self.map_provider, '') or self.MAP_PROVIDER_ATTRIBUTION['carto']
+
     updated_at = models.DateTimeField(auto_now=True)
 
     SELCOM_SANDBOX_BASE = 'https://apigwdev.selcommobile.com/v1'

@@ -1,0 +1,211 @@
+{% extends 'base.html' %}
+{% block title %}Map &middot; Configuration &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container" style="max-width:840px;">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Configuration</h1>
+      <p class="page-subtitle">Integrations and endpoints used by the HYPAX platform.</p>
+    </div>
+  </div>
+
+  {% include 'tenders/config_tabs.html' %}
+
+  <div class="card">
+    <div class="card-title">Map provider</div>
+    <p class="form-help" style="margin-top:-4px; margin-bottom:16px;">
+      Choose which tile provider powers the tracking and route maps. The free
+      <strong>CARTO</strong> baseline needs no key; the others require your provider&rsquo;s
+      <strong>API key</strong>.
+    </p>
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Provider</label>
+        <select name="map_provider" id="map-provider">
+          {% for value, label in form.map_provider.field.choices %}
+            <option value="{{ value }}" {% if form.map_provider.value == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        {% if form.map_provider.errors %}<div class="field-error"><ul><li>{{ form.map_provider.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>API key</label>
+        <div class="api-key-row" style="display:flex; gap:8px; align-items:center;">
+          <input type="password" id="map-api-key" name="map_api_key" style="flex:1;"
+            value="{{ form.map_api_key.value|default_if_none:'' }}" autocomplete="off">
+          <button type="button" class="btn btn-secondary btn-sm" id="map-key-toggle" data-hidden="true">Show</button>
+        </div>
+        <span class="form-help" id="map-key-help">
+          {% if needs_key %}Required for the selected provider. It is embedded in the tile URLs the browsers request.{% else %}Not needed for CARTO &mdash; leave blank.{% endif %}
+        </span>
+        {% if form.map_api_key.errors %}<div class="field-error"><ul><li>{{ form.map_api_key.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Tile URL (optional override)</label>
+        <input type="text" id="map-tile-url" name="map_tile_url" value="{{ form.map_tile_url.value|default_if_none:'' }}" placeholder="https://{s}.basemaps.cartocdn.com/...">
+        <span class="form-help">
+          Leave blank to use the provider default. Use <code>{APIKEY}</code> as the placeholder for the API key;
+          Leaflet placeholders (<code>{z} {x} {y} {s} {r}</code>) are kept as-is.
+        </span>
+        <a href="#" id="map-reset-url" class="form-help" style="display:inline-block; margin-top:4px;">&larr; Restore provider default</a>
+        {% if form.map_tile_url.errors %}<div class="field-error"><ul><li>{{ form.map_tile_url.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:18px;">
+        <label>Attribution (optional override)</label>
+        <input type="text" id="map-attribution" name="map_attribution" value="{{ form.map_attribution.value|default_if_none:'' }}">
+        <span class="form-help">Copyright text shown on the maps. Leave blank to use the provider default.</span>
+        {% if form.map_attribution.errors %}<div class="field-error"><ul><li>{{ form.map_attribution.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-row" style="margin-bottom:8px;">
+        <label>Max zoom</label>
+        <input type="number" id="map-max-zoom" name="map_max_zoom" min="1" max="22"
+          value="{{ form.map_max_zoom.value|default_if_none:18 }}">
+        <span class="form-help">Maximum zoom level the tiles support (most providers: 18&ndash;20).</span>
+        {% if form.map_max_zoom.errors %}<div class="field-error"><ul><li>{{ form.map_max_zoom.errors.0 }}</li></ul></div>{% endif %}
+      </div>
+
+      <div class="form-actions" style="margin-top:8px;">
+        <button type="submit" class="btn btn-primary">Save configuration</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" style="padding:0; overflow:hidden;">
+    <div id="map-preview" style="height: 340px; width: 100%;"></div>
+  </div>
+  <p class="form-help" style="margin:6px 0 20px;">
+    Live preview of <code id="preview-url">{{ map_default_url }}</code>
+  </p>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script>
+  (function () {
+    const PROVIDER_PRESETS = {
+      'carto': {
+        url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+        needsKey: false,
+      },
+      'maptiler': {
+        url: 'https://api.maptiler.com/maps/streets/{z}/{x}/{y}.png?key={APIKEY}',
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://www.maptiler.com/copyright/">MapTiler</a>',
+        needsKey: true,
+      },
+      'stadia': {
+        url: 'https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png?api_key={APIKEY}',
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://www.stadiamaps.com/">Stadia Maps</a>',
+        needsKey: true,
+      },
+      'thunderforest': {
+        url: 'https://tile.thunderforest.com/transport/{z}/{x}/{y}.png?apikey={APIKEY}',
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://www.thunderforest.com/">Thunderforest</a>',
+        needsKey: true,
+      },
+      'custom': { url: '', attribution: '', needsKey: false },
+    };
+
+    const form = document.querySelector('form');
+    const providerSel = document.getElementById('map-provider');
+    const keyField = document.getElementById('map-api-key');
+    const urlField = document.getElementById('map-tile-url');
+    const attrField = document.getElementById('map-attribution');
+    const zoomField = document.getElementById('map-max-zoom');
+    const keyHelp = document.getElementById('map-key-help');
+    const resetUrl = document.getElementById('map-reset-url');
+    const keyToggle = document.getElementById('map-key-toggle');
+    const previewUrl = document.getElementById('preview-url');
+
+    const map = L.map('map-preview').setView([-6.7924, 39.2083], 6);
+    let tileLayer = null;
+
+    function effectiveUrl() {
+      const preset = PROVIDER_PRESETS[providerSel.value] || PROVIDER_PRESETS['carto'];
+      let raw = urlField.value.trim() || preset.url;
+      raw = raw.replace('{APIKEY}', keyField.value);
+      previewUrl.textContent = raw || '&mdash;';
+      return raw;
+    }
+
+    function effectiveAttribution() {
+      const preset = PROVIDER_PRESETS[providerSel.value] || PROVIDER_PRESETS['carto'];
+      return attrField.value.trim() || preset.attribution;
+    }
+
+    function effectiveMaxZoom() {
+      const z = parseInt(zoomField.value, 10);
+      return z >= 1 && z <= 22 ? z : 18;
+    }
+
+    function refreshPreview() {
+      const url = effectiveUrl();
+      if (tileLayer) {
+        map.removeLayer(tileLayer);
+        tileLayer = null;
+      }
+      if (!url) return;
+      tileLayer = L.tileLayer(url, {
+        attribution: effectiveAttribution(),
+        maxZoom: effectiveMaxZoom(),
+      }).addTo(map);
+    }
+
+    function updateKeyHelp() {
+      const preset = PROVIDER_PRESETS[providerSel.value] || PROVIDER_PRESETS['carto'];
+      keyHelp.innerHTML = preset.needsKey
+        ? 'Required for this provider. It is embedded in the tile URLs the browsers request.'
+        : 'Not needed for this provider &mdash; leave blank.';
+    }
+
+    function onProviderChange() {
+      const preset = PROVIDER_PRESETS[providerSel.value] || PROVIDER_PRESETS['carto'];
+      const current = urlField.value.trim();
+      const isPreset = Object.values(PROVIDER_PRESETS).some(p => p.url && p.url === current);
+      if (!current || isPreset) {
+        urlField.value = preset.url;
+        attrField.value = '';
+      }
+      updateKeyHelp();
+      refreshPreview();
+    }
+
+    providerSel.addEventListener('change', onProviderChange);
+    urlField.addEventListener('input', refreshPreview);
+    attrField.addEventListener('input', refreshPreview);
+    zoomField.addEventListener('input', refreshPreview);
+    keyField.addEventListener('input', refreshPreview);
+
+    keyToggle.addEventListener('click', function () {
+      const hidden = keyToggle.dataset.hidden === 'true';
+      keyField.type = hidden ? 'text' : 'password';
+      keyToggle.dataset.hidden = String(!hidden);
+      keyToggle.textContent = hidden ? 'Hide' : 'Show';
+    });
+
+    resetUrl.addEventListener('click', function (e) {
+      e.preventDefault();
+      const preset = PROVIDER_PRESETS[providerSel.value] || PROVIDER_PRESETS['carto'];
+      urlField.value = preset.url;
+      attrField.value = '';
+      refreshPreview();
+    });
+
+    if (typeof window.L === 'undefined' || typeof L.map !== 'function') {
+      var style = document.createElement('style');
+      style.textContent = '#map-preview { background:#e2e8f0; }';
+      document.head.appendChild(style);
+    }
+
+    updateKeyHelp();
+    refreshPreview();
+  })();
+</script>
+{% endblock %}

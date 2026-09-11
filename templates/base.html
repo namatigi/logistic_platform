@@ -92,7 +92,7 @@
           <a href="{% url 'tenders:tracker' %}">Tracker</a>
         </li>
         {% if user.role == 'administrator' %}
-        <li class="nav-dropdown {% if request.resolver_match.url_name == 'config_odoo' or request.resolver_match.url_name == 'config_selcom' or request.resolver_match.url_name == 'config_email' or request.resolver_match.url_name == 'config_media' %}active{% endif %}">
+        <li class="nav-dropdown {% if request.resolver_match.url_name == 'config_odoo' or request.resolver_match.url_name == 'config_selcom' or request.resolver_match.url_name == 'config_email' or request.resolver_match.url_name == 'config_media' or request.resolver_match.url_name == 'config_map' %}active{% endif %}">
           <a href="{% url 'tenders:config_odoo' %}" class="nav-dropdown-toggle">Configuration</a>
           <ul class="nav-dropdown-menu">
             <li class="{% if request.resolver_match.url_name == 'config_odoo' %}active{% endif %}">
@@ -106,6 +106,9 @@
             </li>
             <li class="{% if request.resolver_match.url_name == 'config_media' %}active{% endif %}">
               <a href="{% url 'tenders:config_media' %}">Files</a>
+            </li>
+            <li class="{% if request.resolver_match.url_name == 'config_map' %}active{% endif %}">
+              <a href="{% url 'tenders:config_map' %}">Map</a>
             </li>
           </ul>
         </li>
