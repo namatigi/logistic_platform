@@ -2012,16 +2012,14 @@ def api_invoices(request):
         Order.objects.filter(order_q, lines__awarded=True)
         .select_related('tender')
         .distinct()
-        .order_by('-awarded_at', '-created_at')
     )
-    invoice_map = {
-        inv.order_id: inv
-        for inv in Invoice.objects.filter(order__in=awarded_orders).select_related('transporter')
-    }
-    rows = []
-    for order in awarded_orders:
-        invoice = invoice_map.get(order.pk)
-        rows.append(_invoice_dict(invoice) if invoice else _synthetic_invoice_dict(order))
+    invoices = (
+        Invoice.objects.filter(status=Invoice.Status.PAID)
+        .filter(order__in=awarded_orders)
+        .select_related('order__tender', 'transporter')
+        .order_by('-order__awarded_at', '-created_at')
+    )
+    rows = [_invoice_dict(inv) for inv in invoices]
     return JsonResponse({
         'ok': True,
         'selcom_enabled': _platform_setting().selcom_enabled,
@@ -2211,6 +2209,11 @@ def admin_escrow(request):
 def api_admin_escrow(request):
     accounts = (
         EscrowAccount.objects
+        .annotate(
+            _total_invoices=Count('invoices'),
+            _pending_invoices=Count('invoices', filter=Q(invoices__status=Invoice.Status.PENDING)),
+        )
+        .filter(_total_invoices__gt=0, _pending_invoices=0)
         .select_related('tender', 'user', 'payment_terms')
         .prefetch_related('invoices__order__tender', 'invoices__transporter', 'transporters')
         .order_by('-created_at')

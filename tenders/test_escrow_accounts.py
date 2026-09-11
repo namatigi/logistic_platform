@@ -175,13 +175,8 @@ class EscrowAccountsTest(TestCase):
 
         self.client.login(email='admin@example.com', password='pass1234')
         res = self.client.get(reverse('tenders:api_admin_escrow'))
-        data = res.json()['escrow_accounts'][0]
-        self.assertEqual(set(data['invoice_numbers']), {i.number for i in invoices})
-        self.assertEqual(set(data['transporter_names']), {'Transit Ltd', 'Haulmax Ltd'})
-        self.assertIn(',', data['transporter'])
-        self.assertEqual(data['cargo_reference'], 'CAR9001')
-        self.assertEqual(data['status'], 'open')
-        self.assertEqual(data['trucks'], ['Freight'])
+        self.assertEqual(res.json()['escrow_accounts'], [])
+        self.assertEqual(escrow.status, 'open')
 
         invoice_a.status = Invoice.Status.PAID
         invoice_a.save(update_fields=('status',))
@@ -193,3 +188,12 @@ class EscrowAccountsTest(TestCase):
         _refresh_escrow(escrow)
         escrow.refresh_from_db()
         self.assertEqual(escrow.status, EscrowAccount.Status.PAID)
+
+        res = self.client.get(reverse('tenders:api_admin_escrow'))
+        data = res.json()['escrow_accounts'][0]
+        self.assertEqual(set(data['invoice_numbers']), {i.number for i in invoices})
+        self.assertEqual(set(data['transporter_names']), {'Transit Ltd', 'Haulmax Ltd'})
+        self.assertIn(',', data['transporter'])
+        self.assertEqual(data['cargo_reference'], 'CAR9001')
+        self.assertEqual(data['status'], 'paid')
+        self.assertEqual(data['trucks'], ['Freight'])

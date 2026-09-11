@@ -557,7 +557,7 @@ class InvoicesPageTest(TestCase):
         ids = {i['id'] for i in data['invoices']}
         self.assertEqual(ids, {inv_a.pk, inv_b.pk})
 
-    def test_pending_invoices_now_returned_with_selcom_flag(self):
+    def test_only_paid_invoices_returned(self):
         inv_a = self._order(self.user_a, self._tender(self.user_a, 'REF-A'), 7010, 'REF-A')
         inv_b = self._order(self.user_a, self._tender(self.user_a, 'REF-B'), 7011, 'REF-B')
         inv_b.status = 'paid'
@@ -567,7 +567,7 @@ class InvoicesPageTest(TestCase):
         data = response.json()
         ids = [i['id'] for i in data['invoices']]
         self.assertIn(inv_b.pk, ids)
-        self.assertIn(inv_a.pk, ids)
+        self.assertNotIn(inv_a.pk, ids)
         self.assertIn('selcom_enabled', data)
 
     def test_user_sees_only_own_invoices(self):
@@ -736,17 +736,12 @@ class InvoicesPageTest(TestCase):
         )
         return order
 
-    def test_invoices_api_does_not_create_invoice_or_escrow(self):
+    def test_invoices_api_hides_uninvoiced_until_paid(self):
         from tenders.models import EscrowAccount, Invoice
         order = self._awarded_order(7090, 'DEFER')
         self.client.login(email='invoice-a@example.com', password='pass1234')
         data = self.client.get(reverse('tenders:api_invoices')).json()
-        row = next(r for r in data['invoices'] if r['order_id'] == 7090)
-        self.assertIsNone(row['id'])
-        self.assertEqual(row['order_pk'], order.pk)
-        self.assertEqual(row['number'], 'INV-7090')
-        self.assertEqual(row['status'], 'pending')
-        self.assertEqual(row['amount_total'], '100.00')
+        self.assertFalse(any(r['order_id'] == 7090 for r in data['invoices']))
         self.assertFalse(Invoice.objects.filter(order=order).exists())
         self.assertFalse(EscrowAccount.objects.filter(tender=order.tender).exists())
 
