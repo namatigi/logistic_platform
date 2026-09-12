@@ -2409,7 +2409,7 @@ def admin_escrow_detail(request, pk):
                 if profile is not None:
                     agent_commission_rate = profile.agent_commission or Decimal('0.00')
                     agent_commission_amount = (
-                        (agent_commission_rate / Decimal('100')) * invoice_total
+                        (agent_commission_rate / Decimal('100')) * hypax_commission
                     ).quantize(Decimal('0.01'))
 
         line_items = []

@@ -77,7 +77,7 @@
 
     <div class="fees-row">
       <div class="fee">
-        <div class="stat-label">Agent commission{% if inv.agent_name %} &middot; {{ inv.agent_name }}{% endif %}</div>
+        <div class="stat-label">Agent commission{% if inv.agent_name %} &middot; {{ inv.agent_name }}{% endif %} (% of HYPAX commission)</div>
         <div class="fee-value">{{ inv.agent_commission_rate|floatformat:2 }}% = {{ currency }} {{ inv.agent_commission_amount|floatformat:2 }}</div>
       </div>
       <div class="fee">
