@@ -411,7 +411,7 @@ class EscrowAccountsTest(TestCase):
             order_id=9031, order_name='ORD-9031', company_name='Transit Ltd',
             amount_total=1000, currency='TZS', trans_reference='CAR9031', tender=tender,
         )
-        OrderLine.objects.create(order=order, line_id=1, product_name='Freight', quantity=1, price_unit=1000, price_total=1000, awarded=True)
+        OrderLine.objects.create(order=order, line_id=1, product_name='Freight', quantity=1, price_unit=1000, price_total=1000, commission=50, awarded=True)
         invoice = get_or_create_invoice(order)
         escrow = EscrowAccount.objects.filter(tender=tender).first()
         invoice.transporter.agents.add(agent)
@@ -477,7 +477,7 @@ class EscrowAccountsTest(TestCase):
         )
         OrderLine.objects.create(
             order=order, line_id=1, product_name='Freight', quantity=1,
-            price_unit=1000, price_subtotal=900, price_total=900, awarded=True,
+            price_unit=1000, price_subtotal=900, price_total=900, commission=45, awarded=True,
         )
         invoice = get_or_create_invoice(order)
         escrow = EscrowAccount.objects.filter(tender=tender).first()
