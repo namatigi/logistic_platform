@@ -577,6 +577,7 @@ class AgentPortalTest(TestCase):
         self.assertEqual(full['awarded_lines'], 1)
         self.assertEqual(full['lines_total'], 1)
         self.assertEqual(full['confirmation'], 'full')
+        self.assertEqual(full['currency'], 'TZS')
         part = by_name['ORD-9102']
         self.assertEqual(part['awarded_lines'], 1)
         self.assertEqual(part['lines_total'], 2)
@@ -665,7 +666,7 @@ class AgentMyAccountTest(TestCase):
         )
         self.order = Order.objects.create(
             order_id=9300, order_name='ORD-ME', customer='Me Corp',
-            company_name='MeFleet', company_id=31, tender=self.tender,
+            company_name='MeFleet', company_id=31, tender=self.tender, currency='USD',
         )
         for line_id in (1, 2):
             OrderLine.objects.create(
@@ -701,18 +702,47 @@ class AgentMyAccountTest(TestCase):
         self.assertEqual(row['order_name'], 'ORD-ME')
         self.assertEqual(row['tender_ref'], 'MT-001')
         self.assertEqual(row['transporter'], 'MeFleet')
+        self.assertEqual(row['currency'], 'USD')
         self.assertEqual(row['amount'], '2000.00')
         self.assertEqual(row['commission_total'], '100.00')
         self.assertEqual(row['vat_total'], '520.00')
         self.assertEqual(row['commission'], '62.00')
-        self.assertEqual(data['totals']['amount'], '2000.00')
-        self.assertEqual(data['totals']['commission'], '62.00')
         self.assertEqual(data['totals']['orders'], 1)
+        self.assertEqual(len(data['totals']['currencies']), 1)
+        bucket = data['totals']['currencies'][0]
+        self.assertEqual(bucket['currency'], 'USD')
+        self.assertEqual(bucket['amount'], '2000.00')
+        self.assertEqual(bucket['commission'], '62.00')
 
     def test_my_account_api_scoped_to_linked_transporter(self):
         self._login()
         data = self.client.get(reverse('users:api_my_account')).json()
         self.assertEqual([o['order_name'] for o in data['orders']], ['ORD-ME'])
+
+    def test_my_account_api_buckets_totals_by_currency(self):
+        tzs_tender = Tender.objects.create(
+            user=self.owner, route_loading='Nairobi', route_delivery='Mombasa',
+            customer='Me Corp', cargo_type=Tender.CargoType.DRY_VAN,
+            truck_type=Tender.TruckType.TRUCK, weight=20.0, number_of_trucks=2,
+            distance_km=480, cargo_date=timezone.localdate(), trans_reference='MT-002',
+            status=Tender.Status.SUCCESS,
+        )
+        tzs_order = Order.objects.create(
+            order_id=9302, order_name='ORD-ME-TZS', customer='Me Corp',
+            company_name='MeFleet', company_id=31, tender=tzs_tender,
+        )
+        OrderLine.objects.create(
+            order=tzs_order, line_id=1, product_name='Sand', quantity=1, price_unit=100,
+            commission=0, price_subtotal=100, price_total=100, awarded=True,
+        )
+        self._login()
+        data = self.client.get(reverse('users:api_my_account')).json()
+        self.assertEqual(len(data['orders']), 2)
+        by_currency = {b['currency']: b for b in data['totals']['currencies']}
+        self.assertEqual(set(by_currency.keys()), {'USD', 'TZS'})
+        self.assertEqual(by_currency['USD']['amount'], '2000.00')
+        self.assertEqual(by_currency['TZS']['amount'], '100.00')
+        self.assertEqual(by_currency['TZS']['commission'], '-1.50')
 
     def test_my_account_page_renders_for_agent(self):
         self._login()

@@ -21,13 +21,13 @@
         <div class="stat-value">{{ totals.orders }}</div>
         <div class="stat-label">Awarded orders</div>
       </div>
-      <div class="stat">
-        <div class="stat-value">{{ money(totals.amount, 'TZS') }}</div>
-        <div class="stat-label">Awarded amount</div>
+      <div class="stat" v-for="c in totals.currencies" v-bind:key="'amount-' + c.currency">
+        <div class="stat-value">{{ money(c.amount, c.currency) }}</div>
+        <div class="stat-label">Awarded amount ({{ c.currency }})</div>
       </div>
-      <div class="stat">
-        <div class="stat-value">{{ money(totals.commission, 'TZS') }}</div>
-        <div class="stat-label">Expected commission at {{ rate }}%</div>
+      <div class="stat" v-for="c in totals.currencies" v-bind:key="'comm-' + c.currency">
+        <div class="stat-value">{{ money(c.commission, c.currency) }}</div>
+        <div class="stat-label">Expected commission at {{ rate }}% ({{ c.currency }})</div>
       </div>
     </div>
 
@@ -59,9 +59,9 @@
                 <span class="badge" v-bind:class="o.confirmation === 'full' ? 'badge-success' : 'badge-warning'">{{ o.confirmation_label }}</span>
                 <br><span style="color:#64748b; font-size:13px;">{{ o.awarded_lines }} of {{ o.lines_total }} lines</span>
               </td>
-              <td><strong>{{ money(o.amount, 'TZS') }}</strong></td>
+              <td><strong>{{ money(o.amount, o.currency) }}</strong></td>
               <td>
-                <strong style="color:#16a34a;">{{ money(o.commission, 'TZS') }}</strong>
+                <strong style="color:#16a34a;">{{ money(o.commission, o.currency) }}</strong>
                 <br><span style="color:#64748b; font-size:13px;">{{ o.commission_rate }}% of pool</span>
               </td>
             </tr>
@@ -86,7 +86,7 @@
       data: function () {
         return {
           orders: [],
-          totals: { orders: 0, amount: '0.00', commission: '0.00' },
+          totals: { orders: 0, currencies: [] },
           rate: '',
           error: ''
         };

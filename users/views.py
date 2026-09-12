@@ -469,6 +469,7 @@ def api_agent_awarded(request):
             'company_name': order.company_name,
             'state': order.state or '',
             'awarded_amount': str(order.awarded_amount),
+            'currency': order.currency or 'TZS',
             'lines_total': lines_total,
             'awarded_lines': awarded_lines,
             'confirmation': confirmation,
@@ -485,15 +486,15 @@ def api_my_account(request):
     def account():
         profile = getattr(request.user, 'profile', None)
         rate = profile.agent_commission or Decimal('0.00') if profile is not None else Decimal('0.00')
+
+        def empty_totals():
+            return {'orders': 0, 'currencies': []}
+
         if request.user.role != CustomUser.Role.AGENT:
-            return {'rate': str(rate), 'orders': [], 'totals': {
-                'orders': 0, 'amount': '0.00', 'commission': '0.00',
-            }}
+            return {'rate': str(rate), 'orders': [], 'totals': empty_totals()}
         q = _agent_match_q(request.user)
         if not q:
-            return {'rate': str(rate), 'orders': [], 'totals': {
-                'orders': 0, 'amount': '0.00', 'commission': '0.00',
-            }}
+            return {'rate': str(rate), 'orders': [], 'totals': empty_totals()}
         orders = (
             Order.objects.filter(q, lines__awarded=True)
             .select_related('tender')
@@ -502,10 +503,10 @@ def api_my_account(request):
             .order_by('-created_at')
         )
         rows = []
-        total_amount = Decimal('0.00')
-        total_commission = Decimal('0.00')
+        buckets = {}
         for order in orders:
             tender = order.tender
+            currency = order.currency or 'TZS'
             lines = list(order.lines.all())
             awarded_lines = sum(1 for line in lines if line.awarded)
             lines_total = len(lines)
@@ -513,8 +514,11 @@ def api_my_account(request):
             if awarded_lines < lines_total:
                 confirmation = 'partial'
             commission = _agent_order_commission(order, agent=request.user, lines=lines)
-            total_amount += commission['awarded_total']
-            total_commission += commission['agent_commission_amount']
+            bucket = buckets.setdefault(
+                currency, {'amount': Decimal('0.00'), 'commission': Decimal('0.00')},
+            )
+            bucket['amount'] += commission['awarded_total']
+            bucket['commission'] += commission['agent_commission_amount']
             rows.append({
                 'id': order.pk,
                 'order_id': order.order_id,
@@ -528,6 +532,7 @@ def api_my_account(request):
                 'confirmation_label': 'Fully confirmed' if confirmation == 'full' else 'Partially confirmed',
                 'awarded_lines': awarded_lines,
                 'lines_total': lines_total,
+                'currency': currency,
                 'amount': str(commission['awarded_total'].quantize(Decimal('0.01'))),
                 'amount_expected': str(commission['invoice_total']),
                 'commission': str(commission['agent_commission_amount'].quantize(Decimal('0.01'))),
@@ -536,14 +541,18 @@ def api_my_account(request):
                 'vat_total': str(commission['vat_total']),
                 'created_at': order.created_at.isoformat(),
             })
+        currencies = [
+            {
+                'currency': cur,
+                'amount': str(bucket['amount'].quantize(Decimal('0.01'))),
+                'commission': str(bucket['commission'].quantize(Decimal('0.01'))),
+            }
+            for cur, bucket in buckets.items()
+        ]
         return {
             'rate': str(rate),
             'orders': rows,
-            'totals': {
-                'orders': len(rows),
-                'amount': str(total_amount.quantize(Decimal('0.01'))),
-                'commission': str(total_commission.quantize(Decimal('0.01'))),
-            },
+            'totals': {'orders': len(rows), 'currencies': currencies},
         }
 
     return JsonResponse({'ok': True, **account()})

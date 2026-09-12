@@ -44,7 +44,7 @@
                 <br><span style="color:#64748b; font-size:13px;">{{ o.awarded_lines }} of {{ o.lines_total }} lines</span>
               </td>
               <td><span class="badge" v-bind:class="'badge-' + o.state">{{ o.state || '-' }}</span></td>
-              <td><strong>{{ money(o.awarded_amount, 'TZS') }}</strong></td>
+              <td><strong>{{ money(o.awarded_amount, o.currency) }}</strong></td>
               <td>{{ fmtDate(o.created_at) }}</td>
             </tr>
           </tbody>
