@@ -37,8 +37,11 @@
     </div>
 
     <div class="inv-total">
-      <span class="stat-label">Total</span>
-      <span class="stat-value" style="font-size:20px;">{{ currency }} {{ inv.awarded_total|floatformat:2 }}</span>
+      <div style="display:flex; flex-direction:column; gap:2px;">
+        <span class="stat-label">Awarded total</span>
+        <span style="color:var(--muted); font-size:13px;">{{ currency }} {{ inv.awarded_total|floatformat:2 }}</span>
+      </div>
+      <span class="stat-value" style="font-size:20px;">{{ currency }} {{ inv.invoice_total|floatformat:2 }}</span>
     </div>
 
     <table style="margin-top:16px;">

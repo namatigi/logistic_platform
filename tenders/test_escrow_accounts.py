@@ -453,3 +453,41 @@ class EscrowAccountsTest(TestCase):
         self.client.login(email='admin@example.com', password='pass1234')
         res = self.client.get(reverse('tenders:admin_escrow_detail', args=[999999]))
         self.assertEqual(res.status_code, 404)
+
+    def test_escrow_account_detail_uses_total_formula(self):
+        from tenders.views import get_or_create_invoice
+        from tenders.models import Order, Tender, EscrowAccount, OrderLine, PaymentTerm
+        from users.models import Profile
+        agent = CustomUser.objects.create_user(
+            email='agent@example.com', password='pass1234', role=CustomUser.Role.AGENT,
+        )
+        Profile.objects.create(user=agent, agent_commission=Decimal('10'))
+        term = PaymentTerm.objects.create(user=self.user, name='On confirmation')
+        term.items.create(text='advance', percent=50)
+        term.items.create(text='balance on delivery', percent=50)
+        tender = Tender.objects.create(
+            user=self.user, route_loading='Dar es Salaam', route_delivery='Mombasa',
+            customer='HYPAX', cargo_type='container_20', truck_type='trailer',
+            weight=10, number_of_trucks=1, distance_km=100, cargo_date='2026-09-01',
+            payment_terms=term,
+        )
+        order = Order.objects.create(
+            order_id=9051, order_name='ORD-9051', company_name='Transit Ltd',
+            amount_total=990, currency='TZS', trans_reference='CAR9051', tender=tender,
+        )
+        OrderLine.objects.create(
+            order=order, line_id=1, product_name='Freight', quantity=1,
+            price_unit=1000, price_subtotal=900, price_total=900, commission=5, awarded=True,
+        )
+        invoice = get_or_create_invoice(order)
+        escrow = EscrowAccount.objects.filter(tender=tender).first()
+        invoice.transporter.agents.add(agent)
+
+        self.client.login(email='admin@example.com', password='pass1234')
+        res = self.client.get(reverse('tenders:admin_escrow_detail', args=[escrow.pk]))
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, '1000.00')
+        self.assertContains(res, '500.00')
+        self.assertContains(res, '45.00')
+        self.assertContains(res, '100.00')
+        self.assertContains(res, '900.00')

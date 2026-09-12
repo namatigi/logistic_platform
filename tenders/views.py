@@ -2378,12 +2378,26 @@ def admin_escrow_detail(request, pk):
             transporter_name = (inv.order.company_name or '').strip()
 
         awarded_total = Decimal('0.00')
+        subtotal_total = Decimal('0.00')
+        unit_total = Decimal('0.00')
         hypax_commission = Decimal('0.00')
         for line in inv.order.lines.filter(awarded=True):
-            awarded_total += line.price_total or Decimal('0.00')
+            price_total = line.price_total or Decimal('0.00')
+            subtotal_total += line.price_subtotal or Decimal('0.00')
+            unit_total += line.price_unit or Decimal('0.00')
+            awarded_total += price_total
             if line.commission:
-                hypax_commission += (line.commission / Decimal('100')) * (line.price_total or Decimal('0.00'))
+                hypax_commission += (line.commission / Decimal('100')) * price_total
         hypax_commission = hypax_commission.quantize(Decimal('0.01'))
+
+        order_total = inv.order.amount_total or Decimal('0.00')
+        if subtotal_total:
+            invoice_total = (
+                ((order_total - subtotal_total) / subtotal_total) * unit_total + subtotal_total
+            )
+        else:
+            invoice_total = order_total
+        invoice_total = invoice_total.quantize(Decimal('0.01'))
 
         agent_name = ''
         agent_commission_rate = Decimal('0.00')
@@ -2396,12 +2410,12 @@ def admin_escrow_detail(request, pk):
                 if profile is not None:
                     agent_commission_rate = profile.agent_commission or Decimal('0.00')
                     agent_commission_amount = (
-                        (agent_commission_rate / Decimal('100')) * awarded_total
+                        (agent_commission_rate / Decimal('100')) * invoice_total
                     ).quantize(Decimal('0.01'))
 
         line_items = []
         for ti in term_items:
-            amount = (Decimal(ti.percent) / Decimal('100')) * awarded_total
+            amount = (Decimal(ti.percent) / Decimal('100')) * invoice_total
             line_items.append({
                 'text': ti.text,
                 'percent': ti.percent,
@@ -2411,6 +2425,7 @@ def admin_escrow_detail(request, pk):
         breakdown.append({
             'invoice_number': inv.number,
             'transporter_name': transporter_name or '-',
+            'invoice_total': invoice_total,
             'awarded_total': awarded_total,
             'deposited_amount': inv.deposited_amount or Decimal('0.00'),
             'status': inv.status,
