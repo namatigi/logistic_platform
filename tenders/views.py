@@ -630,6 +630,14 @@ def perform_award(order, setting, line_ids, is_partial):
         if not set(line_ids).issubset(valid_ids):
             return {'ok': False, 'message': 'Some selected order lines do not belong to this order.'}
 
+    if line_ids:
+        extra = OrderLine.objects.filter(order=order, line_id__in=line_ids).exclude(awarded=True).count()
+    else:
+        extra = order.lines.exclude(awarded=True).count()
+    quota_error = _truck_quota_exceeded(order, extra=extra)
+    if quota_error:
+        return {'ok': False, 'message': quota_error}
+
     cargo_name = (
         (order.tender.tender_reference() if order.tender else '')
         or order.trans_reference
@@ -1455,25 +1463,68 @@ def api_order_list(request):
     role = request.user.role
     scope = 'all' if role == CustomUser.Role.ADMINISTRATOR else request.user.pk
 
+    def order_key(ref, trans_ref):
+        return (ref or trans_ref or '').strip() or None
+
     def loader():
         per_page = 15
         base = Order.objects.filter(_visible_orders_q(request))
         total = base.count()
-        pages = max((total + per_page - 1) // per_page, 1)
+        ordered = base.order_by('-date_order', '-created_at')
+        if total == 0:
+            data = _page_meta(1, 1, per_page, 0)
+            data.update({'ok': True, 'groups': [], 'total': 0})
+            return data
+
+        rows = list(ordered.values_list('pk', 'tender__reference', 'tender__trans_reference', 'trans_reference'))
+        ids = [r[0] for r in rows]
+        keys = [order_key(r[1], r[2]) if (r[1] or r[2]) else order_key(None, r[3]) for r in rows]
+
+        first_index = {}
+        last_index = {}
+        for i, key in enumerate(keys):
+            if key is not None:
+                first_index.setdefault(key, i)
+                last_index[key] = i
+            else:
+                first_index.setdefault(key, i)
+                last_index[key] = i
+
+        bounds = [0]
+        start = 0
+        n = len(ids)
+        while start < n:
+            end = min(start + per_page, n)
+            while True:
+                spill = None
+                for i in range(start, end):
+                    k = keys[i]
+                    last_i = last_index[k]
+                    if last_i >= end:
+                        spill = last_i + 1
+                        break
+                if spill is None:
+                    break
+                end = spill
+            bounds.append(end)
+            start = end
+
+        pages = max(len(bounds) - 1, 1)
         p = min(page, pages)
+        page_ids = ids[bounds[p - 1]:bounds[p]]
         orders = (
-            base.prefetch_related('tender', 'invoice')
+            base.filter(pk__in=page_ids)
+            .prefetch_related('tender', 'invoice')
             .annotate(
                 _line_count=Count('lines'),
                 _awarded_line_count=Count('lines', filter=Q(lines__awarded=True)),
                 _awarded_amount_total=Sum('lines__price_total', filter=Q(lines__awarded=True)),
             )
             .order_by('-date_order', '-created_at')
-            [(p - 1) * per_page: p * per_page]
         )
         grouped = {}
         for o in orders:
-            key = o.tender.tender_reference() if o.tender else None
+            key = order_key(o.tender.reference, o.tender.trans_reference) if o.tender_id else order_key(None, o.trans_reference)
             grouped.setdefault(key, []).append(o)
         groups = [{
             'grouper': key or '',
@@ -1481,7 +1532,7 @@ def api_order_list(request):
             'orders': [_order_dict(o) for o in items],
         } for key, items in grouped.items()]
         data = _page_meta(p, pages, per_page, total)
-        data.update({'ok': True, 'groups': groups, 'total': len(orders)})
+        data.update({'ok': True, 'groups': groups, 'total': len(page_ids)})
         return data
 
     return JsonResponse(_cached(_cache_key('ol', scope, page), 5, loader))
@@ -1556,19 +1607,26 @@ def api_order_pay(request, pk):
     return _confirm_invoice_paid(invoice)
 
 
-def _truck_quota_exceeded(order):
+def _truck_quota_exceeded(order, extra=0):
     """Return an error message when a tender's awarded lines exceed its truck quota.
 
     A tender needs a fixed number of trucks; each awarded order line represents
     one quoted truck. When more lines are awarded across the whole tender than
-    the number of trucks needed, payment for any of its orders is blocked.
+    the number of trucks needed, payment for any of its orders is blocked (and
+    confirmations adding ``extra`` lines are refused up front: the total number
+    of awarded order lines can never exceed the number of trucks in the tender).
     Returns None when the quota is fine (or there is nothing to compare).
     """
     tender = order.tender if order is not None else None
     if tender is None or not tender.number_of_trucks:
         return None
     awarded = OrderLine.objects.filter(order__tender=tender, awarded=True).count()
-    if awarded > tender.number_of_trucks:
+    if awarded + extra > tender.number_of_trucks:
+        if extra:
+            return (
+                f'Order confirmation not allowed: this tender needs {tender.number_of_trucks} truck(s), '
+                f'{awarded} already awarded and this confirmation adds {extra} more.'
+            )
         return (
             f'Awarded trucks have exceeded the number of trucks needed '
             f'({awarded} awarded, {tender.number_of_trucks} needed).'

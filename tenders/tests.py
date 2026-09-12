@@ -96,10 +96,14 @@ class OrderListPerformanceTest(TestCase):
             )
 
     def test_order_list_query_count_does_not_grow_with_orders(self):
+        from django.core.cache import cache
         self._make_orders(5)
+        self.client.get(reverse('tenders:api_order_list'))
+        cache.clear()
         with CaptureQueriesContext(connection) as first:
             self.client.get(reverse('tenders:api_order_list'))
         self._make_orders(15, start=100)
+        cache.clear()
         with CaptureQueriesContext(connection) as second:
             self.client.get(reverse('tenders:api_order_list'))
         self.assertEqual(len(first.captured_queries), len(second.captured_queries))
@@ -146,21 +150,55 @@ class OrderListPerformanceTest(TestCase):
         order_ids = [o['order_id'] for group in response.json()['groups'] for o in group['orders']]
         self.assertIn(7777, order_ids)
 
-    def test_order_list_paginated_15_per_page(self):
-        self._make_orders(20)
+    def test_order_list_does_not_split_groups_across_pages(self):
+        second = Tender.objects.create(
+            user=self.user, route_loading='Nairobi', route_delivery='Mombasa',
+            customer='Beta', cargo_type=Tender.CargoType.DRY_VAN,
+            truck_type=Tender.TruckType.TRUCK, weight=20.0, number_of_trucks=1,
+            distance_km=480, cargo_date=timezone.localdate(),
+            reference='HYPAX-000992',
+        )
+        first = self.tender
+        self._make_orders(14)
+        first_date = timezone.now() - timezone.timedelta(days=1)
+        second_date = timezone.now() - timezone.timedelta(days=2)
+        Order.objects.create(
+            order_id=9001, order_name='ORD-9001', user=self.user,
+            tender=second, date_order=first_date,
+        )
+        Order.objects.create(
+            order_id=9002, order_name='ORD-9002', user=self.user,
+            tender=second, date_order=second_date,
+        )
+        first_orders = self.tender.orders
+        second_orders = second.orders
+        self.assertEqual(first_orders.count(), 14)
+        self.assertEqual(second_orders.count(), 2)
         response = self.client.get(reverse('tenders:api_order_list'))
         data = response.json()
-        self.assertEqual(data['page'], 1)
-        self.assertEqual(data['pages'], 2)
-        self.assertEqual(data['per_page'], 15)
-        self.assertTrue(data['has_next'])
-        self.assertFalse(data['has_prev'])
-        self.assertEqual(sum(len(g['orders']) for g in data['groups']), 15)
-        response = self.client.get(reverse('tenders:api_order_list'), {'page': 2})
+        self.assertEqual(data['ok'], True)
+        self.assertEqual(data['pages'], 1)
+        groups = {g['grouper']: g for g in data['groups']}
+        self.assertIn('REF-X', groups)
+        self.assertIn('HYPAX-000992', groups)
+        self.assertEqual(len(groups['HYPAX-000992']['orders']), 2)
+
+    def test_unlinked_orders_group_by_echoed_reference(self):
+        Order.objects.create(
+            order_id=7777, order_name='ORD-7777', user=None, tender=None,
+            trans_reference='CARGO-ALPHA',
+        )
+        Order.objects.create(
+            order_id=7778, order_name='ORD-7778', user=None, tender=None,
+            trans_reference='CARGO-ALPHA',
+        )
+        response = self.client.get(reverse('tenders:api_order_list'))
         data = response.json()
-        self.assertEqual(data['page'], 2)
-        self.assertFalse(data['has_next'])
-        self.assertEqual(sum(len(g['orders']) for g in data['groups']), 5)
+        self.assertEqual(data['ok'], True)
+        groups = {g['grouper']: g for g in data['groups']}
+        self.assertIn('CARGO-ALPHA', groups)
+        self.assertEqual({o['order_id'] for o in groups['CARGO-ALPHA']['orders']}, {7777, 7778})
+        self.assertNotIn('Unlinked orders', groups)
 
     def test_order_list_page_out_of_range_clamps(self):
         response = self.client.get(reverse('tenders:api_order_list'), {'page': 99})
@@ -838,12 +876,12 @@ class TruckQuotaTest(TestCase):
         self.user = CustomUser.objects.create_user(email='quota@example.com', password='pass1234')
         self.client.login(email='quota@example.com', password='pass1234')
 
-    def _tender(self, trucks):
+    def _tender(self, trucks, ref=''):
         return Tender.objects.create(
             user=self.user, route_loading='Nairobi', route_delivery='Mombasa',
             customer='Quota Co', cargo_type=Tender.CargoType.DRY_VAN,
             truck_type=Tender.TruckType.TRUCK, weight=10.0, number_of_trucks=trucks,
-            distance_km=480, cargo_date=timezone.localdate(),
+            distance_km=480, cargo_date=timezone.localdate(), trans_reference=ref,
         )
 
     def _order(self, tender, order_id, awarded_lines=1):
@@ -906,6 +944,78 @@ class TruckQuotaTest(TestCase):
         self.assertIn('exceeded the number of trucks needed', data['error'])
         invoice.refresh_from_db()
         self.assertEqual(invoice.status, Invoice.Status.PENDING)
+
+    def _company(self, name='Award Co'):
+        return OdooCompany.objects.create(
+            name=name, base_url=f'https://{name.lower().replace(" ", "")}.example.com',
+            auth_type='bearer', api_token='tok-award',
+        )
+
+    def _unconfirmed(self, tender, order_id, lines=1, company=None):
+        order = Order.objects.create(
+            order_id=order_id, order_name=f'ORD-{order_id}', user=self.user, tender=tender,
+            company_id=3, company_name='Award Haulage', state='confirmed',
+            amount_total=0, currency='USD', odoo_company=company,
+        )
+        for i in range(lines):
+            OrderLine.objects.create(
+                order=order, line_id=i + 1, product_name='Sand', quantity=1,
+                price_unit=100, commission=0, price_subtotal=100, price_total=100, awarded=False,
+            )
+        return order
+
+    def test_award_blocked_when_lines_exceed_trucks(self):
+        tender = self._tender(1, 'QTR-7206')
+        order = self._unconfirmed(tender, 7206, lines=2, company=self._company())
+        with patch('tenders.views.submit_confirmation',
+                   return_value=(200, '{"status":"success"}', True)) as m:
+            response = self.client.post(reverse('tenders:api_order_award', args=[order.pk]), {})
+        data = response.json()
+        self.assertFalse(data['ok'])
+        self.assertIn('Order confirmation not allowed', data['error'])
+        self.assertIn('adds 2 more', data['error'])
+        m.assert_not_called()
+        self.assertFalse(order.lines.filter(awarded=True).exists())
+
+    def test_partial_award_blocked_across_all_orders(self):
+        tender = self._tender(2, 'QTR-7208')
+        other = self._order(tender, 7207, awarded_lines=1)
+        order = self._unconfirmed(tender, 7208, lines=2, company=self._company())
+        with patch('tenders.views.submit_confirmation',
+                   return_value=(200, '{"status":"success"}', True)) as m:
+            response = self.client.post(
+                reverse('tenders:api_order_award', args=[order.pk]),
+                json.dumps({'line_ids': [1, 2]}),
+                content_type='application/json',
+            )
+        data = response.json()
+        self.assertFalse(data['ok'])
+        self.assertIn('1 already awarded', data['error'])
+        self.assertIn('adds 2 more', data['error'])
+        m.assert_not_called()
+        self.assertFalse(order.lines.filter(awarded=True).exists())
+
+    def test_award_allowed_within_truck_quota(self):
+        tender = self._tender(3, 'QTR-7209')
+        order = self._unconfirmed(tender, 7209, lines=3, company=self._company())
+        with patch('tenders.views.submit_confirmation',
+                   return_value=(200, '{"status":"success"}', True)):
+            response = self.client.post(reverse('tenders:api_order_award', args=[order.pk]), {})
+        self.assertTrue(response.json()['ok'])
+        self.assertEqual(order.lines.filter(awarded=True).count(), 3)
+
+    def test_partial_award_allowed_within_truck_quota(self):
+        tender = self._tender(3, 'QTR-7210')
+        order = self._unconfirmed(tender, 7210, lines=3, company=self._company())
+        with patch('tenders.views.submit_confirmation',
+                   return_value=(200, '{"status":"success"}', True)):
+            response = self.client.post(
+                reverse('tenders:api_order_award', args=[order.pk]),
+                json.dumps({'line_ids': [1, 2]}),
+                content_type='application/json',
+            )
+        self.assertTrue(response.json()['ok'])
+        self.assertEqual(order.lines.filter(awarded=True).count(), 2)
 
 
 class DashboardRoleTest(TestCase):
