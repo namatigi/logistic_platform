@@ -2389,7 +2389,10 @@ def admin_escrow_detail(request, pk):
 
         agent_name = ''
         agent_commission_rate = Decimal('0.00')
+        agent_pool_share = Decimal('0.00')
+        agent_vat = Decimal('0.00')
         agent_commission_amount = Decimal('0.00')
+        vat_total = (awarded_total - unit_total).quantize(Decimal('0.01'))
         if inv.transporter_id:
             first_agent = inv.transporter.agents.select_related('profile').order_by('pk').first()
             if first_agent is not None:
@@ -2397,10 +2400,13 @@ def admin_escrow_detail(request, pk):
                 profile = getattr(first_agent, 'profile', None)
                 if profile is not None:
                     agent_commission_rate = profile.agent_commission or Decimal('0.00')
-                    agent_commission_amount = (
-                        (agent_commission_rate / Decimal('100')) * commission_total
-                    ).quantize(Decimal('0.01'))
-        hypax_commission = (commission_total - agent_commission_amount).quantize(Decimal('0.01'))
+                    rate = agent_commission_rate / Decimal('100')
+                    agent_pool_share = (rate * commission_total).quantize(Decimal('0.01'))
+                    agent_vat = (rate * vat_total).quantize(Decimal('0.01'))
+                    agent_commission_amount = (agent_pool_share + agent_vat).quantize(Decimal('0.01'))
+        hypax_commission = (
+            (commission_total - agent_pool_share) + (vat_total - agent_vat)
+        ).quantize(Decimal('0.01'))
 
         line_items = []
         for ti in term_items:

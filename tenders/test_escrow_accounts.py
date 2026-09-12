@@ -490,6 +490,6 @@ class EscrowAccountsTest(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertContains(res, '1150.00')
         self.assertContains(res, '575.00')
-        self.assertContains(res, '40.50')
-        self.assertContains(res, '4.50')
+        self.assertContains(res, '-49.50')
+        self.assertContains(res, '-5.50')
         self.assertContains(res, '900.00')
