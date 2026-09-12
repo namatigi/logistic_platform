@@ -222,6 +222,11 @@ a:hover {
   white-space: nowrap;
 }
 
+.nav-dropdown-menu a:hover {
+  background: var(--hover);
+  text-decoration: none;
+}
+
 .nav-dropdown-menu .active a {
   background: var(--brand-light);
   color: var(--brand-dark);
