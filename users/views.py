@@ -181,11 +181,12 @@ def admin_dashboard(request):
 
 
 def _transporter_dict(transporter):
-    awarded_orders = Order.objects.filter(
-        lines__awarded=True,
-    ).filter(
-        Q(company_id=transporter.company_id) | Q(company_name__iexact=transporter.company_name)
-    ).distinct().count()
+    awarded_orders = 0
+    if transporter.company_name:
+        awarded_orders = Order.objects.filter(
+            lines__awarded=True,
+            company_name__iexact=transporter.company_name,
+        ).distinct().count()
     return {
         'id': transporter.pk,
         'company_name': transporter.company_name,
@@ -322,12 +323,8 @@ def api_admin_agent_transporters(request, pk):
 def _agent_match_q(agent):
     q = Q()
     for transporter in agent.linked_transporters.all():
-        per = Q()
-        if transporter.company_id:
-            per |= Q(company_id=transporter.company_id)
         if transporter.company_name:
-            per |= Q(company_name__iexact=transporter.company_name)
-        q |= per
+            q |= Q(company_name__iexact=transporter.company_name)
     return q
 
 
@@ -463,12 +460,8 @@ def api_agent_invoices(request):
         return JsonResponse({'ok': True, 'invoices': []})
     q = Q()
     for transporter in transporters:
-        per = Q()
-        if transporter.company_id:
-            per |= Q(company_id=transporter.company_id)
         if transporter.company_name:
-            per |= Q(company_name__iexact=transporter.company_name)
-        q |= per
+            q |= Q(company_name__iexact=transporter.company_name)
     awarded_orders = Order.objects.filter(q, lines__awarded=True).select_related('tender').distinct()
     invoice_map = {
         inv.order_id: inv
@@ -587,8 +580,6 @@ def _agent_truck_assignments(user, now):
         if not trucks:
             continue
         per = Q()
-        if transporter.company_id:
-            per |= Q(company_id=transporter.company_id)
         if transporter.company_name:
             per |= Q(company_name__iexact=transporter.company_name)
         if not per:

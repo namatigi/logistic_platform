@@ -150,9 +150,7 @@ def get_or_create_transporter(order):
     company_id = order.company_id
     company_name = (order.company_name or '').strip()
     transporter = None
-    if company_id:
-        transporter = Transporter.objects.filter(company_id=company_id).first()
-    if transporter is None and company_name:
+    if company_name:
         transporter = Transporter.objects.filter(company_name__iexact=company_name).first()
     if transporter is None:
         transporter = Transporter.objects.create(
@@ -2480,15 +2478,11 @@ def _invoice_in_scope(request, invoice):
 
 
 def _transporter_matches_order(transporter, order):
-    if transporter.company_id and order.company_id == transporter.company_id:
-        return True
-    if (
+    return bool(
         transporter.company_name
         and order.company_name
         and order.company_name.strip().lower() == transporter.company_name.strip().lower()
-    ):
-        return True
-    return False
+    )
 
 
 def _agent_matches_order(user, order):
