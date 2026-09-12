@@ -2392,7 +2392,7 @@ def admin_escrow_detail(request, pk):
         agent_pool_share = Decimal('0.00')
         agent_vat = Decimal('0.00')
         agent_commission_amount = Decimal('0.00')
-        vat_total = (awarded_total - unit_total).quantize(Decimal('0.01'))
+        vat_total = (awarded_total - (Decimal('1.15') * unit_total)).quantize(Decimal('0.01'))
         if inv.transporter_id:
             first_agent = inv.transporter.agents.select_related('profile').order_by('pk').first()
             if first_agent is not None:

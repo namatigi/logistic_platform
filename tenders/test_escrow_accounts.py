@@ -422,12 +422,15 @@ class EscrowAccountsTest(TestCase):
         self.assertContains(res, escrow.virtual_account)
         self.assertContains(res, '10.00')
         self.assertContains(res, '5.00')
-        self.assertContains(res, '45.00')
+        self.assertContains(res, '-90.00')
+        self.assertContains(res, '-10.00')
         self.assertContains(res, 'Transit Ltd')
         self.assertContains(res, 'HYPAX commission fee')
         self.assertContains(res, 'Deposited')
         self.assertContains(res, '1150.00')
         self.assertContains(res, '575.00')
+        self.assertContains(res, '-150.00')
+        self.assertContains(res, '-135.00')
 
     def test_escrow_account_detail_requires_admin(self):
         from tenders.views import get_or_create_invoice
@@ -490,6 +493,8 @@ class EscrowAccountsTest(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertContains(res, '1150.00')
         self.assertContains(res, '575.00')
-        self.assertContains(res, '-49.50')
-        self.assertContains(res, '-5.50')
+        self.assertContains(res, '-184.50')
+        self.assertContains(res, '-20.50')
+        self.assertContains(res, '-250.00')
+        self.assertContains(res, '-225.00')
         self.assertContains(res, '900.00')
