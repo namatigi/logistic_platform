@@ -1909,3 +1909,66 @@ html[data-theme='dark'] .callback-text {
 html[data-theme='dark'] .search-box input.search-input {
   background: #0f172a;
 }
+
+.escrow-account-link {
+  color: var(--brand);
+  text-decoration: none;
+  font-weight: 700;
+  transition: color 0.15s ease;
+}
+
+.escrow-account-link:hover {
+  color: var(--brand);
+  text-decoration: underline;
+}
+
+/* ---------- Escrow account detail ---------- */
+.back-link {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.back-link:hover {
+  color: var(--brand);
+}
+
+.inv-total {
+  padding: 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.amount-col {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.fees-row {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.fee {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.fee-value {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  margin-top: 4px;
+}

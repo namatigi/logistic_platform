@@ -37,7 +37,9 @@
           <tbody>
             <tr v-for="a in accounts" v-bind:key="a.id">
               <td>
-                <strong>{{ a.virtual_account || '-' }}</strong>
+                <a :href="a.detail_url || '#'" class="escrow-account-link">
+                  <strong>{{ a.virtual_account || '-' }}</strong>
+                </a>
                 <div v-if="a.selcom_order_token" class="escrow-mono" style="font-size:12px;">{{ a.selcom_order_token }}</div>
               </td>
               <td>{{ a.customer || '-' }}</td>

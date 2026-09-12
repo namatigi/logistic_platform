@@ -19,7 +19,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum, Count
 from django.core.cache import cache
 from django.http import Http404, HttpResponse, JsonResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
@@ -2005,6 +2005,7 @@ def _escrow_dict(escrow):
                 trucks.append(line.product_name)
     return {
         'id': escrow.pk,
+        'detail_url': reverse('tenders:admin_escrow_detail', args=[escrow.pk]),
         'virtual_account': escrow.virtual_account or '',
         'customer': tender_customer or '-',
         'transporter': ', '.join(transporter_names) or '-',
@@ -2343,6 +2344,94 @@ def api_admin_escrow(request):
         .order_by('-created_at')
     )
     return JsonResponse({'ok': True, 'escrow_accounts': [_escrow_dict(a) for a in accounts]})
+
+
+@login_required
+@_admin_required
+def admin_escrow_detail(request, pk):
+    escrow = get_object_or_404(
+        EscrowAccount.objects.select_related('tender', 'user', 'payment_terms'),
+        pk=pk,
+    )
+    invoices = (
+        escrow.invoices
+        .select_related('order', 'transporter')
+        .prefetch_related('order__lines')
+        .order_by('created_at')
+    )
+    currency = invoices[0].currency if invoices else 'TZS'
+
+    term_items = []
+    if escrow.payment_terms_id:
+        items = list(escrow.payment_terms.items.order_by('sort_order', 'created_at'))
+        term_items = [i for i in items if i.percent is not None]
+        text_only_terms = [i for i in items if i.percent is None]
+    else:
+        text_only_terms = []
+
+    breakdown = []
+    for inv in invoices:
+        transporter_name = ''
+        if inv.transporter_id:
+            transporter_name = (inv.transporter.company_name or inv.transporter.alias or '').strip()
+        if not transporter_name and inv.order_id:
+            transporter_name = (inv.order.company_name or '').strip()
+
+        awarded_total = Decimal('0.00')
+        hypax_commission = Decimal('0.00')
+        for line in inv.order.lines.filter(awarded=True):
+            awarded_total += line.price_total or Decimal('0.00')
+            if line.commission:
+                hypax_commission += (line.commission / Decimal('100')) * (line.price_total or Decimal('0.00'))
+        hypax_commission = hypax_commission.quantize(Decimal('0.01'))
+
+        agent_name = ''
+        agent_commission_rate = Decimal('0.00')
+        agent_commission_amount = Decimal('0.00')
+        if inv.transporter_id:
+            first_agent = inv.transporter.agents.select_related('profile').order_by('pk').first()
+            if first_agent is not None:
+                agent_name = first_agent.get_full_name() or first_agent.username
+                profile = getattr(first_agent, 'profile', None)
+                if profile is not None:
+                    agent_commission_rate = profile.agent_commission or Decimal('0.00')
+                    agent_commission_amount = (
+                        (agent_commission_rate / Decimal('100')) * awarded_total
+                    ).quantize(Decimal('0.01'))
+
+        line_items = []
+        for ti in term_items:
+            amount = (Decimal(ti.percent) / Decimal('100')) * awarded_total
+            line_items.append({
+                'text': ti.text,
+                'percent': ti.percent,
+                'amount': amount.quantize(Decimal('0.01')),
+            })
+
+        breakdown.append({
+            'invoice_number': inv.number,
+            'transporter_name': transporter_name or '-',
+            'awarded_total': awarded_total,
+            'deposited_amount': inv.deposited_amount or Decimal('0.00'),
+            'status': inv.status,
+            'status_label': inv.get_status_display(),
+            'line_items': line_items,
+            'hypax_commission': hypax_commission,
+            'agent_name': agent_name,
+            'agent_commission_rate': agent_commission_rate,
+            'agent_commission_amount': agent_commission_amount,
+        })
+
+    context = {
+        'escrow': escrow,
+        'escrow_data': _escrow_dict(escrow),
+        'currency': currency,
+        'term_items': term_items,
+        'text_only_terms': text_only_terms,
+        'transporter_breakdown': breakdown,
+        'active_tab': 'escrow',
+    }
+    return render(request, 'tenders/admin_escrow_detail.html', context)
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,96 @@
+{% extends 'base.html' %}
+{% block title %}Escrow Account {{ escrow.virtual_account|default:'' }} &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <div>
+      <a href="{% url 'tenders:admin_escrow' %}" class="back-link">&larr; Back to Escrow Accounts</a>
+      <h1 class="page-title" style="margin-top:6px;">{{ escrow.virtual_account }}</h1>
+      <p class="page-subtitle">{{ escrow.tender.tender_reference|default:'Virtual account' }}</p>
+    </div>
+    <span class="badge {% if escrow.status == 'paid' %}badge-success{% elif escrow.status == 'pending' %}badge-info{% else %}badge-warning{% endif %}">{{ escrow.get_status_display }}</span>
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-value">{{ currency }} {{ escrow.amount|floatformat:2 }}</div>
+      <div class="stat-label">Amount</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">{{ currency }} {{ escrow.deposited_amount|floatformat:2 }}</div>
+      <div class="stat-label">Amount deposited</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">{{ term_items|length }}{% if text_only_terms %}+{{ text_only_terms|length }}{% endif %}</div>
+      <div class="stat-label">Payment terms</div>
+    </div>
+  </div>
+
+  {% for inv in transporter_breakdown %}
+  <div class="card">
+    <div class="card-title" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <span>
+        {{ inv.transporter_name }}
+        <span class="page-subtitle" style="display:inline-block; margin-left:8px;">{{ inv.invoice_number }}</span>
+      </span>
+      <span class="badge {% if inv.status == 'paid' %}badge-success{% else %}badge-warning{% endif %}">{{ inv.status_label }}</span>
+    </div>
+
+    <div class="inv-total">
+      <span class="stat-label">Total</span>
+      <span class="stat-value" style="font-size:20px;">{{ currency }} {{ inv.awarded_total|floatformat:2 }}</span>
+    </div>
+
+    <table style="margin-top:16px;">
+      <thead>
+        <tr>
+          <th>Payment term</th>
+          <th class="amount-col">%</th>
+          <th class="amount-col">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in inv.line_items %}
+        <tr>
+          <td>{{ item.text }}</td>
+          <td class="amount-col">{{ item.percent }}%</td>
+          <td class="amount-col">{{ currency }} {{ item.amount|floatformat:2 }}</td>
+        </tr>
+        {% endfor %}
+        {% for item in text_only_terms %}
+        <tr>
+          <td>{{ item.text }}</td>
+          <td class="amount-col">&mdash;</td>
+          <td class="amount-col">&mdash;</td>
+        </tr>
+        {% endfor %}
+        {% if not inv.line_items and not text_only_terms %}
+        <tr>
+          <td colspan="3" style="color:var(--muted);">No payment terms defined for this account.</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+
+    <div class="fees-row">
+      <div class="fee">
+        <div class="stat-label">Agent commission{% if inv.agent_name %} &middot; {{ inv.agent_name }}{% endif %}</div>
+        <div class="fee-value">{{ inv.agent_commission_rate|floatformat:2 }}% = {{ currency }} {{ inv.agent_commission_amount|floatformat:2 }}</div>
+      </div>
+      <div class="fee">
+        <div class="stat-label">HYPAX commission fee</div>
+        <div class="fee-value">{{ currency }} {{ inv.hypax_commission|floatformat:2 }}</div>
+      </div>
+      <div class="fee">
+        <div class="stat-label">Deposited</div>
+        <div class="fee-value">{{ currency }} {{ inv.deposited_amount|floatformat:2 }}</div>
+      </div>
+    </div>
+  </div>
+  {% empty %}
+  <div class="card">
+    <p style="color:var(--muted);">No transporter invoices are linked to this account yet.</p>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

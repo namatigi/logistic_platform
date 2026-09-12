@@ -366,3 +366,90 @@ class EscrowAccountsTest(TestCase):
         self.assertIn('Haulmax Ltd', data['transporter'])
         self.assertEqual(set(data['invoice_numbers']), {i.number for i in invoices})
         self.assertEqual(data['status'], 'paid')
+
+    def test_escrow_list_includes_detail_url(self):
+        from tenders.views import get_or_create_invoice
+        from tenders.models import Order, Tender, EscrowAccount, OrderLine
+        tender = Tender.objects.create(
+            user=self.user, route_loading='Dar es Salaam', route_delivery='Mombasa',
+            customer='HYPAX', cargo_type='container_20', truck_type='trailer',
+            weight=10, number_of_trucks=1, distance_km=100, cargo_date='2026-09-01',
+        )
+        order = Order.objects.create(
+            order_id=9021, order_name='ORD-9021', company_name='Transit Ltd',
+            amount_total=1000, currency='TZS', trans_reference='CAR9021', tender=tender,
+        )
+        OrderLine.objects.create(order=order, line_id=1, product_name='Freight', quantity=1, price_unit=1000, price_total=1000, awarded=True)
+        get_or_create_invoice(order)
+        escrow = EscrowAccount.objects.filter(tender=tender).first()
+        from tenders.models import Invoice
+        invoice = escrow.invoices.first()
+        invoice.status = Invoice.Status.PAID
+        invoice.save(update_fields=('status',))
+        self.client.login(email='admin@example.com', password='pass1234')
+        data = self.client.get(reverse('tenders:api_admin_escrow')).json()['escrow_accounts'][0]
+        self.assertTrue(data['detail_url'].endswith(f'/escrow/{escrow.pk}/'))
+
+    def test_escrow_account_detail(self):
+        from tenders.views import get_or_create_invoice
+        from tenders.models import Order, Tender, EscrowAccount, OrderLine, PaymentTerm
+        from users.models import Profile
+        agent = CustomUser.objects.create_user(
+            email='agent@example.com', password='pass1234', role=CustomUser.Role.AGENT,
+        )
+        Profile.objects.create(user=agent, id_type=Profile.IdType.NIDA, id_number='A-100', agent_commission=Decimal('10'))
+        term = PaymentTerm.objects.create(user=self.user, name='On confirmation')
+        term.items.create(text='advance', percent=50)
+        term.items.create(text='balance on delivery', percent=50)
+        tender = Tender.objects.create(
+            user=self.user, route_loading='Dar es Salaam', route_delivery='Mombasa',
+            customer='HYPAX', cargo_type='container_20', truck_type='trailer',
+            weight=10, number_of_trucks=1, distance_km=100, cargo_date='2026-09-01',
+            payment_terms=term,
+        )
+        order = Order.objects.create(
+            order_id=9031, order_name='ORD-9031', company_name='Transit Ltd',
+            amount_total=1000, currency='TZS', trans_reference='CAR9031', tender=tender,
+        )
+        OrderLine.objects.create(order=order, line_id=1, product_name='Freight', quantity=1, price_unit=1000, price_total=1000, commission=5, awarded=True)
+        invoice = get_or_create_invoice(order)
+        escrow = EscrowAccount.objects.filter(tender=tender).first()
+        invoice.transporter.agents.add(agent)
+
+        self.client.login(email='admin@example.com', password='pass1234')
+        res = self.client.get(reverse('tenders:admin_escrow_detail', args=[escrow.pk]))
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, escrow.virtual_account)
+        self.assertContains(res, '10.00')
+        self.assertContains(res, '100.00')
+        self.assertContains(res, '50.00')
+        self.assertContains(res, 'Transit Ltd')
+        self.assertContains(res, 'HYPAX commission fee')
+        self.assertContains(res, 'Deposited')
+
+    def test_escrow_account_detail_requires_admin(self):
+        from tenders.views import get_or_create_invoice
+        from tenders.models import Order, Tender, EscrowAccount, OrderLine
+        tender = Tender.objects.create(
+            user=self.user, route_loading='Dar es Salaam', route_delivery='Mombasa',
+            customer='HYPAX', cargo_type='container_20', truck_type='trailer',
+            weight=10, number_of_trucks=1, distance_km=100, cargo_date='2026-09-01',
+        )
+        order = Order.objects.create(
+            order_id=9041, order_name='ORD-9041', company_name='Transit Ltd',
+            amount_total=1000, currency='TZS', trans_reference='CAR9041', tender=tender,
+        )
+        OrderLine.objects.create(order=order, line_id=1, product_name='Freight', quantity=1, price_unit=1000, price_total=1000, awarded=True)
+        get_or_create_invoice(order)
+        escrow = EscrowAccount.objects.filter(tender=tender).first()
+        url = reverse('tenders:admin_escrow_detail', args=[escrow.pk])
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 302)
+        self.client.login(email='user@example.com', password='pass1234')
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 302)
+
+    def test_escrow_account_detail_404(self):
+        self.client.login(email='admin@example.com', password='pass1234')
+        res = self.client.get(reverse('tenders:admin_escrow_detail', args=[999999]))
+        self.assertEqual(res.status_code, 404)

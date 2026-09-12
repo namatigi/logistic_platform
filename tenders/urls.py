@@ -27,6 +27,7 @@ urlpatterns = [
     path('api/payment-terms/<int:pk>/items/create/', views.api_payment_term_add_item, name='api_payment_term_add_item'),
     path('api/payment-terms/<int:pk>/items/<int:item_pk>/delete/', views.api_payment_term_item_delete, name='api_payment_term_item_delete'),
     path('escrow/', views.admin_escrow, name='admin_escrow'),
+    path('escrow/<int:pk>/', views.admin_escrow_detail, name='admin_escrow_detail'),
     path('api/admin/escrow/', views.api_admin_escrow, name='api_admin_escrow'),
     path('users/', views.admin_users, name='admin_users'),
     path('api/admin/users/', views.api_admin_users, name='api_admin_users'),
