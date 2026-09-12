@@ -99,6 +99,52 @@ class EscrowAccountsTest(TestCase):
         self.assertTrue(res.json()['ok'])
         self.assertEqual(len(res.json()['payment_term']['items']), 3)
 
+    def test_payment_term_percent_must_sum_to_100(self):
+        self.client.login(email='user@example.com', password='pass1234')
+        res = self.client.post(
+            reverse('tenders:api_payment_term_create'),
+            {'name': 'Short', 'items': [{'text': 'advance', 'percent': 40}, {'text': 'delivery', 'percent': 40}]},
+            content_type='application/json',
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertFalse(res.json()['ok'])
+        self.assertIn('must equal exactly 100', res.json()['error'])
+        res = self.client.get(reverse('tenders:api_payment_terms'))
+        self.assertEqual(res.json()['payment_terms'], [])
+        res = self.client.post(
+            reverse('tenders:api_payment_term_create'),
+            {'name': 'Full', 'items': [{'text': 'advance', 'percent': 40}, {'text': 'delivery', 'percent': 60}]},
+            content_type='application/json',
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertTrue(res.json()['ok'])
+        pid = res.json()['payment_term']['id']
+        self.assertEqual(sum(i['percent'] for i in res.json()['payment_term']['items']), 100)
+        res = self.client.post(
+            reverse('tenders:api_payment_term_add_item', args=[pid]),
+            {'text': 'x', 'percent': 10},
+            content_type='application/json',
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertFalse(res.json()['ok'])
+        self.assertIn('cannot exceed 100', res.json()['error'])
+        self.assertEqual(len(res.json().get('payment_term', {}).get('items', [])), 0)
+        res = self.client.post(
+            reverse('tenders:api_payment_term_add_item', args=[pid]),
+            {'text': 'per invoice'},
+            content_type='application/json',
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertTrue(res.json()['ok'])
+        self.assertEqual(len(res.json()['payment_term']['items']), 3)
+        res = self.client.post(
+            reverse('tenders:api_payment_term_create'),
+            {'name': 'Mixed', 'items': [{'text': 'advance', 'percent': 40}, {'text': 'on request'}]},
+            content_type='application/json',
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertTrue(res.json()['ok'])
+
     def test_admin_users_endpoint(self):
         self.client.login(email='admin@example.com', password='pass1234')
         res = self.client.get(reverse('tenders:api_admin_users'))

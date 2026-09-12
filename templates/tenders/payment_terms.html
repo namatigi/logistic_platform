@@ -149,11 +149,17 @@
           self.message = '';
           self.errors = {};
           if (!self.form.name) { self.error = 'Name is required.'; return; }
-          var pctTotal = self.form.items.reduce(function (sum, x) {
-            var v = parseInt(x.percent, 10);
-            return sum + (isFinite(v) && v > 0 ? v : 0);
-          }, 0);
-          if (pctTotal > 100) { self.error = 'Aggregate payment term percentage cannot exceed 100%.'; return; }
+          var pctRows = self.form.items.filter(function (x) { return (x.text || '').trim(); });
+          var hasPct = pctRows.some(function (x) { return x.percent !== null && x.percent !== undefined && x.percent !== ''; });
+          var missingPct = pctRows.some(function (x) { return x.percent === null || x.percent === undefined || x.percent === ''; });
+          if (hasPct && !missingPct) {
+            var pctTotal = pctRows.reduce(function (sum, x) {
+              var v = parseInt(x.percent, 10);
+              return sum + (isFinite(v) ? v : 0);
+            }, 0);
+            if (pctTotal > 100) { self.error = 'Aggregate payment term percentage cannot exceed 100%.'; return; }
+            if (pctTotal < 100) { self.error = 'Aggregate payment term percentage must equal exactly 100%.'; return; }
+          }
           self.saving = true;
           try {
             var res = await api.post(root.dataset.createUrl, {
@@ -205,11 +211,14 @@
           self.error = '';
           var text = (t.newItem || '').trim();
           if (!text) return;
-          var newPct = parseInt(t.newPercent, 10);
-          if (isFinite(newPct) && newPct > 0) {
-            var total = 0;
-            (t.items || []).forEach(function (it) { if (it.percent) total += it.percent; });
-            if (total + newPct > 100) { self.error = 'Aggregate payment term percentage cannot exceed 100%.'; return; }
+          var newPct = t.newPercent;
+          if (newPct !== null && newPct !== undefined && newPct !== '') {
+            var rows = (t.items || []).map(function (it) { return it.percent; }).concat([newPct]);
+            if (rows.every(function (v) { return v !== null && v !== undefined && v !== ''; })) {
+              var total = rows.reduce(function (sum, v) { var n = parseInt(v, 10); return sum + (isFinite(n) ? n : 0); }, 0);
+              if (total > 100) { self.error = 'Aggregate payment term percentage cannot exceed 100%.'; return; }
+              if (total < 100) { self.error = 'Aggregate payment term percentage must equal exactly 100%.'; return; }
+            }
           }
           try {
             var res = await api.post(withPk0(root.dataset.itemBase, t.id), { text: text, percent: t.newPercent });
