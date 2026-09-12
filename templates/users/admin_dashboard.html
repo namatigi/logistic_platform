@@ -13,6 +13,7 @@
   <div id="admin-app"
        data-url="{% url 'users:api_admin_dashboard' %}"
        data-agent-create-url="{% url 'users:api_admin_agent_create' %}"
+       data-agent-update-base="{% url 'users:api_admin_agent_update' 0 %}"
        data-agent-transporters-base="{% url 'users:api_admin_agent_transporters' 0 %}">
     {% verbatim %}
     <a class="users-summary" href="{% endverbatim %}{% url 'tenders:admin_users' %}{% verbatim %}" v-cloak title="View all users">
@@ -144,7 +145,10 @@
           </div>
           <div class="address-actions">
             <button type="button" class="btn btn-secondary btn-sm" @click="toggleLink(a)">
-              {{ linkedOpen[a.id] ? 'Close' : 'Link transporters' }}
+              {{ linkedOpen[a.id] ? 'Close' : 'Link' }}
+            </button>
+            <button type="button" class="btn btn-primary btn-sm" @click="openEdit(a)">
+              Edit
             </button>
           </div>
         </div>
@@ -167,6 +171,64 @@
             </button>
             <button type="button" class="btn btn-secondary" @click="closeLink">Cancel</button>
           </div>
+        </div>
+      </div>
+
+      <div class="address-form" v-if="editing" style="margin-top:16px; padding-top:16px; border-top:1px solid #e2e8f0;">
+        <h3 style="font-size:14px; font-weight:700; margin-bottom:12px;">
+          Edit {{ editing.first_name }} {{ editing.last_name }}
+        </h3>
+        <div class="form-grid">
+          <div class="form-row">
+            <label>First name</label>
+            <input type="text" v-model.trim="editForm.first_name" required>
+          </div>
+          <div class="form-row">
+            <label>Last name</label>
+            <input type="text" v-model.trim="editForm.last_name">
+          </div>
+          <div class="form-row">
+            <label>Email address</label>
+            <input type="email" v-model.trim="editForm.email" required>
+          </div>
+          <div class="form-row">
+            <label>Phone</label>
+            <input type="text" v-model.trim="editForm.phone">
+          </div>
+          <div class="form-row" style="grid-column: 1 / -1;">
+            <label>ID type</label>
+            <div class="inline-radios">
+              <label v-for="t in idTypes" v-bind:key="t.value" class="inline-radio">
+                <input type="radio" name="edit-id-type" v-bind:value="t.value" v-model="editForm.idType">
+                <span>{{ t.label }}</span>
+              </label>
+            </div>
+          </div>
+          <div class="form-row">
+            <label>ID number</label>
+            <input type="text" v-model.trim="editForm.idNumber" placeholder="e.g. 1982021-23A">
+          </div>
+          <div class="form-row">
+            <label>Agent commission (%)</label>
+            <input type="number" min="0" max="100" step="0.01" v-model="editForm.commission"
+                   placeholder="0 - 100" title="Between 0 and 100%">
+          </div>
+          <div class="form-row" style="grid-column: 1 / -1;">
+            <label>Bio</label>
+            <textarea rows="3" v-model.trim="editForm.bio" placeholder="Short description of the agent..."></textarea>
+          </div>
+          <div class="form-row" style="grid-column: 1 / -1;">
+            <label>Profile picture</label>
+            <input type="file" accept="image/png, image/jpeg, image/webp" @change="onEditPictureChange">
+            <div class="form-help">JPG, PNG or WebP, max 2 MB. Leave empty to keep the current picture.</div>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-primary" @click="saveEdit" :disabled="savingEdit">
+            <span v-if="savingEdit">Saving...</span>
+            <span v-else>Save changes</span>
+          </button>
+          <button type="button" class="btn btn-secondary" @click="closeEdit">Cancel</button>
         </div>
       </div>
 
@@ -270,6 +332,9 @@
           showForm: false,
           saving: false,
           createdPassword: '',
+          editing: null,
+          editForm: blankAgent(),
+          savingEdit: false,
           linkedOpen: {},
           linkedSel: {},
           linkAgent: null,
@@ -321,6 +386,93 @@
           }
           this.agentForm.picture = file;
           this.error = '';
+        },
+        openEdit: function (a) {
+          this.closeForm();
+          this.closeLink();
+          this.editing = a;
+          this.editForm = {
+            first_name: a.first_name,
+            last_name: a.last_name,
+            email: a.email,
+            phone: a.phone,
+            bio: a.bio,
+            picture: null,
+            idType: a.id_type,
+            idNumber: a.id_number,
+            commission: a.commission === '' || a.commission === undefined ? '' : a.commission
+          };
+          this.error = '';
+          this.message = '';
+        },
+        closeEdit: function () {
+          this.editing = null;
+          this.editForm = blankAgent();
+          this.error = '';
+        },
+        onEditPictureChange: function (e) {
+          var file = e.target.files && e.target.files[0];
+          if (!file) return;
+          if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
+            this.error = 'Please choose a JPG, PNG or WebP image.';
+            return;
+          }
+          this.editForm.picture = file;
+          this.error = '';
+        },
+        saveEdit: async function () {
+          var self = this;
+          self.error = '';
+          self.message = '';
+          if (!self.editForm.email || !self.editForm.first_name) {
+            self.error = 'Email and first name are required.';
+            return;
+          }
+          var comm = self.editForm.commission;
+          if (comm !== '' && comm !== null && comm !== undefined) {
+            var cv = parseFloat(comm);
+            if (!isFinite(cv) || cv < 0 || cv > 100) {
+              self.error = 'Agent commission must be between 0 and 100%.';
+              return;
+            }
+          }
+          self.savingEdit = true;
+          try {
+            var fd = new FormData();
+            fd.append('first_name', self.editForm.first_name || '');
+            fd.append('last_name', self.editForm.last_name || '');
+            fd.append('email', self.editForm.email || '');
+            fd.append('phone', self.editForm.phone || '');
+            fd.append('bio', self.editForm.bio || '');
+            fd.append('id_type', self.editForm.idType || '');
+            fd.append('id_number', self.editForm.idNumber || '');
+            fd.append('agent_commission', comm === '' || comm === null || comm === undefined ? '0' : comm);
+            if (self.editForm.picture) fd.append('profile_picture', self.editForm.picture, self.editForm.picture.name);
+
+            var url = root.dataset.agentUpdateBase.replace('0', String(self.editing.id));
+            var resp = await fetch(url, {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRFToken': window.HYPAX.csrftoken() },
+              body: fd
+            });
+            var res = {};
+            try { res = await resp.json(); } catch (err) { /* non-JSON */ }
+            if (!resp.ok || res.ok === false) {
+              self.error = res.error || 'Agent could not be updated.';
+              return;
+            }
+            var updated = res.agent;
+            for (var i = 0; i < self.agents.length; i++) {
+              if (self.agents[i].id === updated.id) { self.agents.splice(i, 1, updated); break; }
+            }
+            self.message = res.message || 'Agent updated successfully.';
+            self.closeEdit();
+          } catch (e) {
+            self.error = e.message || 'Agent could not be updated.';
+          } finally {
+            self.savingEdit = false;
+          }
         },
         toggleLink: function (a) {
           if (this.linkAgent && this.linkAgent.id === a.id) {

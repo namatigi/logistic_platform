@@ -304,6 +304,65 @@ def api_admin_agent_create(request):
     })
 
 
+@login_required
+@require_POST
+def api_admin_agent_update(request, pk):
+    if request.user.role != CustomUser.Role.ADMINISTRATOR:
+        return JsonResponse({'ok': False, 'error': 'Administrator access required.'}, status=403)
+    agent = CustomUser.objects.filter(pk=pk, role=CustomUser.Role.AGENT).first()
+    if agent is None:
+        return JsonResponse({'ok': False, 'error': 'Agent not found.'})
+    email = CustomUser.objects.normalize_email((request.POST.get('email') or '').strip())
+    first_name = (request.POST.get('first_name') or '').strip()[:150]
+    last_name = (request.POST.get('last_name') or '').strip()[:150]
+    phone = (request.POST.get('phone') or '').strip()
+    bio = (request.POST.get('bio') or '').strip()
+    if not email or '@' not in email or not first_name:
+        return JsonResponse({'ok': False, 'error': 'Email and first name are required.'})
+    if CustomUser.objects.filter(email=email).exclude(pk=agent.pk).exists():
+        return JsonResponse({'ok': False, 'error': 'A user with that email already exists.'})
+    id_type = (request.POST.get('id_type') or '').strip()
+    valid_id_types = {code for code, _label in Profile.IdType.choices}
+    if id_type and id_type not in valid_id_types:
+        return JsonResponse({'ok': False, 'error': 'ID type must be Passport, NIDA or Driver License.'})
+    id_number = (request.POST.get('id_number') or '').strip()[:100]
+    commission_raw = request.POST.get('agent_commission')
+    agent_commission = Decimal('0')
+    if commission_raw is not None and str(commission_raw).strip():
+        try:
+            agent_commission = Decimal(str(commission_raw).strip())
+        except (InvalidOperation, ValueError):
+            return JsonResponse({'ok': False, 'error': 'Agent commission must be a number between 0 and 100.'})
+        if agent_commission < 0 or agent_commission > 100:
+            return JsonResponse({'ok': False, 'error': 'Agent commission must be between 0 and 100%.'})
+
+    agent.email = email
+    agent.first_name = first_name
+    agent.last_name = last_name
+    agent.save()
+
+    profile, _created = Profile.objects.get_or_create(user=agent)
+    profile.phone = phone
+    profile.bio = bio
+    profile.id_type = id_type
+    profile.id_number = id_number
+    profile.agent_commission = agent_commission
+    uploaded = request.FILES.get('profile_picture')
+    if uploaded:
+        try:
+            resized = _resize_profile_picture(uploaded)
+            profile.profile_picture.save(resized.name, resized, save=False)
+        except Exception:
+            return JsonResponse({'ok': False, 'error': 'The uploaded picture could not be processed.'})
+    profile.save()
+
+    return JsonResponse({
+        'ok': True,
+        'message': f'Agent {first_name} updated successfully.',
+        'agent': _agent_dict(agent),
+    })
+
+
 def _send_agent_credentials(email, password):
     subject = 'Your HYPAX agent account'
     message = (

@@ -380,6 +380,76 @@ class AdminDashboardTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.json()['ok'])
 
+    def test_api_admin_agent_update(self):
+        agent = CustomUser.objects.create_user(
+            email='agent@example.com', password='pass1234',
+            first_name='Old', last_name='Name', role=CustomUser.Role.AGENT,
+        )
+        Profile.objects.create(user=agent, id_type='nida', id_number='A-1', agent_commission=Decimal('5'))
+        url = reverse('users:api_admin_agent_update', args=[agent.pk])
+        response = self.client.post(url, {
+            'first_name': 'New',
+            'last_name': 'Name',
+            'email': 'agent.new@example.com',
+            'phone': '+255 700 000 000',
+            'bio': 'Updated bio',
+            'id_type': 'passport',
+            'id_number': 'P-99',
+            'agent_commission': '15',
+        })
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['agent']['first_name'], 'New')
+        self.assertEqual(data['agent']['email'], 'agent.new@example.com')
+        self.assertEqual(data['agent']['id_type'], 'passport')
+        self.assertEqual(data['agent']['commission'], '15.00')
+        agent.refresh_from_db()
+        self.assertEqual(agent.email, 'agent.new@example.com')
+        self.assertEqual(agent.first_name, 'New')
+        profile = agent.profile
+        self.assertEqual(profile.phone, '+255 700 000 000')
+        self.assertEqual(profile.bio, 'Updated bio')
+        self.assertEqual(profile.id_type, 'passport')
+        self.assertEqual(profile.id_number, 'P-99')
+        self.assertEqual(profile.agent_commission, Decimal('15'))
+
+    def test_api_admin_agent_update_requires_admin(self):
+        agent = CustomUser.objects.create_user(
+            email='agent@example.com', password='pass1234', role=CustomUser.Role.AGENT,
+        )
+        url = reverse('users:api_admin_agent_update', args=[agent.pk])
+        self.client.logout()
+        self.client.login(email='agent@example.com', password='pass1234')
+        response = self.client.post(url, {'first_name': 'X', 'email': 'x@example.com'})
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(response.json()['ok'])
+
+    def test_api_admin_agent_update_rejects_missing_email(self):
+        agent = CustomUser.objects.create_user(
+            email='agent@example.com', password='pass1234', role=CustomUser.Role.AGENT,
+        )
+        url = reverse('users:api_admin_agent_update', args=[agent.pk])
+        response = self.client.post(url, {'first_name': 'X', 'email': ''})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()['ok'])
+
+    def test_api_admin_agent_update_rejects_duplicate_email(self):
+        CustomUser.objects.create_user(email='take@example.com', password='pass1234')
+        agent = CustomUser.objects.create_user(
+            email='agent@example.com', password='pass1234', role=CustomUser.Role.AGENT,
+        )
+        url = reverse('users:api_admin_agent_update', args=[agent.pk])
+        response = self.client.post(url, {'first_name': 'X', 'email': 'take@example.com'})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()['ok'])
+
+    def test_api_admin_agent_update_unknown_agent(self):
+        url = reverse('users:api_admin_agent_update', args=[999999])
+        response = self.client.post(url, {'first_name': 'X', 'email': 'x@example.com'})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()['ok'])
+
     def test_api_admin_agent_create_duplicate_email(self):
         CustomUser.objects.create_user(email='dup@example.com', password='pass1234')
         response = self.client.post(reverse('users:api_admin_agent_create'), {

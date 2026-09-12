@@ -32,6 +32,7 @@ urlpatterns = [
     path('admin/', views.admin_dashboard, name='admin_dashboard'),
     path('api/admin/dashboard/', views.api_admin_dashboard, name='api_admin_dashboard'),
     path('api/admin/agents/create/', views.api_admin_agent_create, name='api_admin_agent_create'),
+    path('api/admin/agents/<int:pk>/update/', views.api_admin_agent_update, name='api_admin_agent_update'),
     path('api/admin/agents/<int:pk>/transporters/', views.api_admin_agent_transporters, name='api_admin_agent_transporters'),
     path('agents/awarded/', views.agent_awarded, name='agent_awarded'),
     path('agents/tracker/', views.agent_tracker, name='agent_tracker'),
