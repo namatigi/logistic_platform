@@ -75,38 +75,6 @@
       </tbody>
     </table>
 
-    <div class="comm-breakdown">
-      <div style="font-size:13px; color:var(--muted); margin-bottom:8px;"><strong>Commission breakdown</strong></div>
-      <div class="breakdown-row">
-        <span>Commission (total of awarded lines)</span>
-        <span>{{ currency }} {{ inv.commission_total|floatformat:2 }}</span>
-      </div>
-      <div class="breakdown-row">
-        <span>VAT base ((awarded total &minus; 1.15 &times; unit total) &minus; commission)</span>
-        <span>{{ currency }} {{ inv.vat_total|floatformat:2 }}</span>
-      </div>
-      <div class="breakdown-row">
-        <span>Agent pool share ({{ inv.agent_commission_rate|floatformat:2 }}% of commission)</span>
-        <span>{{ currency }} {{ inv.agent_pool_share|floatformat:2 }}</span>
-      </div>
-      <div class="breakdown-row">
-        <span>Agent VAT ({{ inv.agent_commission_rate|floatformat:2 }}% of VAT base)</span>
-        <span>{{ currency }} {{ inv.agent_vat|floatformat:2 }}</span>
-      </div>
-      <div class="breakdown-row breakdown-total">
-        <span>Agent commission fee (pool share + VAT)</span>
-        <span>{{ currency }} {{ inv.agent_commission_amount|floatformat:2 }}</span>
-      </div>
-      <div class="breakdown-row">
-        <span>Remaining VAT for HYPAX (VAT base &minus; agent VAT)</span>
-        <span>{{ currency }} {{ inv.hypax_vat|floatformat:2 }}</span>
-      </div>
-      <div class="breakdown-row breakdown-total">
-        <span>HYPAX commission fee</span>
-        <span>{{ currency }} {{ inv.hypax_commission|floatformat:2 }}</span>
-      </div>
-    </div>
-
     <div class="fees-row">
       <div class="fee">
         <div class="stat-label">Agent commission{% if inv.agent_name %} &middot; {{ inv.agent_name }}{% endif %}</div>
