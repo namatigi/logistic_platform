@@ -2380,15 +2380,12 @@ def admin_escrow_detail(request, pk):
         awarded_total = Decimal('0.00')
         subtotal_total = Decimal('0.00')
         unit_total = Decimal('0.00')
-        hypax_commission = Decimal('0.00')
         for line in inv.order.lines.filter(awarded=True):
             price_total = line.price_total or Decimal('0.00')
             subtotal_total += line.price_subtotal or Decimal('0.00')
             unit_total += line.price_unit or Decimal('0.00')
             awarded_total += price_total
-            if line.commission:
-                hypax_commission += (line.commission / Decimal('100')) * price_total
-        hypax_commission = hypax_commission.quantize(Decimal('0.01'))
+        hypax_commission = (awarded_total * Decimal('0.05')).quantize(Decimal('0.01'))
 
         order_total = inv.order.amount_total or Decimal('0.00')
         if subtotal_total:
