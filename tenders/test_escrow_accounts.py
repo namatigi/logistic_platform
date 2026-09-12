@@ -56,6 +56,49 @@ class EscrowAccountsTest(TestCase):
         res = self.client.get(reverse('tenders:api_payment_terms'))
         self.assertEqual(res.json()['payment_terms'], [])
 
+    def test_payment_term_percent_total_capped_at_100(self):
+        self.client.login(email='user@example.com', password='pass1234')
+        res = self.client.post(
+            reverse('tenders:api_payment_term_create'),
+            {'name': 'Bad', 'items': [{'text': 'advance', 'percent': 60}, {'text': 'balance', 'percent': 50}]},
+            content_type='application/json',
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertFalse(res.json()['ok'])
+        self.assertIn('cannot exceed 100', res.json()['error'])
+        res = self.client.get(reverse('tenders:api_payment_terms'))
+        self.assertEqual(res.json()['payment_terms'], [])
+        res = self.client.post(
+            reverse('tenders:api_payment_term_create'),
+            {'name': 'OK', 'items': [{'text': 'advance', 'percent': 40}, {'text': 'balance', 'percent': 60}]},
+            content_type='application/json',
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertTrue(res.json()['ok'])
+        pid = res.json()['payment_term']['id']
+        res = self.client.get(reverse('tenders:api_payment_terms'))
+        self.assertEqual(sum(i['percent'] or 0 for i in res.json()['payment_terms'][0]['items']), 100)
+        res = self.client.post(
+            reverse('tenders:api_payment_term_add_item', args=[pid]),
+            {'text': 'extra', 'percent': 5},
+            content_type='application/json',
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertFalse(res.json()['ok'])
+        self.assertIn('cannot exceed 100', res.json()['error'])
+        res = self.client.get(reverse('tenders:api_payment_terms'))
+        items = res.json()['payment_terms'][0]['items']
+        self.assertEqual(len(items), 2)
+        self.assertEqual(sum(i['percent'] or 0 for i in items), 100)
+        res = self.client.post(
+            reverse('tenders:api_payment_term_add_item', args=[pid]),
+            {'text': 'on confirmation'},
+            content_type='application/json',
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertTrue(res.json()['ok'])
+        self.assertEqual(len(res.json()['payment_term']['items']), 3)
+
     def test_admin_users_endpoint(self):
         self.client.login(email='admin@example.com', password='pass1234')
         res = self.client.get(reverse('tenders:api_admin_users'))

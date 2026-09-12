@@ -2175,6 +2175,8 @@ def api_payment_term_create(request):
     form = PaymentTermForm(body)
     if not form.is_valid():
         return JsonResponse({'ok': False, 'error': 'Please fix the highlighted fields.', 'errors': form.errors})
+    if _raw_items_percent_total(body.get('items') or []) > 100:
+        return JsonResponse({'ok': False, 'error': 'Aggregate payment term percentage cannot exceed 100%.'})
     term = form.save(commit=False)
     term.user = request.user
     term.is_active = True
@@ -2198,6 +2200,18 @@ def _parse_percent(raw):
     if not 0 <= value <= 100:
         return None
     return value
+
+
+def _raw_items_percent_total(raw_items):
+    """Sum of percentages carried by a raw items list (dicts only). Matches _create_payment_term_items."""
+    total = 0
+    if isinstance(raw_items, (list, tuple)):
+        for raw in raw_items:
+            if isinstance(raw, dict):
+                pct = _parse_percent(raw.get('percent'))
+                if pct:
+                    total += pct
+    return total
 
 
 def _create_payment_term_items(term, raw_items):
@@ -2227,11 +2241,19 @@ def api_payment_term_add_item(request, pk):
     text = str(body.get('text') or '').strip()
     if not text:
         return JsonResponse({'ok': False, 'error': 'Term detail text is required.'})
+    percent = _parse_percent(body.get('percent'))
+    if percent:
+        total = 0
+        for item in term.items.all():
+            if item.percent:
+                total += item.percent
+        if total + percent > 100:
+            return JsonResponse({'ok': False, 'error': 'Aggregate payment term percentage cannot exceed 100%.'})
     last = term.items.order_by('-sort_order').first()
     sort = (last.sort_order + 1) if last else 0
     item = term.items.create(
         text=text[:300],
-        percent=_parse_percent(body.get('percent')),
+        percent=percent,
         sort_order=sort,
     )
     return JsonResponse({

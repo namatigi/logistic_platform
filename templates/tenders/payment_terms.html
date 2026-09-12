@@ -149,6 +149,11 @@
           self.message = '';
           self.errors = {};
           if (!self.form.name) { self.error = 'Name is required.'; return; }
+          var pctTotal = self.form.items.reduce(function (sum, x) {
+            var v = parseInt(x.percent, 10);
+            return sum + (isFinite(v) && v > 0 ? v : 0);
+          }, 0);
+          if (pctTotal > 100) { self.error = 'Aggregate payment term percentage cannot exceed 100%.'; return; }
           self.saving = true;
           try {
             var res = await api.post(root.dataset.createUrl, {
@@ -200,6 +205,12 @@
           self.error = '';
           var text = (t.newItem || '').trim();
           if (!text) return;
+          var newPct = parseInt(t.newPercent, 10);
+          if (isFinite(newPct) && newPct > 0) {
+            var total = 0;
+            (t.items || []).forEach(function (it) { if (it.percent) total += it.percent; });
+            if (total + newPct > 100) { self.error = 'Aggregate payment term percentage cannot exceed 100%.'; return; }
+          }
           try {
             var res = await api.post(withPk0(root.dataset.itemBase, t.id), { text: text, percent: t.newPercent });
             if (res && res.ok === false) { self.error = res.error || 'Could not add the term detail.'; return; }
