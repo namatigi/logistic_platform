@@ -232,3 +232,39 @@ class EscrowAccountsTest(TestCase):
         self.assertEqual(data['tender_reference'], 'CAR9001')
         self.assertEqual(data['status'], 'paid')
         self.assertEqual(data['trucks'], ['Freight'])
+
+    def test_escrow_transporters_come_from_invoices_and_self_heal(self):
+        from tenders.views import get_or_create_invoice, _refresh_escrow
+        from tenders.models import Order, Tender, EscrowAccount, OrderLine, Invoice
+        tender = Tender.objects.create(
+            user=self.user, route_loading='Dar es Salaam', route_delivery='Mombasa',
+            customer='HYPAX', cargo_type='container_20', truck_type='trailer',
+            weight=10, number_of_trucks=1, distance_km=100, cargo_date='2026-09-01',
+        )
+        invoices = []
+        for offset, amount, company in ((9011, 500, 'Transit Ltd'), (9012, 700, 'Haulmax Ltd')):
+            order = Order.objects.create(
+                order_id=offset, order_name=f'ORD-{offset}', company_name=company,
+                amount_total=amount, currency='TZS', trans_reference='CAR9011', tender=tender,
+            )
+            OrderLine.objects.create(order=order, line_id=offset, product_name='Freight', quantity=1, price_unit=amount, price_total=amount, awarded=True)
+            invoices.append(get_or_create_invoice(order))
+        escrow = EscrowAccount.objects.filter(tender=tender).first()
+        self.assertEqual(escrow.transporters.count(), 2)
+
+        for inv in invoices:
+            inv.status = Invoice.Status.PAID
+            inv.save(update_fields=('status',))
+        escrow.transporters.clear()
+        _refresh_escrow(escrow)
+        self.assertEqual(escrow.transporters.count(), 2)
+        self.assertEqual(set(escrow.invoices.values_list('pk', flat=True)), {i.pk for i in invoices})
+
+        escrow.transporters.clear()
+        self.client.login(email='admin@example.com', password='pass1234')
+        data = self.client.get(reverse('tenders:api_admin_escrow')).json()['escrow_accounts'][0]
+        self.assertEqual(set(data['transporter_names']), {'Transit Ltd', 'Haulmax Ltd'})
+        self.assertIn('Transit Ltd', data['transporter'])
+        self.assertIn('Haulmax Ltd', data['transporter'])
+        self.assertEqual(set(data['invoice_numbers']), {i.number for i in invoices})
+        self.assertEqual(data['status'], 'paid')

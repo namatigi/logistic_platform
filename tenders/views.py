@@ -226,6 +226,16 @@ def _ensure_escrow_account(tender, order, invoice):
 
 def _refresh_escrow(escrow):
     invoices = Invoice.objects.filter(order__tender=escrow.tender)
+    linked_invoice_ids = set(escrow.invoices.values_list('pk', flat=True))
+    missing_invoice_ids = set(invoices.values_list('pk', flat=True)) - linked_invoice_ids
+    if missing_invoice_ids:
+        escrow.invoices.add(*missing_invoice_ids)
+    linked_transporter_ids = set(escrow.transporters.values_list('pk', flat=True))
+    missing_transporter_ids = {
+        inv.transporter_id for inv in invoices if inv.transporter_id and inv.transporter_id not in linked_transporter_ids
+    }
+    if missing_transporter_ids:
+        escrow.transporters.add(*missing_transporter_ids)
     expected = invoices.aggregate(total=Sum('amount_total'))['total'] or Decimal('0.00')
     deposited = invoices.aggregate(total=Sum('deposited_amount'))['total'] or Decimal('0.00')
     has_checkout = invoices.exclude(selcom_order_token='').exists()
@@ -1950,15 +1960,21 @@ def _payment_term_dict(term):
 
 def _escrow_dict(escrow):
     invoices = list(escrow.invoices.select_related('order', 'transporter').order_by('created_at'))
-    transporters = list(escrow.transporters.all())
     order = invoices[0].order if invoices else None
     tender = escrow.tender
     tender_reference = tender.tender_reference() if tender else ''
     if not tender_reference and order and order.trans_reference:
         tender_reference = order.trans_reference
-    transporter_names = [t.company_name or t.alias for t in transporters if t.company_name or t.alias]
-    if not transporter_names and order and order.company_name:
-        transporter_names = [order.company_name]
+    transporter_names = []
+    seen = set()
+    for inv in invoices:
+        t = inv.transporter
+        name = (t.company_name or t.alias).strip() if t else ''
+        if not name:
+            name = (inv.order.company_name or '').strip() if inv.order_id else ''
+        if name and name not in seen:
+            seen.add(name)
+            transporter_names.append(name)
     tender_customer = tender.customer if tender else ''
     pending_tokens = [i.selcom_order_token for i in invoices if i.selcom_order_token]
     trucks = []
