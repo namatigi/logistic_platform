@@ -15,7 +15,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum, Count
 from django.core.cache import cache
 from django.http import Http404, HttpResponse, JsonResponse
@@ -180,8 +180,11 @@ def get_or_create_invoice(order):
     invoice = Invoice.objects.filter(order=order).first()
     if invoice is None:
         transporter = get_or_create_transporter(order)
+        number = f'INV-{order.order_id}'
+        if Invoice.objects.filter(number=number).exists():
+            number = f'INV-{order.order_id}-{order.pk}'
         invoice = Invoice.objects.create(
-            number=f'INV-{order.order_id}',
+            number=number,
             order=order,
             transporter=transporter,
             amount_total=order.awarded_amount,
@@ -2085,12 +2088,21 @@ def _confirm_invoice_paid(invoice):
         })
 
     invoice.status = Invoice.Status.PAID
+    local_number = invoice.number
     update_fields = ['status']
     external_name = _external_invoice_number(parsed)
-    if external_name:
+    if external_name and not Invoice.objects.filter(number=external_name).exclude(pk=invoice.pk).exists():
         invoice.number = str(external_name)[:50]
         update_fields.append('number')
-    invoice.save(update_fields=update_fields)
+    try:
+        invoice.save(update_fields=update_fields)
+    except IntegrityError:
+        if 'number' not in update_fields:
+            raise
+        # Another invoice already holds this external number (two orders paid
+        # against the same external invoice). Keep our locally issued number.
+        invoice.number = local_number
+        invoice.save(update_fields=['status'])
     _flush_derived_caches()
     return JsonResponse({
         'ok': True,

@@ -667,6 +667,62 @@ class InvoicesPageTest(TestCase):
         invite.refresh_from_db()
         self.assertEqual(invite.status, 'pending')
 
+    def test_admin_mark_paid_keeps_local_number_when_external_name_is_taken(self):
+        from tenders.models import Invoice
+        first = self._order(self.user_a, self._tender(self.user_a, 'REF-A'), 7017, 'REF-A')
+        second = self._order(self.user_a, self._tender(self.user_a, 'REF-B'), 7018, 'REF-B')
+        self.client.login(email='invoice-admin@example.com', password='pass1234')
+        with patch('tenders.views.submit_confirmation',
+                   return_value=(200, '{"status":"success","data":{"name":"EXT-INV-7017"}}', True)):
+            r1 = self.client.post(reverse('tenders:api_invoice_paid', args=[first.pk]), {})
+            r2 = self.client.post(reverse('tenders:api_invoice_paid', args=[second.pk]), {})
+        self.assertTrue(r1.json()['ok'])
+        self.assertTrue(r2.json()['ok'])
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.status, 'paid')
+        self.assertEqual(second.status, 'paid')
+        self.assertEqual(first.number, 'EXT-INV-7017')
+        self.assertEqual(second.number, 'INV-7018')
+        self.assertEqual(Invoice.objects.values('number').count(),
+                         Invoice.objects.values('number').distinct().count())
+
+    def test_pay_creates_distinct_invoices_for_same_order_id_across_companies(self):
+        from tenders.views import get_or_create_invoice
+        company_b = OdooCompany.objects.create(
+            name='Other Transporter', base_url='https://other.example.com/', auth_type='bearer',
+        )
+        order_a = Order.objects.create(
+            order_id=7019, order_name='ORD-7019-A', user=self.user_a, tender=self._tender(self.user_a, 'REF-A'),
+            company_id=1, company_name='Alpha Haulage', trans_reference='REF-A', state='confirmed',
+            amount_total=0, currency='USD', odoo_company=self.company,
+        )
+        order_b = Order.objects.create(
+            order_id=7019, order_name='ORD-7019-B', user=self.user_b, tender=self._tender(self.user_b, 'REF-B'),
+            company_id=2, company_name='Beta Haulage', trans_reference='REF-B', state='confirmed',
+            amount_total=0, currency='USD', odoo_company=company_b,
+        )
+        self.assertEqual({o.order_id for o in (order_a, order_b)}, {7019})
+        invoice_a = get_or_create_invoice(order_a)
+        invoice_b = get_or_create_invoice(order_b)
+        self.assertNotEqual(invoice_a.number, invoice_b.number)
+        self.assertIn('INV-7019', {invoice_a.number, invoice_b.number})
+
+        self.client.login(email='invoice-admin@example.com', password='pass1234')
+        with patch('tenders.views.submit_confirmation',
+                   return_value=(200, '{"status":"success","data":{"name":"EXT-INV-7019"}}', True)):
+            r1 = self.client.post(reverse('tenders:api_order_pay', args=[order_a.pk]), {})
+            r2 = self.client.post(reverse('tenders:api_order_pay', args=[order_b.pk]), {})
+        self.assertEqual(r1.status_code, 200)
+        self.assertEqual(r2.status_code, 200)
+        self.assertTrue(r1.json()['ok'])
+        self.assertTrue(r2.json()['ok'])
+        invoice_a.refresh_from_db()
+        invoice_b.refresh_from_db()
+        self.assertEqual(invoice_a.status, 'paid')
+        self.assertEqual(invoice_b.status, 'paid')
+        self.assertNotEqual(invoice_a.number, invoice_b.number)
+
     def test_admin_mark_paid_without_company_rejected(self):
         from tenders.views import get_or_create_invoice
         tender = self._tender(self.user_a, 'REF-A')
