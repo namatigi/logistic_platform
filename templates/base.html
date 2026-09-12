@@ -58,6 +58,9 @@
 
       {% if user.role == 'agent' %}
       <ul class="nav-links">
+        <li class="{% if request.resolver_match.url_name == 'my_account' %}active{% endif %}">
+          <a href="{% url 'users:my_account' %}">My Account</a>
+        </li>
         <li class="{% if request.resolver_match.url_name == 'agent_awarded' %}active{% endif %}">
           <a href="{% url 'users:agent_awarded' %}">Awarded Orders</a>
         </li>

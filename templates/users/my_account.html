@@ -1,0 +1,115 @@
+{% extends 'base.html' %}
+{% block title %}My Account &middot; HYPAX{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">My Account</h1>
+      <p class="page-subtitle">
+        Your awarded orders and your commission
+        {% if agent_commission_rate %} at {{ agent_commission_rate }}% commission{% endif %}
+      </p>
+    </div>
+  </div>
+
+  <div id="my-account-app" data-url="{% url 'users:api_my_account' %}" v-cloak>
+    {% verbatim %}
+    <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
+
+    <div class="stats" v-if="totals.orders > 0">
+      <div class="stat">
+        <div class="stat-value">{{ totals.orders }}</div>
+        <div class="stat-label">Awarded orders</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">{{ money(totals.amount, 'TZS') }}</div>
+        <div class="stat-label">Awarded amount</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">{{ money(totals.commission, 'TZS') }}</div>
+        <div class="stat-label">Expected commission at {{ rate }}%</div>
+      </div>
+    </div>
+
+    <div class="alert alert-warning" v-if="!error && orders.length === 0">
+      No awarded orders yet for your linked transporters.
+    </div>
+
+    <div class="card">
+      <div class="table-wrap" v-if="orders.length">
+        <table>
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th>Tender ref</th>
+              <th>Transporter</th>
+              <th>Customer</th>
+              <th>Confirmation</th>
+              <th>Amount</th>
+              <th>Commission</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="o in orders" v-bind:key="o.id">
+              <td><strong>{{ o.order_name }}</strong><br><span style="color:#64748b; font-size:13px;">#{{ o.order_id }}</span></td>
+              <td>{{ o.tender_ref || '-' }}</td>
+              <td>{{ o.transporter || '-' }}</td>
+              <td>{{ o.customer || '-' }}</td>
+              <td>
+                <span class="badge" v-bind:class="o.confirmation === 'full' ? 'badge-success' : 'badge-warning'">{{ o.confirmation_label }}</span>
+                <br><span style="color:#64748b; font-size:13px;">{{ o.awarded_lines }} of {{ o.lines_total }} lines</span>
+              </td>
+              <td><strong>{{ money(o.amount, 'TZS') }}</strong></td>
+              <td>
+                <strong style="color:#16a34a;">{{ money(o.commission, 'TZS') }}</strong>
+                <br><span style="color:#64748b; font-size:13px;">{{ o.commission_rate }}% of pool</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="empty" v-else>
+        <p style="padding:24px;">Loading your account...</p>
+      </div>
+    </div>
+    {% endverbatim %}
+  </div>
+</div>
+
+<script>
+  (function () {
+    var root = document.getElementById('my-account-app');
+    var api = window.HYPAX.api;
+    var HY = window.HYPAX;
+
+    Vue.createApp({
+      data: function () {
+        return {
+          orders: [],
+          totals: { orders: 0, amount: '0.00', commission: '0.00' },
+          rate: '',
+          error: ''
+        };
+      },
+      created: function () {
+        this.load();
+      },
+      methods: {
+        money: function (v, c) { return HY.money(v, c); },
+        load: async function () {
+          var self = this;
+          try {
+            var res = await api.get(root.dataset.url);
+            if (res && res.ok === false) { self.error = res.error || 'Failed to load your account.'; return; }
+            self.orders = (res && res.orders) || [];
+            self.totals = (res && res.totals) || self.totals;
+            self.rate = (res && res.rate) || '';
+          } catch (e) {
+            self.error = e.message;
+          }
+        }
+      }
+    }).mount('#my-account-app');
+  })();
+</script>
+{% endblock %}

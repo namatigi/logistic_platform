@@ -30,6 +30,7 @@ from tenders.views import (
     SIM_SPEED_KMH,
     _admin_user_dict,
     _agent_matches_order,
+    _agent_order_commission,
     _invoice_dict,
     _online_user_ids,
     _position_at,
@@ -48,7 +49,7 @@ MAX_PROFILE_SIZE = (512, 512)
 
 def _default_landing_url(user):
     if getattr(user, 'role', None) == CustomUser.Role.AGENT:
-        return reverse('users:agent_awarded')
+        return reverse('users:my_account')
     return reverse('tenders:dashboard')
 
 
@@ -414,6 +415,18 @@ def agent_awarded(request):
     return render(request, 'users/agent_awarded.html', {'active_tab': 'agents'})
 
 
+@login_required
+def my_account(request):
+    if request.user.role != CustomUser.Role.AGENT:
+        return redirect('tenders:dashboard')
+    profile = getattr(request.user, 'profile', None)
+    agent_commission_rate = profile.agent_commission if profile is not None else Decimal('0.00')
+    return render(request, 'users/my_account.html', {
+        'active_tab': 'my_account',
+        'agent_commission_rate': agent_commission_rate,
+    })
+
+
 def agent_tracker(request):
     return render(request, 'users/agent_tracker.html', {'active_tab': 'agents'})
 
@@ -463,6 +476,77 @@ def api_agent_awarded(request):
             'created_at': order.created_at.isoformat(),
         })
     return JsonResponse({'ok': True, 'orders': out})
+
+
+@login_required
+def api_my_account(request):
+    """My Account for agents: awarded orders with the agent's commission."""
+
+    def account():
+        profile = getattr(request.user, 'profile', None)
+        rate = profile.agent_commission or Decimal('0.00') if profile is not None else Decimal('0.00')
+        if request.user.role != CustomUser.Role.AGENT:
+            return {'rate': str(rate), 'orders': [], 'totals': {
+                'orders': 0, 'amount': '0.00', 'commission': '0.00',
+            }}
+        q = _agent_match_q(request.user)
+        if not q:
+            return {'rate': str(rate), 'orders': [], 'totals': {
+                'orders': 0, 'amount': '0.00', 'commission': '0.00',
+            }}
+        orders = (
+            Order.objects.filter(q, lines__awarded=True)
+            .select_related('tender')
+            .prefetch_related('lines')
+            .distinct()
+            .order_by('-created_at')
+        )
+        rows = []
+        total_amount = Decimal('0.00')
+        total_commission = Decimal('0.00')
+        for order in orders:
+            tender = order.tender
+            lines = list(order.lines.all())
+            awarded_lines = sum(1 for line in lines if line.awarded)
+            lines_total = len(lines)
+            confirmation = 'full'
+            if awarded_lines < lines_total:
+                confirmation = 'partial'
+            commission = _agent_order_commission(order, agent=request.user, lines=lines)
+            total_amount += commission['awarded_total']
+            total_commission += commission['agent_commission_amount']
+            rows.append({
+                'id': order.pk,
+                'order_id': order.order_id,
+                'order_name': order.order_name or f'#{order.order_id}',
+                'tender_ref': tender.tender_reference() if tender else (order.trans_reference or ''),
+                'transporter': order.company_name or '',
+                'customer': tender.customer if tender else order.customer,
+                'route': f'{tender.route_loading} \u2192 {tender.route_delivery}' if tender else '',
+                'state': order.state or '',
+                'confirmation': confirmation,
+                'confirmation_label': 'Fully confirmed' if confirmation == 'full' else 'Partially confirmed',
+                'awarded_lines': awarded_lines,
+                'lines_total': lines_total,
+                'amount': str(commission['awarded_total'].quantize(Decimal('0.01'))),
+                'amount_expected': str(commission['invoice_total']),
+                'commission': str(commission['agent_commission_amount'].quantize(Decimal('0.01'))),
+                'commission_rate': str(commission['agent_commission_rate']),
+                'commission_total': str(commission['commission_total']),
+                'vat_total': str(commission['vat_total']),
+                'created_at': order.created_at.isoformat(),
+            })
+        return {
+            'rate': str(rate),
+            'orders': rows,
+            'totals': {
+                'orders': len(rows),
+                'amount': str(total_amount.quantize(Decimal('0.01'))),
+                'commission': str(total_commission.quantize(Decimal('0.01'))),
+            },
+        }
+
+    return JsonResponse({'ok': True, **account()})
 
 
 @login_required

@@ -617,7 +617,7 @@ class AgentPortalTest(TestCase):
 
     def test_agent_pages_render(self):
         self._login('agent.a@example.com')
-        for name in ('agent_awarded', 'agent_tracker', 'agent_invoices'):
+        for name in ('agent_awarded', 'agent_tracker', 'agent_invoices', 'my_account'):
             response = self.client.get(reverse('users:' + name))
             self.assertEqual(response.status_code, 200, name)
 
@@ -643,6 +643,95 @@ class AgentPortalTest(TestCase):
         self.assertNotContains(response, 'Linked transporter')
         data = self.client.get(reverse('users:api_profile')).json()
         self.assertEqual(data['linked_transporters'], [])
+
+
+class AgentMyAccountTest(TestCase):
+    def setUp(self):
+        self.owner = CustomUser.objects.create_user(email='me-owner@example.com', password='pass1234')
+        self.agent = CustomUser.objects.create_user(
+            email='me-agent@example.com', password='pass1234', role=CustomUser.Role.AGENT,
+        )
+        Profile.objects.update_or_create(user=self.agent, defaults={'agent_commission': Decimal('10.00')})
+        self.trans = Transporter.objects.create(company_id=31, company_name='MeFleet', alias='MF')
+        self.other_trans = Transporter.objects.create(company_id=32, company_name='OtherFleet', alias='OF')
+        self.trans.agents.add(self.agent)
+
+        self.tender = Tender.objects.create(
+            user=self.owner, route_loading='Nairobi', route_delivery='Mombasa',
+            customer='Me Corp', cargo_type=Tender.CargoType.DRY_VAN,
+            truck_type=Tender.TruckType.TRUCK, weight=20.0, number_of_trucks=2,
+            distance_km=480, cargo_date=timezone.localdate(), trans_reference='MT-001',
+            status=Tender.Status.SUCCESS,
+        )
+        self.order = Order.objects.create(
+            order_id=9300, order_name='ORD-ME', customer='Me Corp',
+            company_name='MeFleet', company_id=31, tender=self.tender,
+        )
+        for line_id in (1, 2):
+            OrderLine.objects.create(
+                order=self.order, line_id=line_id, product_name='Sand', quantity=1, price_unit=600,
+                commission=50, price_subtotal=600, price_total=1000, awarded=True,
+            )
+        self.foreign_tender = Tender.objects.create(
+            user=self.owner, route_loading='Nairobi', route_delivery='Mombasa',
+            customer='Other Corp', cargo_type=Tender.CargoType.DRY_VAN,
+            truck_type=Tender.TruckType.TRUCK, weight=20.0, number_of_trucks=2,
+            distance_km=480, cargo_date=timezone.localdate(), trans_reference='OT-001',
+            status=Tender.Status.SUCCESS,
+        )
+        self.foreign_order = Order.objects.create(
+            order_id=9301, order_name='ORD-OTHER', customer='Other Corp',
+            company_name='OtherFleet', company_id=32, tender=self.foreign_tender,
+        )
+        OrderLine.objects.create(
+            order=self.foreign_order, line_id=1, product_name='Sand', quantity=1, price_unit=100,
+            commission=0, price_subtotal=100, price_total=100, awarded=True,
+        )
+
+    def _login(self, email='me-agent@example.com'):
+        self.client.login(email=email, password='pass1234')
+
+    def test_my_account_api_returns_order_with_commission(self):
+        self._login()
+        data = self.client.get(reverse('users:api_my_account')).json()
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['rate'], '10.00')
+        self.assertEqual(len(data['orders']), 1)
+        row = data['orders'][0]
+        self.assertEqual(row['order_name'], 'ORD-ME')
+        self.assertEqual(row['tender_ref'], 'MT-001')
+        self.assertEqual(row['transporter'], 'MeFleet')
+        self.assertEqual(row['amount'], '2000.00')
+        self.assertEqual(row['commission_total'], '100.00')
+        self.assertEqual(row['vat_total'], '520.00')
+        self.assertEqual(row['commission'], '62.00')
+        self.assertEqual(data['totals']['amount'], '2000.00')
+        self.assertEqual(data['totals']['commission'], '62.00')
+        self.assertEqual(data['totals']['orders'], 1)
+
+    def test_my_account_api_scoped_to_linked_transporter(self):
+        self._login()
+        data = self.client.get(reverse('users:api_my_account')).json()
+        self.assertEqual([o['order_name'] for o in data['orders']], ['ORD-ME'])
+
+    def test_my_account_page_renders_for_agent(self):
+        self._login()
+        response = self.client.get(reverse('users:my_account'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'My Account')
+        self.assertContains(response, '/accounts/api/me/')
+
+    def test_my_account_page_redirects_non_agent(self):
+        self.client.login(email='me-owner@example.com', password='pass1234')
+        response = self.client.get(reverse('users:my_account'))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse('tenders:dashboard'))
+
+    def test_my_account_api_empty_for_non_agent(self):
+        self.client.login(email='me-owner@example.com', password='pass1234')
+        data = self.client.get(reverse('users:api_my_account')).json()
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['orders'], [])
 
 
 class AgentTransportersTest(TestCase):
@@ -945,13 +1034,13 @@ class LandingRedirectTest(TestCase):
             content_type='application/json',
         ).json()
 
-    def test_agent_login_redirects_to_awarded_orders(self):
+    def test_agent_login_redirects_to_my_account(self):
         agent = CustomUser.objects.create_user(
             email='landag@example.com', password='pass1234', role=CustomUser.Role.AGENT,
         )
         data = self._post('landag@example.com')
         self.assertTrue(data['ok'])
-        self.assertEqual(data['redirect'], reverse('users:agent_awarded'))
+        self.assertEqual(data['redirect'], reverse('users:my_account'))
 
     def test_regular_user_login_redirects_to_dashboard(self):
         CustomUser.objects.create_user(email='landusr@example.com', password='pass1234')

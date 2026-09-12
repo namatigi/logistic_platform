@@ -1607,6 +1607,66 @@ def api_order_pay(request, pk):
     return _confirm_invoice_paid(invoice)
 
 
+def _order_commission_totals(order, lines=None):
+    """Sum the award totals of an order that feed the commission breakdown.
+
+    ``lines`` may be passed from a prefetched manager to avoid extra queries;
+    otherwise the awarded lines are queried here.
+    """
+    awarded_total = Decimal('0.00')
+    unit_total = Decimal('0.00')
+    commission_total = Decimal('0.00')
+    if lines is None:
+        lines = order.lines.filter(awarded=True)
+    for line in lines:
+        if not line.awarded:
+            continue
+        awarded_total += line.price_total or Decimal('0.00')
+        unit_total += line.price_unit or Decimal('0.00')
+        commission_total += line.commission or Decimal('0.00')
+    commission_total = commission_total.quantize(Decimal('0.01'))
+    invoice_total = (unit_total * Decimal('1.15')).quantize(Decimal('0.01'))
+    vat_total = (awarded_total - (Decimal('1.15') * unit_total) - commission_total).quantize(Decimal('0.01'))
+    return {
+        'awarded_total': awarded_total,
+        'unit_total': unit_total,
+        'commission_total': commission_total,
+        'invoice_total': invoice_total,
+        'vat_total': vat_total,
+    }
+
+
+def _agent_order_commission(order, agent=None, lines=None):
+    """Return the per-order commission numbers for ``agent`` (or the pool alone).
+
+    ``agent`` is the transporter's first linked agent on the admin escrow view,
+    or the logged-in agent on My Account. All values are Decimals; serialize to
+    strings before putting them in a JSON response.
+    """
+    totals = _order_commission_totals(order, lines)
+    agent_commission_rate = Decimal('0.00')
+    agent_pool_share = Decimal('0.00')
+    agent_vat = Decimal('0.00')
+    profile = getattr(agent, 'profile', None)
+    if agent is not None and profile is not None:
+        agent_commission_rate = profile.agent_commission or Decimal('0.00')
+        rate = agent_commission_rate / Decimal('100')
+        agent_pool_share = (rate * totals['commission_total']).quantize(Decimal('0.01'))
+        agent_vat = (rate * totals['vat_total']).quantize(Decimal('0.01'))
+    agent_commission_amount = (agent_pool_share + agent_vat).quantize(Decimal('0.01'))
+    hypax_commission = (
+        (totals['commission_total'] - agent_pool_share) + (totals['vat_total'] - agent_vat)
+    ).quantize(Decimal('0.01'))
+    return {
+        **totals,
+        'agent_commission_rate': agent_commission_rate,
+        'agent_pool_share': agent_pool_share,
+        'agent_vat': agent_vat,
+        'agent_commission_amount': agent_commission_amount,
+        'hypax_commission': hypax_commission,
+    }
+
+
 def _truck_quota_exceeded(order, extra=0):
     """Return an error message when a tender's awarded lines exceed its truck quota.
 
@@ -2435,40 +2495,15 @@ def admin_escrow_detail(request, pk):
         if not transporter_name and inv.order_id:
             transporter_name = (inv.order.company_name or '').strip()
 
-        awarded_total = Decimal('0.00')
-        unit_total = Decimal('0.00')
-        commission_total = Decimal('0.00')
-        for line in inv.order.lines.filter(awarded=True):
-            awarded_total += line.price_total or Decimal('0.00')
-            unit_total += line.price_unit or Decimal('0.00')
-            commission_total += line.commission or Decimal('0.00')
-        commission_total = commission_total.quantize(Decimal('0.01'))
-        invoice_total = (unit_total * Decimal('1.15')).quantize(Decimal('0.01'))
-
+        agent = inv.transporter.agents.select_related('profile').order_by('pk').first() if inv.transporter_id else None
         agent_name = ''
-        agent_commission_rate = Decimal('0.00')
-        agent_pool_share = Decimal('0.00')
-        agent_vat = Decimal('0.00')
-        agent_commission_amount = Decimal('0.00')
-        vat_total = (awarded_total - (Decimal('1.15') * unit_total) - commission_total).quantize(Decimal('0.01'))
-        if inv.transporter_id:
-            first_agent = inv.transporter.agents.select_related('profile').order_by('pk').first()
-            if first_agent is not None:
-                agent_name = first_agent.get_full_name() or first_agent.username
-                profile = getattr(first_agent, 'profile', None)
-                if profile is not None:
-                    agent_commission_rate = profile.agent_commission or Decimal('0.00')
-                    rate = agent_commission_rate / Decimal('100')
-                    agent_pool_share = (rate * commission_total).quantize(Decimal('0.01'))
-                    agent_vat = (rate * vat_total).quantize(Decimal('0.01'))
-                    agent_commission_amount = (agent_pool_share + agent_vat).quantize(Decimal('0.01'))
-        hypax_commission = (
-            (commission_total - agent_pool_share) + (vat_total - agent_vat)
-        ).quantize(Decimal('0.01'))
+        if agent is not None:
+            agent_name = agent.get_full_name() or agent.username
+        commission = _agent_order_commission(inv.order, agent=agent)
 
         line_items = []
         for ti in term_items:
-            amount = (Decimal(ti.percent) / Decimal('100')) * invoice_total
+            amount = (Decimal(ti.percent) / Decimal('100')) * commission['invoice_total']
             line_items.append({
                 'text': ti.text,
                 'percent': ti.percent,
@@ -2478,22 +2513,22 @@ def admin_escrow_detail(request, pk):
         breakdown.append({
             'invoice_number': inv.number,
             'transporter_name': transporter_name or '-',
-            'invoice_total': invoice_total,
-            'awarded_total': awarded_total,
-            'unit_total': unit_total,
-            'commission_total': commission_total,
-            'vat_total': vat_total,
-            'hypax_vat': (vat_total - agent_vat).quantize(Decimal('0.01')),
+            'invoice_total': commission['invoice_total'],
+            'awarded_total': commission['awarded_total'],
+            'unit_total': commission['unit_total'],
+            'commission_total': commission['commission_total'],
+            'vat_total': commission['vat_total'],
+            'hypax_vat': (commission['vat_total'] - commission['agent_vat']).quantize(Decimal('0.01')),
             'deposited_amount': inv.deposited_amount or Decimal('0.00'),
             'status': inv.status,
             'status_label': inv.get_status_display(),
             'line_items': line_items,
-            'hypax_commission': hypax_commission,
+            'hypax_commission': commission['hypax_commission'],
             'agent_name': agent_name,
-            'agent_commission_rate': agent_commission_rate,
-            'agent_pool_share': agent_pool_share,
-            'agent_vat': agent_vat,
-            'agent_commission_amount': agent_commission_amount,
+            'agent_commission_rate': commission['agent_commission_rate'],
+            'agent_pool_share': commission['agent_pool_share'],
+            'agent_vat': commission['agent_vat'],
+            'agent_commission_amount': commission['agent_commission_amount'],
         })
 
     context = {
