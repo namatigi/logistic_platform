@@ -565,6 +565,11 @@ html[data-theme='dark'] .user-menu-form button:hover {
   font-size: 13px;
 }
 
+.btn-icon {
+  padding: 5px 8px;
+  line-height: 1;
+}
+
 .btn-block {
   width: 100%;
 }

@@ -74,7 +74,7 @@
                 <span v-if="it.percent !== null && it.percent !== undefined" class="payterm-percent">{{ it.percent }}%</span>
                 <span>{{ it.text }}</span>
               </div>
-              <button type="button" class="btn btn-danger btn-sm" @click="removeItem(t, it)">&#215;</button>
+              <button type="button" class="btn btn-danger btn-sm btn-icon" @click="removeItem(t, it)" title="Delete term detail"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
             </li>
           </ul>
 
@@ -82,7 +82,7 @@
             <input type="number" min="0" max="100" class="terms-percent-input" v-model.number="t.newPercent" placeholder="%" title="Percentage value">
             <input type="text" v-model.trim="t.newItem" placeholder="Add a term detail, e.g. advance on confirmation"
                    @keydown.enter.prevent="addItem(t)">
-            <button type="button" class="btn btn-secondary btn-sm" @click="addItem(t)">+ Add</button>
+            <button type="button" class="btn btn-secondary btn-sm btn-icon" @click="addItem(t)" title="Add term detail">+</button>
           </div>
           <div style="color:var(--muted); font-size:12px; margin-top:6px;">Created {{ fmtDate(t.created_at) }}</div>
         </div>
