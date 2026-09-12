@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.test import TestCase
 from django.urls import reverse
 
@@ -173,6 +175,7 @@ class EscrowAccountsTest(TestCase):
         self.assertTrue(escrow.invoices.filter(pk=invoice.pk).exists())
         self.assertEqual(escrow.user_id, self.user.pk)
         self.assertTrue(escrow.virtual_account.startswith('EA-'))
+        self.assertEqual(escrow.amount, Decimal('1000'))
 
     def test_escrow_multiple_invoices(self):
         from tenders.views import get_or_create_invoice
@@ -192,6 +195,7 @@ class EscrowAccountsTest(TestCase):
             invoices.append(get_or_create_invoice(order))
         escrow = EscrowAccount.objects.filter(tender=tender).first()
         self.assertIsNotNone(escrow)
+        self.assertEqual(escrow.amount, Decimal('1200'))
         self.assertEqual(set(escrow.invoices.values_list('pk', flat=True)), {i.pk for i in invoices})
         self.assertEqual(set(escrow.transporters.values_list('company_name', flat=True)), {'Transit Ltd', 'Haulmax Ltd'})
         invoice_a, invoice_b = invoices

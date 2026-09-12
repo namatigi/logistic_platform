@@ -210,9 +210,6 @@ def _ensure_escrow_account(tender, order, invoice):
         escrow.virtual_account = f'EA-{escrow.pk:05d}'
         escrow.save(update_fields=('virtual_account',))
     else:
-        if escrow.amount == 0 and invoice is not None and invoice.amount_total:
-            escrow.amount = invoice.amount_total
-            update_fields.append('amount')
         if escrow.payment_terms_id is None and tender.payment_terms_id:
             escrow.payment_terms = tender.payment_terms
             update_fields.append('payment_terms')
@@ -229,6 +226,7 @@ def _ensure_escrow_account(tender, order, invoice):
 
 def _refresh_escrow(escrow):
     invoices = Invoice.objects.filter(order__tender=escrow.tender)
+    expected = invoices.aggregate(total=Sum('amount_total'))['total'] or Decimal('0.00')
     deposited = invoices.aggregate(total=Sum('deposited_amount'))['total'] or Decimal('0.00')
     has_checkout = invoices.exclude(selcom_order_token='').exists()
     total_invoices = invoices.count()
@@ -240,6 +238,9 @@ def _refresh_escrow(escrow):
     else:
         status = EscrowAccount.Status.OPEN
     updated = []
+    if escrow.amount != expected:
+        escrow.amount = expected
+        updated.append('amount')
     if escrow.deposited_amount != deposited:
         escrow.deposited_amount = deposited
         updated.append('deposited_amount')
