@@ -1,6 +1,10 @@
 {% extends 'base.html' %}
 {% block title %}Profile &middot; HYPAX{% endblock %}
+{% block extra_head %}
+  {% if fonts_preview_url %}<link rel="stylesheet" href="{{ fonts_preview_url }}">{% endif %}
+{% endblock %}
 {% block content %}
+{{ font_options|json_script:"font-options" }}
 <div class="container">
   <div class="page-header">
     <div>
@@ -117,6 +121,20 @@
             <span class="pref-option-body">
               <strong>Dark</strong>
               <small>Always dark theme</small>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <div class="pref-group">
+        <div class="pref-label">Font</div>
+        <div class="pref-options">
+          <label class="pref-option" v-for="font in fontOptions" v-bind:key="font.value">
+            <input type="radio" name="font" v-bind:value="font.value" v-model="form.font">
+            <span class="pref-option-body" v-bind:style="font.stack ? { fontFamily: font.stack } : {}">
+              <strong>{{ font.label }}</strong>
+              <small v-if="font.value === 'default'">Use the platform default font</small>
+              <small v-else>Google Font for the whole platform</small>
             </span>
           </label>
         </div>
@@ -362,7 +380,8 @@
     Vue.createApp({
       data: function () {
         return {
-          form: { first_name: '', last_name: '', email: '', phone: '', bio: '', picture: '', newPicture: null, theme: 'system', notification_pref: 'email' },
+          form: { first_name: '', last_name: '', email: '', phone: '', bio: '', picture: '', newPicture: null, theme: 'system', notification_pref: 'email', font: 'default' },
+          fontOptions: [],
           errors: {},
           error: '',
           message: '',
@@ -398,7 +417,13 @@
         addressCity: function () { return (this.primaryAddress && this.primaryAddress.city) || ''; },
         addressCountry: function () { return (this.primaryAddress && this.primaryAddress.country) || ''; }
       },
-      created: function () { this.load(); },
+      created: function () {
+        var node = document.getElementById('font-options');
+        if (node) {
+          try { this.fontOptions = JSON.parse(node.textContent) || []; } catch (e) { this.fontOptions = []; }
+        }
+        this.load();
+      },
       methods: {
         load: async function () {
           try {
@@ -413,6 +438,8 @@
             this.form.picture = p.picture || '';
             this.form.theme = p.theme || 'system';
             this.form.notification_pref = p.notification_pref || 'email';
+            this.form.font = p.font || 'default';
+            if (window.HYPAX.applyFont) window.HYPAX.applyFont(this.form.font);
             this.addresses = (res && res.addresses) || [];
             this.linkedTransporters = (res && res.linked_transporters) || [];
             if ('showCompanies' in root.dataset) {
@@ -449,6 +476,7 @@
             fd.append('bio', self.form.bio || '');
             fd.append('theme', self.form.theme || 'system');
             fd.append('notification_pref', self.form.notification_pref || 'email');
+            fd.append('font', self.form.font || 'default');
             if (self.form.newPicture) fd.append('profile_picture', self.form.newPicture, self.form.newPicture.name);
 
             var resp = await fetch(root.dataset.profileSaveUrl, {
@@ -472,8 +500,10 @@
               self.form.picture = res.profile.picture || self.form.picture;
               self.form.theme = res.profile.theme || 'system';
               self.form.notification_pref = res.profile.notification_pref || 'email';
+              self.form.font = res.profile.font || 'default';
             }
             if (window.HYPAX.applyTheme) window.HYPAX.applyTheme(self.form.theme);
+            if (window.HYPAX.applyFont) window.HYPAX.applyFont(self.form.font);
             self.form.newPicture = null;
           } catch (e) {
             self.error = e.message || 'Profile could not be saved.';

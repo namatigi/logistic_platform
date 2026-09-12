@@ -63,30 +63,41 @@ class ProfileViewsTest(TestCase):
         self.assertEqual(data['profile']['country'], '')
         self.assertEqual(data['profile']['theme'], 'system')
         self.assertEqual(data['profile']['notification_pref'], 'email')
+        self.assertEqual(data['profile']['font'], 'default')
 
     def test_profile_save_preferences(self):
         from users.models import Profile
         response = self.client.post(reverse('users:api_profile_save'), {
-            'email': 'alice@example.com', 'theme': 'dark', 'notification_pref': 'hypax',
+            'email': 'alice@example.com', 'theme': 'dark', 'notification_pref': 'hypax', 'font': 'poppins',
         })
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data['profile']['theme'], 'dark')
         self.assertEqual(data['profile']['notification_pref'], 'hypax')
+        self.assertEqual(data['profile']['font'], 'poppins')
         profile = Profile.objects.get(user=self.user)
         self.assertEqual(profile.theme, 'dark')
         self.assertEqual(profile.notification_pref, 'hypax')
+        self.assertEqual(profile.font_pref, 'poppins')
         response = self.client.post(reverse('users:api_profile_save'), {
-            'email': 'alice@example.com', 'theme': 'not-a-theme', 'notification_pref': 'spam',
+            'email': 'alice@example.com', 'theme': 'not-a-theme', 'notification_pref': 'spam', 'font': 'not-a-font',
         })
         self.assertEqual(response.json()['profile']['theme'], 'dark')
         self.assertEqual(response.json()['profile']['notification_pref'], 'hypax')
+        self.assertEqual(response.json()['profile']['font'], 'poppins')
 
     def test_profile_page_sets_theme_attribute(self):
         from users.models import Profile
         Profile.objects.update_or_create(user=self.user, defaults={'theme': 'dark'})
         response = self.client.get(reverse('users:profile'))
         self.assertContains(response, 'data-user-theme="dark"')
+
+    def test_profile_page_sets_font_attribute(self):
+        from users.models import Profile
+        Profile.objects.update_or_create(user=self.user, defaults={'font_pref': 'poppins'})
+        response = self.client.get(reverse('users:profile'))
+        self.assertContains(response, 'data-user-font="poppins"')
+        self.assertContains(response, 'fonts.googleapis.com/css2?family=Poppins')
 
     def test_profile_location_comes_from_physical_address(self):
         Address.objects.create(

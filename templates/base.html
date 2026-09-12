@@ -1,10 +1,12 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en" data-user-theme="{{ user_theme|default:'system' }}">
+<html lang="en" data-user-theme="{{ user_theme|default:'system' }}" data-user-font="{{ user_font|default:'default' }}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}HYPAX Cargo Logistic and Transportation{% endblock %}</title>
+  {% if user_font_url %}<link rel="stylesheet" href="{{ user_font_url }}">{% endif %}
+  {% block extra_head %}{% endblock %}
   <link rel="stylesheet" href="{% static 'css/hypax.css' %}">
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
   <script src="{% static 'js/hypax.js' %}"></script>
@@ -18,6 +20,9 @@
         var root = document.documentElement;
         root.setAttribute('data-theme', resolveTheme(pref));
       }
+      function applyFont(pref) {
+        document.documentElement.setAttribute('data-user-font', pref || 'default');
+      }
       var current = document.documentElement.getAttribute('data-user-theme') || 'system';
       applyTheme(current);
       var mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -29,6 +34,9 @@
       window.HYPAX.applyTheme = function (pref) {
         document.documentElement.setAttribute('data-user-theme', pref);
         applyTheme(pref);
+      };
+      window.HYPAX.applyFont = function (pref) {
+        document.documentElement.setAttribute('data-user-font', pref || 'default');
       };
     })();
   </script>

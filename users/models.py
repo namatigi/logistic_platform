@@ -102,6 +102,16 @@ class Profile(models.Model):
         EMAIL = 'email', 'By Email'
         HYPAX = 'hypax', 'In HYPAX'
 
+    class Fonts(models.TextChoices):
+        DEFAULT = 'default', 'Default'
+        INTER = 'inter', 'Inter'
+        POPPINS = 'poppins', 'Poppins'
+        OUTFIT = 'outfit', 'Outfit'
+        MANROPE = 'manrope', 'Manrope'
+        SPACE_GROTESK = 'space_grotesk', 'Space Grotesk'
+        EXO_2 = 'exo_2', 'Exo 2'
+        PLUS_JAKARTA = 'plus_jakarta', 'Plus Jakarta Sans'
+
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -117,6 +127,10 @@ class Profile(models.Model):
     notification_pref = models.CharField(
         max_length=20, choices=Notifications.choices, default=Notifications.EMAIL,
         help_text='How the account owner wants to receive notifications.',
+    )
+    font_pref = models.CharField(
+        max_length=30, choices=Fonts.choices, default=Fonts.DEFAULT,
+        help_text='Web font applied to the whole platform for this account.',
     )
     updated_at = models.DateTimeField(auto_now=True)
 

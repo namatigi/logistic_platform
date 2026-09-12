@@ -21,6 +21,7 @@ from django.views.decorators.http import require_POST
 from django.views.decorators.csrf import ensure_csrf_cookie
 
 from .forms import AddressForm, ProfileForm, SignUpForm
+from .fonts import all_fonts_url, options as font_options
 from .models import Address, CustomUser, Profile
 from tenders.models import ApiSetting, Invoice, Order, OrderLine, Tender, Town, Transporter, Truck, TruckModel
 from tenders.views import (
@@ -865,7 +866,12 @@ def api_agent_truck_track(request, pk):
 @login_required
 def profile_view(request):
     profile, _created = Profile.objects.get_or_create(user=request.user)
-    context = {'profile': profile, 'active_tab': 'profile'}
+    context = {
+        'profile': profile,
+        'active_tab': 'profile',
+        'fonts_preview_url': all_fonts_url(),
+        'font_options': font_options(),
+    }
     return render(request, 'users/profile.html', context)
 
 
@@ -885,6 +891,7 @@ def _profile_dict(user, profile):
             'phone': profile.phone,
             'theme': profile.theme,
             'notification_pref': profile.notification_pref,
+            'font': profile.font_pref,
             'street': addr.street if addr else '',
             'city': addr.city if addr else '',
             'country': addr.country if addr else '',
@@ -964,7 +971,10 @@ def api_profile_save(request):
     notification_pref = (request.POST.get('notification_pref') or '').strip()
     if notification_pref in Profile.Notifications.values:
         profile.notification_pref = notification_pref
-    profile.save(update_fields=('theme', 'notification_pref'))
+    font = (request.POST.get('font') or '').strip()
+    if font in Profile.Fonts.values:
+        profile.font_pref = font
+    profile.save(update_fields=('theme', 'notification_pref', 'font_pref'))
     return JsonResponse({
         'ok': True,
         'message': 'Profile saved successfully.',
