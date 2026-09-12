@@ -2378,25 +2378,14 @@ def admin_escrow_detail(request, pk):
             transporter_name = (inv.order.company_name or '').strip()
 
         awarded_total = Decimal('0.00')
-        subtotal_total = Decimal('0.00')
         unit_total = Decimal('0.00')
         commission_total = Decimal('0.00')
         for line in inv.order.lines.filter(awarded=True):
-            price_total = line.price_total or Decimal('0.00')
-            subtotal_total += line.price_subtotal or Decimal('0.00')
+            awarded_total += line.price_total or Decimal('0.00')
             unit_total += line.price_unit or Decimal('0.00')
-            awarded_total += price_total
             commission_total += line.commission or Decimal('0.00')
         commission_total = commission_total.quantize(Decimal('0.01'))
-
-        order_total = inv.order.amount_total or Decimal('0.00')
-        if subtotal_total:
-            invoice_total = (
-                ((order_total - subtotal_total) / subtotal_total) * unit_total + subtotal_total
-            )
-        else:
-            invoice_total = order_total
-        invoice_total = invoice_total.quantize(Decimal('0.01'))
+        invoice_total = (unit_total * Decimal('1.15')).quantize(Decimal('0.01'))
 
         agent_name = ''
         agent_commission_rate = Decimal('0.00')

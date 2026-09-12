@@ -426,6 +426,8 @@ class EscrowAccountsTest(TestCase):
         self.assertContains(res, 'Transit Ltd')
         self.assertContains(res, 'HYPAX commission fee')
         self.assertContains(res, 'Deposited')
+        self.assertContains(res, '1150.00')
+        self.assertContains(res, '575.00')
 
     def test_escrow_account_detail_requires_admin(self):
         from tenders.views import get_or_create_invoice
@@ -454,7 +456,7 @@ class EscrowAccountsTest(TestCase):
         res = self.client.get(reverse('tenders:admin_escrow_detail', args=[999999]))
         self.assertEqual(res.status_code, 404)
 
-    def test_escrow_account_detail_uses_total_formula(self):
+    def test_escrow_account_detail_amount_uses_unit_price_base(self):
         from tenders.views import get_or_create_invoice
         from tenders.models import Order, Tender, EscrowAccount, OrderLine, PaymentTerm
         from users.models import Profile
@@ -486,8 +488,8 @@ class EscrowAccountsTest(TestCase):
         self.client.login(email='admin@example.com', password='pass1234')
         res = self.client.get(reverse('tenders:admin_escrow_detail', args=[escrow.pk]))
         self.assertEqual(res.status_code, 200)
-        self.assertContains(res, '1000.00')
-        self.assertContains(res, '500.00')
+        self.assertContains(res, '1150.00')
+        self.assertContains(res, '575.00')
         self.assertContains(res, '40.50')
         self.assertContains(res, '4.50')
         self.assertContains(res, '900.00')
