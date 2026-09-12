@@ -647,6 +647,30 @@ html[data-theme='dark'] .user-menu-form button:hover {
   font-size: 12px;
 }
 
+.pw-panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+
+.pw-lock {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border-radius: 10px;
+  background: rgba(29, 78, 216, 0.10);
+  color: var(--brand);
+}
+
+.password-fields.has-errors .form-row input {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.12);
+}
+
 .order-detail-lines {
   padding: 14px 18px 18px;
 }

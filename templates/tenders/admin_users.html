@@ -91,23 +91,49 @@
                       </div>
                     </div>
 
-                    <div style="flex:1; min-width:280px;">
-                      <div class="detail-label" style="margin-bottom:8px;">Change password</div>
-                      <div class="alert alert-error" v-if="pwErrors[u.id]" style="margin-bottom:8px;">
-                        <ul style="margin:0; padding-left:16px;">
-                          <li v-for="err in pwErrors[u.id]">{{ err }}</li>
-                        </ul>
-                      </div>
-                      <div style="display:flex; flex-direction:column; gap:8px; max-width:360px;">
-                        <input type="password" v-model="pw[u.id].new" placeholder="New password"
-                               :disabled="pwBusy === u.id" @keyup.enter="savePassword(u)">
-                        <input type="password" v-model="pw[u.id].confirm" placeholder="Confirm new password"
-                               :disabled="pwBusy === u.id" @keyup.enter="savePassword(u)">
-                        <button type="button" class="btn btn-primary"
-                                :disabled="pwBusy === u.id" @click="savePassword(u)">
-                          <span v-if="pwBusy === u.id">Saving...</span>
-                          <span v-else>Set new password</span>
-                        </button>
+                    <div style="flex:1; min-width:300px; max-width:460px;">
+                      <div class="pw-panel">
+                        <div style="display:flex; align-items:flex-start; gap:10px; margin-bottom:14px;">
+                          <span class="pw-lock">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                          </span>
+                          <div>
+                            <div style="font-size:14px; font-weight:600; color:var(--text);">Change password</div>
+                            <div class="form-help">Set a new password this user can sign in with.</div>
+                          </div>
+                        </div>
+
+                        <div class="alert alert-error" v-if="pwErrors[u.id]" style="margin-bottom:12px;">
+                          <ul style="margin:0; padding-left:18px;">
+                            <li v-for="err in pwErrors[u.id]">{{ err }}</li>
+                          </ul>
+                        </div>
+
+                        <div class="password-fields" :class="{ 'has-errors': pwErrors[u.id] }">
+                          <div class="form-row" style="margin-bottom:12px;">
+                            <label for="pw-new-{{ u.id }}">New password</label>
+                            <input id="pw-new-{{ u.id }}" type="password" v-model="pw[u.id].new"
+                                   placeholder="At least 8 characters"
+                                   :disabled="pwBusy === u.id" @keyup.enter="savePassword(u)"
+                                   autocomplete="new-password">
+                          </div>
+                          <div class="form-row">
+                            <label for="pw-confirm-{{ u.id }}">Confirm new password</label>
+                            <input id="pw-confirm-{{ u.id }}" type="password" v-model="pw[u.id].confirm"
+                                   placeholder="Re-enter the password"
+                                   :disabled="pwBusy === u.id" @keyup.enter="savePassword(u)"
+                                   autocomplete="new-password">
+                          </div>
+                          <div class="form-help" style="margin-top:6px;">Passwords must match and be at least 8 characters.</div>
+                        </div>
+
+                        <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+                          <button type="button" class="btn btn-primary"
+                                  :disabled="pwBusy === u.id" @click="savePassword(u)">
+                            <span v-if="pwBusy === u.id">Saving...</span>
+                            <span v-else>Set new password</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
