@@ -2380,14 +2380,14 @@ def admin_escrow_detail(request, pk):
         awarded_total = Decimal('0.00')
         subtotal_total = Decimal('0.00')
         unit_total = Decimal('0.00')
-        hypax_commission = Decimal('0.00')
+        commission_total = Decimal('0.00')
         for line in inv.order.lines.filter(awarded=True):
             price_total = line.price_total or Decimal('0.00')
             subtotal_total += line.price_subtotal or Decimal('0.00')
             unit_total += line.price_unit or Decimal('0.00')
             awarded_total += price_total
-            hypax_commission += line.commission or Decimal('0.00')
-        hypax_commission = hypax_commission.quantize(Decimal('0.01'))
+            commission_total += line.commission or Decimal('0.00')
+        commission_total = commission_total.quantize(Decimal('0.01'))
 
         order_total = inv.order.amount_total or Decimal('0.00')
         if subtotal_total:
@@ -2409,8 +2409,9 @@ def admin_escrow_detail(request, pk):
                 if profile is not None:
                     agent_commission_rate = profile.agent_commission or Decimal('0.00')
                     agent_commission_amount = (
-                        (agent_commission_rate / Decimal('100')) * hypax_commission
+                        (agent_commission_rate / Decimal('100')) * commission_total
                     ).quantize(Decimal('0.01'))
+        hypax_commission = (commission_total - agent_commission_amount).quantize(Decimal('0.01'))
 
         line_items = []
         for ti in term_items:
