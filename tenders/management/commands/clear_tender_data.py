@@ -1,14 +1,15 @@
 from django.core.management.base import BaseCommand
 
-from tenders.models import EscrowAccount, Invoice, Order, OrderLine, PendingPush, Tender, TenderSubmission
+from tenders.models import EscrowAccount, Invoice, Order, OrderLine, PendingPush, Tender, TenderSubmission, Transporter
 
 
 class Command(BaseCommand):
     help = (
-        'Permanently delete all tenders, orders, invoices and escrow accounts '
-        'from the configured database. Related rows (order lines, tender '
-        'submissions, pending pushes, escrow accounts) are removed by cascade. '
-        'Runs against whatever database the environment points at (DATABASE_URL).'
+        'Permanently delete all tenders, orders, invoices, escrow accounts and '
+        'transporters from the configured database. Related rows (order lines, '
+        'tender submissions, pending pushes, escrow accounts) are removed by '
+        'cascade. Runs against whatever database the environment points at '
+        '(DATABASE_URL).'
     )
 
     def add_arguments(self, parser):
@@ -27,6 +28,7 @@ class Command(BaseCommand):
             ('Escrow accounts', EscrowAccount),
             ('Tender submissions', TenderSubmission),
             ('Pending pushes', PendingPush),
+            ('Transporters', Transporter),
         )
         before = {label: model.objects.count() for label, model in tables}
 
@@ -40,6 +42,7 @@ class Command(BaseCommand):
         Invoice.objects.all().delete()
         Order.objects.all().delete()
         Tender.objects.all().delete()
+        Transporter.objects.all().delete()
 
         self.stdout.write(self.style.SUCCESS('Deleted.'))
         for label, model in tables:
