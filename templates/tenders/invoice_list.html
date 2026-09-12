@@ -47,7 +47,7 @@
               <td><strong>{{ inv.number }}</strong></td>
               <td>{{ inv.transporter }}</td>
               <td>{{ inv.order_name }}</td>
-              <td>{{ inv.cargo_reference || '-' }}</td>
+              <td>{{ inv.trans_reference || '-' }}</td>
               <td>{{ inv.tender_reference || '-' }}</td>
               <td>{{ fmtDate(inv.created_at) }}</td>
               <td><strong>{{ money(inv.amount_total, inv.currency) }}</strong></td>
@@ -84,7 +84,7 @@
                   </div>
                   <div>
                     <span class="detail-label">Trans Reference</span>
-                    <div><strong>{{ inv.cargo_reference || '-' }}</strong></div>
+                    <div><strong>{{ inv.trans_reference || '-' }}</strong></div>
                   </div>
                   <div>
                     <span class="detail-label">Tender reference</span>
@@ -219,7 +219,7 @@
           return String(root.dataset.mapUrl) + '?from=' + encodeURIComponent(inv.tender_loading || '') +
             '&to=' + encodeURIComponent(inv.tender_delivery || '') + '&source=invoices' +
             '&truck=' + truckIndex +
-            '&cargo_ref=' + encodeURIComponent(inv.cargo_reference || '') +
+            '&trans_ref=' + encodeURIComponent(inv.trans_reference || '') +
             '&tender_id=' + (inv.tender_id || '');
         },
         load: async function () {

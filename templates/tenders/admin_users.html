@@ -169,7 +169,7 @@
         toggle: function (id) {
           this.expanded = this.expanded === id ? null : id;
           if (this.expanded === id && !this.pw[id]) {
-            this.$set(this.pw, id, { new: '', confirm: '' });
+            this.pw[id] = { new: '', confirm: '' };
           }
         },
         savePassword: async function (u) {
@@ -178,21 +178,21 @@
           self.notice = '';
           self.pwErrors = {};
           var entry = self.pw[u.id] || {};
-          if (!entry.new) { self.$set(self.pwErrors, u.id, ['Enter a new password.']); return; }
-          if (entry.new !== entry.confirm) { self.$set(self.pwErrors, u.id, ['Passwords do not match.']); return; }
+          if (!entry.new) { self.pwErrors[u.id] = ['Enter a new password.']; return; }
+          if (entry.new !== entry.confirm) { self.pwErrors[u.id] = ['Passwords do not match.']; return; }
           self.pwBusy = u.id;
           try {
             var base = root.dataset.passwordBase;
             var url = base.replace('0', u.id);
             var res = await HY.api.post(url, { password: entry.new });
             if (res && res.ok === false) {
-              self.$set(self.pwErrors, u.id, res.errors || [res.error || 'Password could not be changed.']);
+              self.pwErrors[u.id] = res.errors || [res.error || 'Password could not be changed.'];
               return;
             }
             self.notice = (res && res.message) || 'Password updated.';
-            self.$set(self.pw, u.id, { new: '', confirm: '' });
+            self.pw[u.id] = { new: '', confirm: '' };
           } catch (e) {
-            self.$set(self.pwErrors, u.id, [e.message]);
+            self.pwErrors[u.id] = [e.message];
           } finally {
             self.pwBusy = null;
           }

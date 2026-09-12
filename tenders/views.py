@@ -296,8 +296,6 @@ def build_payload(tender):
         }
     else:
         payload['payment_terms'] = None
-    if reference:
-        payload['cargo_reference'] = reference
     return payload
 
 
@@ -397,7 +395,7 @@ def _record_submission(tender, company, status_code, body):
         status_code=status_code,
         response_body=(body or '')[:4000],
         external_id=data.get('id'),
-        cargo_reference=data.get('name', '') or '',
+        trans_reference=data.get('name', '') or '',
         external_status=data.get('status', '') or '',
         success=is_ok,
     )
@@ -412,7 +410,7 @@ def _apply_aggregate_tender(tender):
         tender.response_code = sub.status_code
         tender.response_body = sub.response_body
         tender.external_id = sub.external_id
-        tender.cargo_reference = sub.cargo_reference
+        tender.trans_reference = sub.trans_reference
         tender.external_status = sub.external_status
         tender.status = Tender.Status.SUCCESS if sub.success else Tender.Status.FAILED
     else:
@@ -622,11 +620,11 @@ def perform_award(order, setting, line_ids, is_partial):
 
     cargo_name = (
         (order.tender.tender_reference() if order.tender else '')
-        or order.cargo_reference
+        or order.trans_reference
         or ''
     ).strip()
     if not cargo_name:
-        return {'ok': False, 'message': 'This order has no cargo reference to confirm.'}
+        return {'ok': False, 'message': 'This order has no reference to confirm.'}
 
     payload = {
         'order_id': order.order_id,
@@ -774,19 +772,32 @@ def webhook_orders(request, slug):
     if not company.is_active:
         return JsonResponse({'error': f"Company webhook '{slug}' is disabled."}, status=403)
 
-    cargo_reference = (payload.get('cargo_reference') or '').strip()
+    tender_reference = (payload.get('tender_reference') or '').strip()
+    legacy_reference = (payload.get('cargo_reference') or '').strip()
+    trans_reference = (payload.get('cargo_name') or legacy_reference).strip()
     tender = None
-    if cargo_reference:
+    if tender_reference:
         tender = Tender.objects.filter(
-            Q(reference=cargo_reference) | Q(cargo_reference=cargo_reference)
+            Q(reference=tender_reference) | Q(trans_reference=tender_reference)
         ).first()
         if tender is None:
-            submission = TenderSubmission.objects.filter(cargo_reference=cargo_reference)\
+            submission = TenderSubmission.objects.filter(trans_reference=tender_reference)\
+                .select_related('tender').first()
+            if submission is not None:
+                tender = submission.tender
+    if tender is None and legacy_reference:
+        # Backward compatibility: older Odoo builds only echo a cargo reference.
+        tender = Tender.objects.filter(
+            Q(reference=legacy_reference) | Q(trans_reference=legacy_reference)
+        ).first()
+        if tender is None:
+            submission = TenderSubmission.objects.filter(trans_reference=legacy_reference)\
                 .select_related('tender').first()
             if submission is not None:
                 tender = submission.tender
 
     order, created = Order.objects.update_or_create(
+        odoo_company=company,
         order_id=payload['order_id'],
         defaults={
             'order_name': payload.get('order_name', '') or '',
@@ -798,11 +809,10 @@ def webhook_orders(request, slug):
             'amount_total': to_decimal(payload.get('amount_total')),
             'customer': (tender.customer if tender else '') or payload.get('customer', '') or '',
             'currency': payload.get('currency', '') or '',
-            'cargo_reference': cargo_reference,
+            'trans_reference': trans_reference,
             'cargo_id': payload.get('cargo_id'),
             'user': tender.user if tender else None,
             'tender': tender,
-            'odoo_company': company,
             'raw_payload': payload,
         },
     )
@@ -831,7 +841,7 @@ def webhook_orders(request, slug):
         'status': 'ok',
         'created': created,
         'order_id': order.order_id,
-        'cargo_reference': cargo_reference,
+        'trans_reference': trans_reference,
         'linked_tender': tender.tender_reference() if tender else None,
         'company_slug': company.slug,
     })
@@ -933,7 +943,7 @@ class OrderList(LoginRequiredMixin, ListView):
                 Q(user=self.request.user) | Q(user__isnull=True)
             )
             .select_related('tender')
-            .order_by('tender__cargo_reference', '-date_order', '-created_at')
+            .order_by('tender__trans_reference', '-date_order', '-created_at')
         )
 
     def get_context_data(self, **kwargs):
@@ -1147,7 +1157,7 @@ def _tender_dict(tender):
         'status': tender.status,
         'status_label': tender.get_status_display(),
         'reference': tender.reference,
-        'cargo_reference': tender.cargo_reference,
+        'trans_reference': tender.trans_reference,
         'response_code': tender.response_code,
         'payment_terms': tender.payment_terms.name if tender.payment_terms_id else '',
         'payment_term_id': tender.payment_terms_id,
@@ -1197,7 +1207,7 @@ def _order_dict(order, include_lines=False):
         'awarded_amount': str(awarded_amount or 0),
         'awarded_lines_count': awarded_count,
         'total_lines_count': line_count,
-        'cargo_reference': order.cargo_reference,
+        'trans_reference': order.trans_reference,
         'cargo_id': order.cargo_id,
         'date_order': order.date_order.isoformat() if order.date_order else None,
         'created_at': order.created_at.isoformat() if order.created_at else None,
@@ -1552,7 +1562,6 @@ def route_map(request):
     tender_id = request.GET.get('tender_id')
     source = request.GET.get('source', '')
     truck = request.GET.get('truck', '')
-    cargo_ref = request.GET.get('cargo_ref', '')
 
     truck_index = 0
     try:
@@ -1788,7 +1797,7 @@ def api_tracker(request):
                 'order_id': order.order_id,
                 'order_name': order.order_name,
                 'company_name': order.company_name,
-                'cargo_reference': order.cargo_reference,
+                'trans_reference': order.trans_reference,
                 'state': order.state or '',
                 'awarded_amount': str(order._awarded_amount_total or 0),
                 'awarded_lines_count': order._awarded_line_count,
@@ -1864,7 +1873,7 @@ def _invoice_dict(invoice):
         'order_name': order.order_name or f'#{order.order_id}',
         'transporter': invoice.transporter.company_name if invoice.transporter else (order.company_name or ''),
         'customer': order.customer or '',
-        'cargo_reference': order.cargo_reference,
+        'trans_reference': order.trans_reference,
         'cargo_id': order.cargo_id,
         'route': f'{tender.route_loading} \u2192 {tender.route_delivery}' if tender else '',
         'tender_loading': tender.route_loading if tender else '',
@@ -1903,7 +1912,7 @@ def _synthetic_invoice_dict(order):
         'order_name': order.order_name or f'#{order.order_id}',
         'transporter': order.company_name or '',
         'customer': order.customer or '',
-        'cargo_reference': order.cargo_reference,
+        'trans_reference': order.trans_reference,
         'cargo_id': order.cargo_id,
         'route': f'{tender.route_loading} \u2192 {tender.route_delivery}' if tender else '',
         'tender_loading': tender.route_loading if tender else '',
@@ -1940,9 +1949,9 @@ def _escrow_dict(escrow):
     transporters = list(escrow.transporters.all())
     order = invoices[0].order if invoices else None
     tender = escrow.tender
-    cargo_reference = tender.tender_reference() if tender else ''
-    if not cargo_reference and order and order.cargo_reference:
-        cargo_reference = order.cargo_reference
+    tender_reference = tender.tender_reference() if tender else ''
+    if not tender_reference and order and order.trans_reference:
+        tender_reference = order.trans_reference
     transporter_names = [t.company_name or t.alias for t in transporters if t.company_name or t.alias]
     if not transporter_names and order and order.company_name:
         transporter_names = [order.company_name]
@@ -1964,7 +1973,7 @@ def _escrow_dict(escrow):
         'payment_terms': escrow.payment_terms.name if escrow.payment_terms else '',
         'payment_terms_description': escrow.payment_terms.description if escrow.payment_terms else '',
         'created_at': escrow.created_at.isoformat() if escrow.created_at else None,
-        'cargo_reference': cargo_reference or '',
+        'tender_reference': tender_reference or '',
         'invoice_numbers': [i.number for i in invoices],
         'invoice_number': ', '.join(i.number for i in invoices),
         'bank': escrow.bank or 'Selcom',
@@ -1993,7 +2002,7 @@ def _invoice_payload(invoice):
     company = _company_for_order(order)
     return {
         'order_id': order.order_id,
-        'cargo_name': (order.tender.tender_reference() if order.tender else '') or order.cargo_reference or '',
+        'cargo_name': (order.tender.tender_reference() if order.tender else '') or order.trans_reference or '',
         'tender_reference': order.tender.tender_reference() if order.tender else '',
         'customer_name': (order.customer or '').strip(),
         'tax_id': company.tin if company else '',

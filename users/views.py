@@ -366,7 +366,7 @@ def api_agent_awarded(request):
             'id': order.pk,
             'order_id': order.order_id,
             'order_name': order.order_name or f'#{order.order_id}',
-            'cargo_reference': order.cargo_reference or '',
+            'trans_reference': order.trans_reference or '',
             'tender_ref': tender.tender_reference() if tender else '',
             'customer': tender.customer if tender else order.customer,
             'route': f'{tender.route_loading} \u2192 {tender.route_delivery}' if tender else '',
@@ -422,7 +422,7 @@ def api_agent_tracker(request):
             'order_name': order.order_name,
             'customer': order.customer,
             'company_name': order.company_name,
-            'cargo_reference': order.cargo_reference,
+            'trans_reference': order.trans_reference,
             'state': order.state or '',
             'awarded_amount': str(order.awarded_amount),
         })
@@ -629,7 +629,7 @@ def _agent_truck_assignments(user, now):
                     'active': True,
                     'order_id': order.order_id,
                     'order_name': order.order_name or '',
-                    'cargo_reference': order.cargo_reference or '',
+                    'trans_reference': order.trans_reference or '',
                     'tender_ref': tender.tender_reference() or '',
                     'state': order.state or '',
                     'origin': {'name': origin.name, 'lat': origin.lat, 'lng': origin.lng},
@@ -817,7 +817,7 @@ def api_agent_trucks(request):
             'progress': a['progress'] if a else None,
             'order_id': a['order_id'] if a else '',
             'order_name': a['order_name'] if a else '',
-            'cargo_reference': a['cargo_reference'] if a else '',
+            'trans_reference': a['trans_reference'] if a else '',
             'route_text': f"{a['origin']['name']} \u2192 {a['destination']['name']}" if a else '',
         }
         out.append(row)

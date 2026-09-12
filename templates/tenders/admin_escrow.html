@@ -51,7 +51,7 @@
                 <div v-if="a.payment_terms_description" style="color:#64748b; font-size:12px;">{{ a.payment_terms_description }}</div>
               </td>
               <td>{{ fmtDate(a.created_at) }}</td>
-              <td>{{ a.cargo_reference || '-' }}</td>
+              <td>{{ a.tender_reference || '-' }}</td>
               <td>
                 <div v-for="t in a.trucks" v-bind:key="t">{{ t }}</div>
                 <span v-if="!a.trucks.length">-</span>

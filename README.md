@@ -53,7 +53,6 @@ A Django web platform for managing cargo logistics:
   "distance_km": 850.0,
   "cargo_date": "2026-09-10",
   "tender_reference": "HX-2609-000042",
-  "cargo_reference": "HX-2609-000042",
   "payment_terms": {
     "name": "On confirmation",
     "description": "Pay via Selcom before loading.",
@@ -65,7 +64,7 @@ A Django web platform for managing cargo logistics:
 }
 ```
 
-`tender_reference` is the **canonical tender number** — the unique `HX-YYMM-<id>` reference assigned when the tender is created. It is always present in the payload (required). `cargo_reference` carries the same value and is kept for backward compatibility with earlier integrations.
+`tender_reference` is the **canonical tender number** — the unique `HX-YYMM-<id>` reference assigned when the tender is created. It is always present in the payload (required).
 
 The optional `payment_terms` object repeats what the user picked from their **Pay Term** library on the tender form:
 - `name` — the term label (e.g. "Net 30", "On confirmation")
@@ -95,7 +94,7 @@ When no payment term is selected the field is sent as `null`.
   }
 }
 ```
-The returned `data.name` (e.g. `CAR00014`) is stored on the tender as its **cargo reference**. The **canonical** tender number is the `tender_reference` (HX reference) sent in the payload. Incoming webhook orders are matched by `cargo_reference` against the tender's HX reference, its cargo reference, or a recorded submission, so both values link orders back to the originating tender.
+The returned `data.name` (e.g. `CAR00014`) is stored as the tender/order **trans reference**. The **canonical** tender number is the `tender_reference` (HX reference) sent in the payload. Incoming webhook orders are matched by `tender_reference`, so both values link orders back to the originating tender.
 
 ### Payment terms (Pay Term)
 Every user has a personal **Pay Term** library (`/payment-terms/`):
@@ -106,7 +105,7 @@ Every user has a personal **Pay Term** library (`/payment-terms/`):
 ### Escrow accounts
 An escrow account is created automatically for a tender **when its first invoice is confirmed** (i.e. at payment/checkout time — not when the order is awarded):
 - Virtual account number `EA-00001`, customer, transporter(s), amount, payment terms and status (**open** → **pending** → **paid**).
-- A cargo reference can have **multiple invoices** — one per transporter/order. All invoices and all their transporters are listed on the escrow account.
+- A tender can have **multiple invoices** — one per transporter/order. All invoices and all their transporters are listed on the escrow account.
 - `deposited_amount` is summed from all invoices of the tender; confirming a Selcom payment marks the invoice paid and refreshes the escrow. The account is **paid** once every invoice is paid.
 - Administrators monitor everything on the **Escrow** page (`/escrow/`).
 
@@ -157,9 +156,9 @@ Orders are pushed by the Odoo instances to the (CSRF-exempt, JSON) webhook URL:
 |-----|-----------|
 | `POST /webhook/orders/<slug>/` | Per-instance URL. The order is attributed to the Odoo company with that `slug`. Unknown slug → **404**, inactive company → **403**. |
 
-- Orders are upserted by `order_id`, storing every detail and the order lines.
-- If `cargo_reference` matches a tender's HX reference, its cargo reference, or a recorded submission, the order is linked to that tender and its owner.
-- Orders appear on the **Orders** page (list + detail) with all details and how much it totals.
+- Orders are upserted by `order_id` **per Odoo company**: each transporter's order numbers are independent, so two transporters can both post #42 — they are stored as two distinct orders, both grouped under the same tender.
+- Orders are **received by `tender_reference`**: if it matches a tender's HX reference or a recorded submission, the order is linked to that tender and its owner. The transporter's `cargo_name` is saved as the order's **trans reference**.
+- Orders appear on the **Orders** page grouped by **tender reference**; each order keeps its own distinct **trans reference**.
 
 The webhook responds with:
 ```json
@@ -167,12 +166,12 @@ The webhook responds with:
   "status": "ok",
   "created": true,
   "order_id": 42,
-  "cargo_reference": "HX-2609-000042",
+  "trans_reference": "CAR00014",
   "linked_tender": "HX-2609-000042",
   "company_slug": "lake-trans"
 }
 ```
-`linked_tender` reports the **canonical tender number** of the matched tender (`HX-YYMM-<id>`, preferring the HX reference over the external cargo reference), or `null` when no tender matched.
+`linked_tender` reports the **canonical tender number** of the matched tender (`HX-YYMM-<id>`), or `null` when no tender matched.
 
 #### Webhook payload
 ```json
@@ -186,7 +185,8 @@ The webhook responds with:
   "amount_total": 250.0,
   "customer": "HYPAX",
   "currency": "USD",
-  "cargo_reference": "CAR00014",
+  "tender_reference": "HX-2609-000042",
+  "cargo_name": "CAR00014",
   "cargo_id": 18,
   "order_lines": [
     {
@@ -228,7 +228,7 @@ When an order is awarded, HYPAX confirms it back to the **order's own Odoo compa
   }
   ```
 
-`cargo_name` and `tender_reference` both carry the order's **canonical tender number** (`HX-YYMM-<id>`); `cargo_name` falls back to the order's `cargo_reference` when the tender has no HX number yet.
+`cargo_name` and `tender_reference` both carry the order's **canonical tender number** (`HX-YYMM-<id>`); `cargo_name` falls back to the order's **trans reference** when the tender has no HX number yet.
 
 A confirmation is treated as successful when the HTTP status is `2xx`, or the response body contains `"status": "success"`. A successful confirmation stores the award response and marks the selected lines as awarded.
 
@@ -287,7 +287,7 @@ The tracker `groups[]` entries are keyed by the canonical tender reference and c
       "order_id": 42,
       "order_name": "S00042",
       "company_name": "My Company",
-      "cargo_reference": "HX-2609-000042",
+      "trans_reference": "HX-2609-000042",
       "state": "confirmed",
       "awarded_amount": "200.00",
       "awarded_lines_count": 1,

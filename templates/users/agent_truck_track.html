@@ -44,7 +44,7 @@
                 <strong>{{ tracking.order_name || ('#' + tracking.order_id) }}</strong>
                 <span class="badge" v-bind:class="HY.stateBadgeClass(tracking.state)">{{ tracking.state || '-' }}</span>
               </div>
-              <div class="tracker-item-sub">{{ tracking.cargo_reference || tracking.tender_ref || 'no reference' }} &middot; truck {{ tracking.slot }}</div>
+              <div class="tracker-item-sub">{{ tracking.trans_reference || tracking.tender_ref || 'no reference' }} &middot; truck {{ tracking.slot }}</div>
               <div class="tracker-item-sub tracker-item-route">
                 {{ tracking.origin.name }} &rarr; {{ tracking.destination.name }}
               </div>

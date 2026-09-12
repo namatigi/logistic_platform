@@ -64,7 +64,7 @@ class Tender(models.Model):
     response_code = models.IntegerField(null=True, blank=True)
     response_body = models.TextField(blank=True)
     external_id = models.BigIntegerField(null=True, blank=True, help_text='ID returned by the external system')
-    cargo_reference = models.CharField(max_length=200, blank=True, default='', help_text='Reference returned by the external system (e.g. CAR00014)')
+    trans_reference = models.CharField(max_length=200, blank=True, default='', help_text='Reference returned by the external system (e.g. CAR00014)')
     external_status = models.CharField(max_length=50, blank=True, default='', help_text='Status returned by the external system')
     payment_terms = models.ForeignKey(
         'PaymentTerm', null=True, blank=True, on_delete=models.SET_NULL,
@@ -90,7 +90,7 @@ class Tender(models.Model):
 
         Generated at creation so every tender displays a stable number, and reused
         on every send/retry so it stays constant end-to-end (tender → order →
-        invoice). The number travels to the transport company as `cargo_reference`
+        invoice). The number travels to the transport company as `tender_reference`
         and is echoed back on orders, which is how orders are grouped.
         """
         if self.reference:
@@ -103,8 +103,8 @@ class Tender(models.Model):
 
     def tender_reference(self):
         """The canonical tender number: the unique HX reference when present,
-        otherwise the legacy/external cargo reference."""
-        return self.reference or self.cargo_reference
+        otherwise the external trans reference."""
+        return self.reference or self.trans_reference
 
     def __str__(self):
         return f'{self.customer} - {self.route_loading} to {self.route_delivery}'
@@ -124,7 +124,7 @@ class TenderSubmission(models.Model):
     status_code = models.IntegerField(null=True, blank=True)
     response_body = models.TextField(blank=True, default='')
     external_id = models.BigIntegerField(null=True, blank=True)
-    cargo_reference = models.CharField(max_length=200, blank=True, default='')
+    trans_reference = models.CharField(max_length=200, blank=True, default='')
     external_status = models.CharField(max_length=50, blank=True, default='')
     success = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -190,11 +190,11 @@ class EscrowAccount(models.Model):
     )
     transporters = models.ManyToManyField(
         'Transporter', blank=True, related_name='escrow_accounts',
-        help_text='Transport companies related to this escrow account. The same cargo reference can have multiple transporters.',
+        help_text='Transport companies related to this escrow account. The same tender can have multiple transporters.',
     )
     invoices = models.ManyToManyField(
         'Invoice', blank=True, related_name='escrow_accounts',
-        help_text='Invoices issued against this cargo reference. A cargo reference can have more than one invoice.',
+        help_text='Invoices issued against this escrow account. A tender can have more than one invoice.',
     )
     bank = models.CharField(max_length=60, blank=True, default='Selcom')
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
@@ -533,7 +533,7 @@ class OdooCompany(models.Model):
 
 
 class Order(models.Model):
-    order_id = models.PositiveBigIntegerField(unique=True)
+    order_id = models.PositiveBigIntegerField()
     order_name = models.CharField(max_length=255, blank=True, default='')
     state = models.CharField(max_length=50, blank=True, default='')
     company_id = models.PositiveBigIntegerField(null=True, blank=True)
@@ -543,7 +543,7 @@ class Order(models.Model):
     amount_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     customer = models.CharField(max_length=255, blank=True, default='')
     currency = models.CharField(max_length=10, blank=True, default='')
-    cargo_reference = models.CharField(max_length=255, blank=True, default='', db_index=True)
+    trans_reference = models.CharField(max_length=255, blank=True, default='', db_index=True)
     cargo_id = models.PositiveBigIntegerField(null=True, blank=True)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True,
@@ -606,6 +606,12 @@ class Order(models.Model):
 
     class Meta:
         ordering = ['-date_order', '-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['odoo_company', 'order_id'],
+                name='uniq_order_per_company',
+            ),
+        ]
         indexes = [
             models.Index(fields=['-date_order', '-created_at'], name='order_dates_idx'),
         ]

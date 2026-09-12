@@ -83,7 +83,7 @@
                       <div class="fleet-row"><span>Status</span><strong><span class="badge" v-bind:class="statusBadge(tr)">{{ tr.tracking.status }}</span></strong></div>
                       <div class="fleet-row"><span>Route</span><strong>{{ tr.tracking.route_text }}</strong></div>
                       <div class="fleet-row"><span>Order</span><strong>{{ tr.tracking.order_name || ('#' + tr.tracking.order_id) }}</strong></div>
-                      <div class="fleet-row"><span>Reference</span><strong>{{ tr.tracking.cargo_reference || '-' }}</strong></div>
+                      <div class="fleet-row"><span>Reference</span><strong>{{ tr.tracking.trans_reference || '-' }}</strong></div>
                       <div class="tracker-progress" style="margin:10px 0 4px;">
                         <div class="tracker-progress-bar" v-bind:style="{ width: pct(tr.tracking.progress) }"></div>
                       </div>

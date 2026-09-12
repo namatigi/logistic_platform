@@ -81,7 +81,7 @@ class OrderListPerformanceTest(TestCase):
             customer='Acme', cargo_type=Tender.CargoType.DRY_VAN,
             truck_type=Tender.TruckType.TRUCK, weight=20.0, number_of_trucks=1,
             distance_km=480, cargo_date=timezone.localdate(), status=Tender.Status.SUCCESS,
-            cargo_reference='REF-X',
+            trans_reference='REF-X',
         )
 
     def _make_orders(self, n, start=0):
@@ -127,7 +127,7 @@ class OrderListPerformanceTest(TestCase):
             customer='Beta', cargo_type=Tender.CargoType.DRY_VAN,
             truck_type=Tender.TruckType.TRUCK, weight=20.0, number_of_trucks=1,
             distance_km=480, cargo_date=timezone.localdate(),
-            reference='HYPAX-000991', cargo_reference='LEGACY-CARGO-REF',
+            reference='HYPAX-000991', trans_reference='LEGACY-CARGO-REF',
         )
         Order.objects.create(order_id=6001, order_name='ORD-6001', user=self.user, tender=self.tender)
         Order.objects.create(order_id=6002, order_name='ORD-6002', user=self.user, tender=second)
@@ -285,7 +285,7 @@ class TrackerTest(TestCase):
             'to': 'Mombasa',
             'source': 'invoices',
             'truck': '2',
-            'cargo_ref': order.cargo_reference,
+            'trans_ref': order.trans_reference,
             'tender_id': order.tender_id,
         })
         self.assertEqual(response.status_code, 200)
@@ -528,13 +528,13 @@ class InvoicesPageTest(TestCase):
             user=user, route_loading='Nairobi', route_delivery='Mombasa',
             customer=f'C-{ref}', cargo_type=Tender.CargoType.DRY_VAN,
             truck_type=Tender.TruckType.TRUCK, weight=10.0, number_of_trucks=1,
-            distance_km=480, cargo_date=timezone.localdate(), cargo_reference=ref,
+            distance_km=480, cargo_date=timezone.localdate(), trans_reference=ref,
         )
 
     def _order(self, user, tender, order_id, ref, company=None):
         order = Order.objects.create(
             order_id=order_id, order_name=f'ORD-{order_id}', user=user, tender=tender,
-            company_id=1, company_name='Alpha Haulage', cargo_reference=ref, state='confirmed',
+            company_id=1, company_name='Alpha Haulage', trans_reference=ref, state='confirmed',
             amount_total=0, currency='USD', odoo_company=company if company is not None else self.company,
         )
         OrderLine.objects.create(
@@ -672,7 +672,7 @@ class InvoicesPageTest(TestCase):
         tender = self._tender(self.user_a, 'REF-A')
         order = Order.objects.create(
             order_id=7009, order_name='ORD-7009', user=self.user_a, tender=tender,
-            company_id=1, company_name='Alpha Haulage', cargo_reference='REF-A', state='confirmed',
+            company_id=1, company_name='Alpha Haulage', trans_reference='REF-A', state='confirmed',
             amount_total=0, currency='USD', odoo_company=None,
         )
         invite = get_or_create_invoice(order)
@@ -727,7 +727,7 @@ class InvoicesPageTest(TestCase):
         tender = self._tender(user or self.user_a, f'REF-{ref}')
         order = Order.objects.create(
             order_id=order_id, order_name=f'ORD-{order_id}', user=user or self.user_a, tender=tender,
-            company_id=1, company_name='Alpha Haulage', cargo_reference=f'REF-{ref}', state='confirmed',
+            company_id=1, company_name='Alpha Haulage', trans_reference=f'REF-{ref}', state='confirmed',
             amount_total=0, currency='USD',
         )
         OrderLine.objects.create(
@@ -869,11 +869,11 @@ def _order_for(user, ref, order_id):
         user=user, route_loading='Nairobi', route_delivery='Mombasa',
         customer=f'C-{ref}', cargo_type=Tender.CargoType.DRY_VAN,
         truck_type=Tender.TruckType.TRUCK, weight=10.0, number_of_trucks=1,
-        distance_km=480, cargo_date=timezone.localdate(), cargo_reference=ref,
+        distance_km=480, cargo_date=timezone.localdate(), trans_reference=ref,
     )
     order = Order.objects.create(
         order_id=order_id, order_name=f'ORD-{order_id}', user=user, tender=tender,
-        company_id=1, company_name='Alpha Haulage', cargo_reference=ref, state='confirmed',
+        company_id=1, company_name='Alpha Haulage', trans_reference=ref, state='confirmed',
         amount_total=0, currency='TZS',
     )
     OrderLine.objects.create(
@@ -1324,7 +1324,7 @@ class OdooCompanyWebhookTest(TestCase):
             user=self.owner, route_loading='Nairobi', route_delivery='Mombasa',
             customer=f'C-{ref}', cargo_type=Tender.CargoType.DRY_VAN,
             truck_type=Tender.TruckType.TRUCK, weight=10.0, number_of_trucks=1,
-            distance_km=480, cargo_date=timezone.localdate(), cargo_reference=ref,
+            distance_km=480, cargo_date=timezone.localdate(), trans_reference=ref,
         )
 
     def _payload(self, order_id, ref):
@@ -1383,7 +1383,7 @@ class OdooCompanyWebhookTest(TestCase):
         self.assertEqual(response.json()['linked_tender'], 'HYPAX-000777')
         order = Order.objects.get(order_id=90005)
         self.assertEqual(order.tender, tender)
-        self.assertEqual(order.cargo_reference, 'HYPAX-000777')
+        self.assertEqual(order.trans_reference, 'HYPAX-000777')
 
     def test_webhook_aliases_truck_numbers(self):
         self._tender('REF-AL')
@@ -1455,7 +1455,7 @@ class OdooCompanyRoutingTest(TestCase):
         tender = self._tender(ref)
         order = Order.objects.create(
             order_id=order_id, order_name=f'ORD-{order_id}', user=self.owner, tender=tender,
-            company_id=2, company_name='Routing Co', cargo_reference=ref, state='confirmed',
+            company_id=2, company_name='Routing Co', trans_reference=ref, state='confirmed',
             amount_total=0, currency='TZS', odoo_company=company,
         )
         OrderLine.objects.create(
@@ -1469,7 +1469,7 @@ class OdooCompanyRoutingTest(TestCase):
             user=self.owner, route_loading='Nairobi', route_delivery='Mombasa',
             customer=f'C-{ref}', cargo_type=Tender.CargoType.DRY_VAN,
             truck_type=Tender.TruckType.TRUCK, weight=10.0, number_of_trucks=1,
-            distance_km=480, cargo_date=timezone.localdate(), cargo_reference=ref,
+            distance_km=480, cargo_date=timezone.localdate(), trans_reference=ref,
         )
 
     def test_award_confirmation_posts_to_order_company(self):
@@ -1584,7 +1584,7 @@ class ApiDiagnosticsTest(TestCase):
         ApiSetting.objects.create(base_url='https://diag.example.com/')
         order = Order.objects.create(
             order_id=99001, order_name='ORD-99001', user=self.user, state='draft',
-            amount_total=0, currency='TZS', cargo_reference='',
+            amount_total=0, currency='TZS', trans_reference='',
         )
         self._login(self.user)
         response = self.client.post(reverse('tenders:api_order_award', args=[order.pk]), {})
@@ -1601,11 +1601,11 @@ class ApiDiagnosticsTest(TestCase):
             user=self.user, route_loading='Nairobi', route_delivery='Mombasa',
             customer='DiagCo', cargo_type=Tender.CargoType.DRY_VAN,
             truck_type=Tender.TruckType.TRUCK, weight=10.0, number_of_trucks=1,
-            distance_km=480, cargo_date=timezone.localdate(), cargo_reference='REF-DIAG',
+            distance_km=480, cargo_date=timezone.localdate(), trans_reference='REF-DIAG',
         )
         order = Order.objects.create(
             order_id=99002, order_name='ORD-99002', user=self.user, state='draft',
-            tender=tender, cargo_reference='REF-DIAG', amount_total=0, currency='TZS',
+            tender=tender, trans_reference='REF-DIAG', amount_total=0, currency='TZS',
             odoo_company=self.company,
         )
         self._login(self.user)
@@ -1833,9 +1833,9 @@ class TenderBroadcastTest(TestCase):
         subs = tender.submissions.select_related('odoo_company').order_by('odoo_company__name')
         self.assertEqual(subs.count(), 2)
         self.assertTrue(all(s.success for s in subs))
-        self.assertEqual({s.cargo_reference for s in subs}, {'CAR0056'})
+        self.assertEqual({s.trans_reference for s in subs}, {'CAR0056'})
         self.assertEqual(subs.filter(odoo_company=second).count(), 1)
-        self.assertEqual(tender.cargo_reference, 'CAR0056')
+        self.assertEqual(tender.trans_reference, 'CAR0056')
 
     def test_tender_reference_generated_at_creation(self):
         with patch('tenders.views.submit_tender') as m:
@@ -1843,7 +1843,7 @@ class TenderBroadcastTest(TestCase):
         self.assertTrue(response.json()['needs_settings'])
         m.assert_not_called()
         tender = Tender.objects.get(customer='TransCo')
-        self.assertEqual(tender.cargo_reference, '')
+        self.assertEqual(tender.trans_reference, '')
         self.assertTrue(tender.reference.startswith(Tender.REFERENCE_PREFIX))
         self.assertEqual(
             tender.reference,
@@ -1883,7 +1883,7 @@ class TenderBroadcastTest(TestCase):
         tender.refresh_from_db()
         self.assertEqual(tender.reference, first)
 
-    def test_build_payload_sends_reference_as_cargo_reference(self):
+    def test_build_payload_sends_tender_reference_only(self):
         odoo = OdooCompany.objects.create(name='Lake Trans', base_url='https://lake.example.com')
         tender = Tender.objects.create(
             user=self.user, route_loading='Nairobi', route_delivery='Mombasa',
@@ -1898,7 +1898,7 @@ class TenderBroadcastTest(TestCase):
         self.assertTrue(ok)
         payload = m.call_args[0][1]
         self.assertEqual(payload['tender_reference'], tender.reference)
-        self.assertEqual(payload['cargo_reference'], tender.reference)
+        self.assertNotIn('cargo_reference', payload)
 
     def test_webhook_links_order_by_any_submission_reference(self):
         first = OdooCompany.objects.create(name='Lake Trans', base_url='https://lake.example.com')
@@ -1911,7 +1911,7 @@ class TenderBroadcastTest(TestCase):
         with patch('tenders.views.submit_tender', side_effect=send_tender):
             self._post_tender()
         tender = Tender.objects.get(customer='TransCo')
-        self.assertEqual(tender.cargo_reference, 'CAR0001')
+        self.assertEqual(tender.trans_reference, 'CAR0001')
         response = self.client.post(
             reverse('tenders:webhook_order_company', kwargs={'slug': second.slug}),
             json.dumps({
@@ -1924,7 +1924,65 @@ class TenderBroadcastTest(TestCase):
         self.assertEqual(response.json()['linked_tender'], tender.reference)
         order = Order.objects.get(order_id=55001)
         self.assertEqual(order.tender, tender)
-        self.assertEqual(order.cargo_reference, 'CAR0099')
+        self.assertEqual(order.trans_reference, 'CAR0099')
+
+    def test_webhook_links_order_by_tender_reference_and_stores_cargo_name(self):
+        odoo = OdooCompany.objects.create(name='Lake Trans', base_url='https://lake.example.com')
+        with patch('tenders.views.submit_tender',
+                   return_value=(200, '{"status":"success","data":{"id":1,"name":"CAR0001"}}', True)):
+            self._post_tender()
+        tender = Tender.objects.get(customer='TransCo')
+        response = self.client.post(
+            reverse('tenders:webhook_order_company', kwargs={'slug': odoo.slug}),
+            json.dumps({
+                'order_id': 55002, 'order_name': 'ORD-0002',
+                'tender_reference': tender.reference,
+                'cargo_name': 'TRANSPORTER-CARGO-2',
+                'amount_total': 900.0, 'currency': 'USD',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['linked_tender'], tender.reference)
+        self.assertEqual(response.json()['trans_reference'], 'TRANSPORTER-CARGO-2')
+        order = Order.objects.get(order_id=55002)
+        self.assertEqual(order.tender, tender)
+        self.assertEqual(order.trans_reference, 'TRANSPORTER-CARGO-2')
+
+    def test_webhook_keeps_transporter_orders_distinct_under_one_tender(self):
+        first = OdooCompany.objects.create(name='Alpha Haulage', base_url='https://alpha.example.com')
+        second = OdooCompany.objects.create(name='Beta Haulage', base_url='https://beta.example.com')
+        with patch('tenders.views.submit_tender',
+                   return_value=(200, '{"status":"success","data":{"id":1,"name":"CAR0001"}}', True)):
+            self._post_tender()
+        tender = Tender.objects.get(customer='TransCo')
+
+        def post(company, order_id, cargo_name, order_name):
+            return self.client.post(
+                reverse('tenders:webhook_order_company', kwargs={'slug': company.slug}),
+                json.dumps({
+                    'order_id': order_id, 'order_name': order_name,
+                    'tender_reference': tender.reference,
+                    'cargo_name': cargo_name,
+                    'amount_total': 800.0, 'currency': 'USD',
+                }),
+                content_type='application/json',
+            )
+
+        r1 = post(first, 55003, 'CAR-AAA', 'ORD-AAA')
+        r2 = post(second, 55003, 'CAR-BBB', 'ORD-BBB')
+        self.assertEqual(r1.status_code, 200)
+        self.assertEqual(r2.status_code, 200)
+        self.assertEqual(Order.objects.filter(order_id=55003).count(), 2)
+        by_company = {
+            o.odoo_company: o for o in Order.objects.filter(order_id=55003).select_related('odoo_company')
+        }
+        self.assertEqual(set(by_company), {first, second})
+        self.assertEqual(by_company[first].trans_reference, 'CAR-AAA')
+        self.assertEqual(by_company[first].order_name, 'ORD-AAA')
+        self.assertEqual(by_company[second].trans_reference, 'CAR-BBB')
+        self.assertEqual(by_company[second].order_name, 'ORD-BBB')
+        self.assertEqual({o.tender for o in by_company.values()}, {tender})
 
     def test_tender_success_when_any_transporter_succeeds(self):
         OdooCompany.objects.create(name='Down', base_url='https://down.example.com')
@@ -1942,7 +2000,7 @@ class TenderBroadcastTest(TestCase):
         self.assertTrue(response.json()['queued'])
         tender = Tender.objects.get(customer='TransCo')
         self.assertEqual(tender.status, Tender.Status.SUCCESS)
-        self.assertEqual(tender.cargo_reference, 'CAR0009')
+        self.assertEqual(tender.trans_reference, 'CAR0009')
         self.assertTrue(tender.submissions.filter(odoo_company=up, success=True).exists())
         self.assertTrue(tender.submissions.filter(odoo_company__name='Down', success=False).exists())
         self.assertEqual(tender.pending_pushes.filter(state='pending').count(), 1)
@@ -1972,7 +2030,9 @@ class TenderBroadcastTest(TestCase):
         self.assertTrue(response.json()['ok'])
         tender = Tender.objects.get(customer='TransCo')
         self.assertEqual(len(m.call_args_list), 2)
-        refs = {args[0][1]['cargo_reference'] for args in m.call_args_list}
+        for call in m.call_args_list:
+            self.assertNotIn('cargo_reference', call[0][1])
+        refs = {args[0][1]['tender_reference'] for args in m.call_args_list}
         self.assertEqual(refs, {tender.reference})
 
     def test_order_confirmation_uses_canonical_tender_reference(self):
@@ -1986,10 +2046,10 @@ class TenderBroadcastTest(TestCase):
         tender.ensure_reference()
         order = Order.objects.create(
             order_id=77001, order_name='ORD-77001', user=self.user, tender=tender,
-            company_id=1, company_name='Lake Trans', cargo_reference='CAR9999',
+            company_id=1, company_name='Lake Trans', trans_reference='CAR9999',
             state='confirmed', amount_total=0, currency='USD', odoo_company=odoo,
         )
-        self.assertNotEqual(tender.reference, order.cargo_reference)
+        self.assertNotEqual(tender.reference, order.trans_reference)
         with patch('tenders.views.submit_confirmation',
                    return_value=(200, '{"status":"success"}', True)) as m:
             response = self.client.post(reverse('tenders:api_order_award', args=[order.pk]), {})
@@ -2009,7 +2069,7 @@ class TenderBroadcastTest(TestCase):
         tender.ensure_reference()
         order = Order.objects.create(
             order_id=77002, order_name='ORD-77002', user=self.user, tender=tender,
-            company_id=1, company_name='Lake Trans', cargo_reference='CAR8888',
+            company_id=1, company_name='Lake Trans', trans_reference='CAR8888',
             state='confirmed', amount_total=0, currency='USD', odoo_company=odoo,
         )
         OrderLine.objects.create(
@@ -2110,7 +2170,7 @@ class PendingPushTest(TestCase):
         push.tender.refresh_from_db()
         self.assertEqual(push.tender.status, Tender.Status.SUCCESS)
         self.assertEqual(push.tender.external_id, 9)
-        self.assertEqual(push.tender.cargo_reference, 'CAR0009')
+        self.assertEqual(push.tender.trans_reference, 'CAR0009')
         self.assertTrue(push.tender.reference)
         self.assertEqual(
             push.tender.reference,

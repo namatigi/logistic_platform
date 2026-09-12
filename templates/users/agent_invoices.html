@@ -42,7 +42,7 @@
               <td><strong>{{ inv.number }}</strong></td>
               <td>{{ inv.transporter }}</td>
               <td>{{ inv.order_name }}</td>
-              <td>{{ inv.cargo_reference || '-' }}</td>
+              <td>{{ inv.trans_reference || '-' }}</td>
               <td>
                 <div v-for="t in inv.trucks" v-bind:key="t">{{ t }}</div>
                 <span v-if="!inv.trucks || !inv.trucks.length">-</span>

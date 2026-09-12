@@ -163,7 +163,7 @@ class EscrowAccountsTest(TestCase):
         )
         order = Order.objects.create(
             order_id=9001, order_name='ORD-9001', company_name='Transit Ltd',
-            amount_total=1000, currency='TZS', cargo_reference='CAR9001', tender=tender,
+            amount_total=1000, currency='TZS', trans_reference='CAR9001', tender=tender,
         )
         OrderLine.objects.create(order=order, line_id=1, product_name='Freight', quantity=1, price_unit=1000, price_total=1000, awarded=True)
         invoice = get_or_create_invoice(order)
@@ -186,7 +186,7 @@ class EscrowAccountsTest(TestCase):
         for offset, amount, company in ((9001, 500, 'Transit Ltd'), (9002, 700, 'Haulmax Ltd')):
             order = Order.objects.create(
                 order_id=offset, order_name=f'ORD-{offset}', company_name=company,
-                amount_total=amount, currency='TZS', cargo_reference='CAR9001', tender=tender,
+                amount_total=amount, currency='TZS', trans_reference='CAR9001', tender=tender,
             )
             OrderLine.objects.create(order=order, line_id=offset, product_name='Freight', quantity=1, price_unit=amount, price_total=amount, awarded=True)
             invoices.append(get_or_create_invoice(order))
@@ -225,6 +225,6 @@ class EscrowAccountsTest(TestCase):
         self.assertEqual(set(data['invoice_numbers']), {i.number for i in invoices})
         self.assertEqual(set(data['transporter_names']), {'Transit Ltd', 'Haulmax Ltd'})
         self.assertIn(',', data['transporter'])
-        self.assertEqual(data['cargo_reference'], 'CAR9001')
+        self.assertEqual(data['tender_reference'], 'CAR9001')
         self.assertEqual(data['status'], 'paid')
         self.assertEqual(data['trucks'], ['Freight'])

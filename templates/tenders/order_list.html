@@ -37,6 +37,7 @@
                   <th>Customer</th>
                   <th>TRANSPORTER</th>
                   <th>Tender</th>
+                  <th>Trans ref</th>
                   <th>Date</th>
                   <th>Amount</th>
                   <th>State</th>
@@ -55,6 +56,7 @@
                     <a v-if="o.tender_ref" v-bind:href="tenderListUrl">{{ o.tender_ref }}</a>
                     <span v-else style="color:#94a3b8;">not linked</span>
                   </td>
+                  <td>{{ o.trans_reference || '-' }}</td>
                   <td>{{ fmtDate(o.date_order) }}</td>
                   <td>
                     <strong>{{ money(o.amount_total, o.currency) }}</strong>
@@ -86,7 +88,7 @@
                   </td>
                 </tr>
                 <tr v-if="expandedId === o.id" class="order-detail-row">
-                  <td colspan="8" style="padding:0;">
+                  <td colspan="9" style="padding:0;">
                     <div v-if="detail(o)">
                       <div class="order-detail-summary">
                         <div>
