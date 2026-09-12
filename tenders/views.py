@@ -1556,6 +1556,26 @@ def api_order_pay(request, pk):
     return _confirm_invoice_paid(invoice)
 
 
+def _truck_quota_exceeded(order):
+    """Return an error message when a tender's awarded lines exceed its truck quota.
+
+    A tender needs a fixed number of trucks; each awarded order line represents
+    one quoted truck. When more lines are awarded across the whole tender than
+    the number of trucks needed, payment for any of its orders is blocked.
+    Returns None when the quota is fine (or there is nothing to compare).
+    """
+    tender = order.tender if order is not None else None
+    if tender is None or not tender.number_of_trucks:
+        return None
+    awarded = OrderLine.objects.filter(order__tender=tender, awarded=True).count()
+    if awarded > tender.number_of_trucks:
+        return (
+            f'Awarded trucks have exceeded the number of trucks needed '
+            f'({awarded} awarded, {tender.number_of_trucks} needed).'
+        )
+    return None
+
+
 @login_required
 def api_order_checkout(request, pk):
     if request.method != 'POST':
@@ -1563,6 +1583,9 @@ def api_order_checkout(request, pk):
     order = Order.objects.filter(pk=pk).first()
     if not _payment_order_in_scope(request, order):
         return JsonResponse({'ok': False, 'error': 'Order not found.'})
+    quota_error = _truck_quota_exceeded(order)
+    if quota_error:
+        return JsonResponse({'ok': False, 'error': quota_error})
     invoice = get_or_create_invoice(order)
     return _initiate_selcom(request, invoice)
 
@@ -2074,6 +2097,9 @@ def api_invoice_paid(request, pk):
     invoice = Invoice.objects.select_related('order__tender', 'transporter').filter(pk=pk).first()
     if invoice is None or not _payment_order_in_scope(request, invoice.order):
         return JsonResponse({'ok': False, 'error': 'Invoice not found.'}, status=404)
+    quota_error = _truck_quota_exceeded(invoice.order)
+    if quota_error:
+        return JsonResponse({'ok': False, 'error': quota_error})
     return _confirm_invoice_paid(invoice)
 
 

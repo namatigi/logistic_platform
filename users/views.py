@@ -35,6 +35,7 @@ from tenders.views import (
     _route_arrays,
     _platform_setting,
     _synthetic_invoice_dict,
+    _truck_quota_exceeded,
     get_or_create_invoice,
     get_route,
 )
@@ -481,6 +482,9 @@ def api_agent_invoice_paid(request, pk):
     order = Order.objects.filter(pk=pk).first()
     if order is None or not _agent_matches_order(request.user, order):
         return JsonResponse({'ok': False, 'error': 'Invoice not found.'}, status=404)
+    quota_error = _truck_quota_exceeded(order)
+    if quota_error:
+        return JsonResponse({'ok': False, 'error': quota_error})
     invoice = get_or_create_invoice(order)
     invoice.status = Invoice.Status.PAID
     invoice.save(update_fields=('status',))

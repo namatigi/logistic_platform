@@ -831,6 +831,83 @@ class InvoicesPageTest(TestCase):
         self.assertTrue(escrow.invoices.filter(pk=invoice.pk).exists())
 
 
+class TruckQuotaTest(TestCase):
+    """Payment must be blocked when a tender's awarded lines exceed its truck quota."""
+
+    def setUp(self):
+        self.user = CustomUser.objects.create_user(email='quota@example.com', password='pass1234')
+        self.client.login(email='quota@example.com', password='pass1234')
+
+    def _tender(self, trucks):
+        return Tender.objects.create(
+            user=self.user, route_loading='Nairobi', route_delivery='Mombasa',
+            customer='Quota Co', cargo_type=Tender.CargoType.DRY_VAN,
+            truck_type=Tender.TruckType.TRUCK, weight=10.0, number_of_trucks=trucks,
+            distance_km=480, cargo_date=timezone.localdate(),
+        )
+
+    def _order(self, tender, order_id, awarded_lines=1):
+        order = Order.objects.create(
+            order_id=order_id, order_name=f'ORD-{order_id}', user=self.user, tender=tender,
+            company_id=1, company_name='Alpha Haulage', state='confirmed',
+            amount_total=0, currency='USD',
+        )
+        for i in range(awarded_lines):
+            OrderLine.objects.create(
+                order=order, line_id=i + 1, product_name='Sand', quantity=1,
+                price_unit=100, commission=0, price_subtotal=100, price_total=100, awarded=True,
+            )
+        return order
+
+    def test_checkout_blocked_when_awarded_lines_exceed_trucks(self):
+        from tenders.models import Invoice
+        tender = self._tender(1)
+        order = self._order(tender, 7201, awarded_lines=2)
+        response = self.client.post(reverse('tenders:api_order_checkout', args=[order.pk]), {})
+        data = response.json()
+        self.assertFalse(data['ok'])
+        self.assertIn('exceeded the number of trucks needed', data['error'])
+        self.assertIn('(2 awarded, 1 needed)', data['error'])
+        self.assertFalse(Invoice.objects.filter(order=order).exists())
+
+    def test_checkout_allowed_within_quota(self):
+        from tenders.models import Invoice
+        tender = self._tender(2)
+        order = self._order(tender, 7202, awarded_lines=1)
+        ApiSetting.objects.create(selcom_enabled=True, selcom_client_id='c', selcom_client_secret='s')
+        with patch('tenders.views.selcom.create_checkout_order', return_value={
+            'order_token': 'tok-quota', 'pay_link': 'https://checkout/tok-quota',
+        }):
+            response = self.client.post(reverse('tenders:api_order_checkout', args=[order.pk]), {})
+        self.assertTrue(response.json()['ok'])
+        self.assertTrue(Invoice.objects.filter(order=order).exists())
+
+    def test_awarded_lines_across_all_orders_count_against_quota(self):
+        from tenders.models import Invoice
+        tender = self._tender(1)
+        self._order(tender, 7203, awarded_lines=1)
+        order_b = self._order(tender, 7204, awarded_lines=1)
+        response = self.client.post(reverse('tenders:api_order_checkout', args=[order_b.pk]), {})
+        data = response.json()
+        self.assertFalse(data['ok'])
+        self.assertIn('exceeded the number of trucks needed', data['error'])
+        self.assertFalse(Invoice.objects.filter(order=order_b).exists())
+
+    def test_invoice_paid_blocked_when_quota_exceeded(self):
+        from tenders.models import Invoice
+        tender = self._tender(1)
+        order = self._order(tender, 7205, awarded_lines=2)
+        invoice = Invoice.objects.create(
+            order=order, number='INV-7205', amount_total=200, status=Invoice.Status.PENDING,
+        )
+        response = self.client.post(reverse('tenders:api_invoice_paid', args=[invoice.pk]), {})
+        data = response.json()
+        self.assertFalse(data['ok'])
+        self.assertIn('exceeded the number of trucks needed', data['error'])
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.Status.PENDING)
+
+
 class DashboardRoleTest(TestCase):
     def test_agent_dashboard_hides_send_tender_buttons(self):
         agent = CustomUser.objects.create_user(
