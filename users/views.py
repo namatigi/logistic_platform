@@ -1,5 +1,6 @@
 import json
 import secrets
+from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from urllib.parse import urlencode
 
@@ -207,6 +208,9 @@ def _agent_dict(user):
         'last_name': user.last_name,
         'phone': profile.phone if profile else '',
         'bio': profile.bio if profile else '',
+        'id_type': profile.id_type if profile else '',
+        'id_number': profile.id_number if profile else '',
+        'commission': str(profile.agent_commission) if profile else '0',
         'picture': profile.profile_picture.url if (profile and profile.profile_picture) else '',
         'created_at': user.date_joined.isoformat(),
         'linked': sorted(user.linked_transporters.values_list('id', flat=True)),
@@ -256,6 +260,20 @@ def api_admin_agent_create(request):
         return JsonResponse({'ok': False, 'error': 'A user with that email already exists.'})
     if not password:
         password = secrets.token_urlsafe(8)
+    id_type = (request.POST.get('id_type') or '').strip()
+    valid_id_types = {code for code, _label in Profile.IdType.choices}
+    if id_type and id_type not in valid_id_types:
+        return JsonResponse({'ok': False, 'error': 'ID type must be Passport, NIDA or Driver License.'})
+    id_number = (request.POST.get('id_number') or '').strip()[:100]
+    commission_raw = request.POST.get('agent_commission')
+    agent_commission = Decimal('0')
+    if commission_raw is not None and str(commission_raw).strip():
+        try:
+            agent_commission = Decimal(str(commission_raw).strip())
+        except (InvalidOperation, ValueError):
+            return JsonResponse({'ok': False, 'error': 'Agent commission must be a number between 0 and 100.'})
+        if agent_commission < 0 or agent_commission > 100:
+            return JsonResponse({'ok': False, 'error': 'Agent commission must be between 0 and 100%.'})
     user = CustomUser.objects.create_user(
         email=email,
         password=password,
@@ -263,7 +281,11 @@ def api_admin_agent_create(request):
         last_name=last_name,
         role=CustomUser.Role.AGENT,
     )
-    profile = Profile.objects.create(user=user, phone=phone, bio=bio)
+    profile = Profile.objects.create(
+        user=user, phone=phone, bio=bio,
+        id_type=id_type, id_number=id_number,
+        agent_commission=agent_commission,
+    )
     uploaded = request.FILES.get('profile_picture')
     if uploaded:
         try:

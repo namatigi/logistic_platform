@@ -194,6 +194,26 @@
             <label>Phone</label>
             <input type="text" v-model.trim="agentForm.phone">
           </div>
+          <div class="form-row" style="grid-column: 1 / -1;">
+            <label>ID type</label>
+            <div class="inline-radios">
+              <label v-for="t in idTypes" v-bind:key="t.value" class="inline-radio">
+                <input type="radio" name="agent-id-type" v-bind:value="t.value" v-model="agentForm.idType">
+                <span>{{ t.label }}</span>
+              </label>
+            </div>
+            <div class="form-help">Select the government ID this agent holds.</div>
+          </div>
+          <div class="form-row">
+            <label>ID number</label>
+            <input type="text" v-model.trim="agentForm.idNumber" placeholder="e.g. 1982021-23A">
+          </div>
+          <div class="form-row">
+            <label>Agent commission (%)</label>
+            <input type="number" min="0" max="100" step="0.01" v-model="agentForm.commission"
+                   placeholder="0 - 100" title="Between 0 and 100%">
+            <div class="form-help">Percentage cut the agent earns, between 0 and 100.</div>
+          </div>
           <div class="form-row">
             <label>Password</label>
             <input type="text" v-model="agentForm.password" placeholder="Leave blank to auto-generate">
@@ -228,7 +248,8 @@
     var api = window.HYPAX.api;
 
     function blankAgent() {
-      return { first_name: '', last_name: '', email: '', phone: '', password: '', bio: '', picture: null };
+      return { first_name: '', last_name: '', email: '', phone: '', password: '', bio: '', picture: null,
+               idType: '', idNumber: '', commission: '' };
     }
 
     Vue.createApp({
@@ -241,6 +262,11 @@
           onlineUsers: [],
           offlineUsers: [],
           agentForm: blankAgent(),
+          idTypes: [
+            { value: 'passport', label: 'Passport' },
+            { value: 'nida', label: 'NIDA' },
+            { value: 'driver_license', label: 'Driver License' }
+          ],
           showForm: false,
           saving: false,
           createdPassword: '',
@@ -348,6 +374,14 @@
             self.error = 'Email and first name are required.';
             return;
           }
+          var comm = self.agentForm.commission;
+          if (comm !== '' && comm !== null && comm !== undefined) {
+            var cv = parseFloat(comm);
+            if (!isFinite(cv) || cv < 0 || cv > 100) {
+              self.error = 'Agent commission must be between 0 and 100%.';
+              return;
+            }
+          }
           self.saving = true;
           try {
             var fd = new FormData();
@@ -356,6 +390,9 @@
             fd.append('email', self.agentForm.email || '');
             fd.append('phone', self.agentForm.phone || '');
             fd.append('bio', self.agentForm.bio || '');
+            fd.append('id_type', self.agentForm.idType || '');
+            fd.append('id_number', self.agentForm.idNumber || '');
+            fd.append('agent_commission', comm === '' || comm === null || comm === undefined ? '0' : comm);
             if (self.agentForm.password) fd.append('password', self.agentForm.password);
             if (self.agentForm.picture) fd.append('profile_picture', self.agentForm.picture, self.agentForm.picture.name);
 

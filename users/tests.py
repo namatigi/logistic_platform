@@ -1,5 +1,6 @@
 from io import BytesIO
 import json
+from decimal import Decimal
 from unittest.mock import patch
 
 from PIL import Image
@@ -341,6 +342,43 @@ class AdminDashboardTest(TestCase):
         self.assertEqual(profile.phone, '+254 700 000 000')
         self.assertTrue(profile.profile_picture)
         self.assertTrue(data['password'])
+
+    def test_api_admin_agent_create_stores_id_and_commission(self):
+        response = self.client.post(reverse('users:api_admin_agent_create'), {
+            'first_name': 'Zainab',
+            'last_name': 'Hassan',
+            'email': 'zainab@example.com',
+            'id_type': 'nida',
+            'id_number': '1982021-23A',
+            'agent_commission': '12.5',
+        })
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['agent']['id_type'], 'nida')
+        self.assertEqual(data['agent']['id_number'], '1982021-23A')
+        self.assertEqual(data['agent']['commission'], '12.5')
+        profile = CustomUser.objects.get(email='zainab@example.com').profile
+        self.assertEqual(profile.id_type, 'nida')
+        self.assertEqual(profile.id_number, '1982021-23A')
+        self.assertEqual(profile.agent_commission, Decimal('12.5'))
+
+    def test_api_admin_agent_create_rejects_commission_out_of_range(self):
+        for bad in ['-1', '101', 'not-a-number']:
+            response = self.client.post(reverse('users:api_admin_agent_create'), {
+                'first_name': 'X',
+                'email': 'x-%s@example.com' % bad.replace('.', '').replace('-', ''),
+                'agent_commission': bad,
+            })
+            self.assertEqual(response.status_code, 200)
+            self.assertFalse(response.json()['ok'])
+
+    def test_api_admin_agent_create_rejects_invalid_id_type(self):
+        response = self.client.post(reverse('users:api_admin_agent_create'), {
+            'first_name': 'Y', 'email': 'y@example.com', 'id_type': 'birth_certificate',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()['ok'])
 
     def test_api_admin_agent_create_duplicate_email(self):
         CustomUser.objects.create_user(email='dup@example.com', password='pass1234')

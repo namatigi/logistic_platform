@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractUser
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
@@ -112,6 +113,11 @@ class Profile(models.Model):
         EXO_2 = 'exo_2', 'Exo 2'
         PLUS_JAKARTA = 'plus_jakarta', 'Plus Jakarta Sans'
 
+    class IdType(models.TextChoices):
+        PASSPORT = 'passport', 'Passport'
+        NIDA = 'nida', 'NIDA'
+        DRIVER_LICENSE = 'driver_license', 'Driver License'
+
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -120,6 +126,16 @@ class Profile(models.Model):
     bio = models.TextField(blank=True, default='', help_text='Short personal or company bio')
     profile_picture = models.ImageField(upload_to='profiles/', null=True, blank=True)
     phone = models.CharField(max_length=50, blank=True, default='')
+    id_type = models.CharField(
+        max_length=30, choices=IdType.choices, blank=True, default='',
+        help_text='Kind of government ID held by the account owner (e.g. NIDA).',
+    )
+    id_number = models.CharField(max_length=100, blank=True, default='', help_text='Government ID number')
+    agent_commission = models.DecimalField(
+        max_digits=5, decimal_places=2, default=0,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text='Agent commission percentage (0-100).',
+    )
     theme = models.CharField(
         max_length=20, choices=Theme.choices, default=Theme.SYSTEM,
         help_text='UI theme: follow the system, or force light/dark.',
