@@ -331,6 +331,58 @@ class EscrowAccountsTest(TestCase):
         self.assertEqual(data['status'], 'paid')
         self.assertEqual(data['trucks'], ['Freight'])
 
+    def test_escrow_summary_totals(self):
+        from tenders.views import get_or_create_invoice, _refresh_escrow
+        from tenders.models import Order, Tender, EscrowAccount, OrderLine, Invoice, Transporter
+        from users.models import Profile
+        agent = CustomUser.objects.create_user(
+            email='escrow-agent@example.com', password='pass1234', role=CustomUser.Role.AGENT,
+        )
+        Profile.objects.update_or_create(user=agent, defaults={'agent_commission': Decimal('10.00')})
+        trans = Transporter.objects.create(company_id=41, company_name='Escrow Haul', alias='EH')
+        trans.agents.add(agent)
+        tender = Tender.objects.create(
+            user=self.user, route_loading='Dar es Salaam', route_delivery='Mombasa',
+            customer='HYPAX', cargo_type='container_20', truck_type='trailer',
+            weight=10, number_of_trucks=1, distance_km=100, cargo_date='2026-09-01',
+        )
+        order = Order.objects.create(
+            order_id=9050, order_name='ORD-9050', company_name='Escrow Haul',
+            amount_total=1000, currency='USD', trans_reference='ESUM9050', tender=tender,
+        )
+        OrderLine.objects.create(
+            order=order, line_id=1, product_name='Freight', quantity=1,
+            price_unit=1000, commission=50, price_subtotal=1000, price_total=1000, awarded=True,
+        )
+        invoice = get_or_create_invoice(order)
+        invoice.deposited_amount = 1150
+        invoice.status = Invoice.Status.PAID
+        invoice.save(update_fields=('deposited_amount', 'status'))
+        escrow = EscrowAccount.objects.get(tender=tender)
+        _refresh_escrow(escrow)
+        escrow.refresh_from_db()
+        self.assertEqual(escrow.deposited_amount, 1150)
+
+        self.client.login(email='admin@example.com', password='pass1234')
+        data = self.client.get(reverse('tenders:api_admin_escrow')).json()
+        summary = data['summary']
+        self.assertEqual(summary['count'], 1)
+        self.assertEqual(len(summary['currencies']), 1)
+        row = summary['currencies'][0]
+        self.assertEqual(row['currency'], 'USD')
+        self.assertEqual(row['awarded_amount'], '1000.00')
+        self.assertEqual(row['hypax_commission'], '-135.00')
+        self.assertEqual(row['agent_commission'], '-15.00')
+        self.assertEqual(row['transporter_payout'], '1150.00')
+        self.assertEqual(row['deposited_amount'], '1150.00')
+        self.assertEqual(row['balance'], '150.00')
+
+    def test_escrow_summary_empty_without_accounts(self):
+        self.client.login(email='admin@example.com', password='pass1234')
+        data = self.client.get(reverse('tenders:api_admin_escrow')).json()
+        self.assertEqual(data['summary']['count'], 0)
+        self.assertEqual(data['summary']['currencies'], [])
+
     def test_escrow_transporters_come_from_invoices_and_self_heal(self):
         from tenders.views import get_or_create_invoice, _refresh_escrow
         from tenders.models import Order, Tender, EscrowAccount, OrderLine, Invoice

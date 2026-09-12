@@ -2147,6 +2147,65 @@ def _escrow_dict(escrow):
     }
 
 
+def _escrow_invoice_commission(inv):
+    """Commission numbers for one escrow invoice (agent = first linked agent)."""
+    agents = list(inv.transporter.agents.all()) if inv.transporter_id else []
+    first_agent = min(agents, key=lambda a: a.pk) if agents else None
+    lines = list(inv.order.lines.all()) if inv.order_id else []
+    if inv.order_id:
+        return _agent_order_commission(inv.order, agent=first_agent, lines=lines)
+    return _agent_order_commission(inv.order, agent=None, lines=[])
+
+
+def _escrow_summary(accounts):
+    """Aggregate awarded/deposited/commission/payout totals across escrow accounts.
+
+    Ret urns a dict keyed by currency so mixed-currency ledgers stay correct. The
+    transporter payout is the awarded total minus both commissions (equivalently
+    the invoice total); ``balance`` reconciles it against deposits (both of the
+    above): deposited - HYPAX - agent - payout.
+    """
+    buckets = {}
+    count = 0
+    for escrow in accounts:
+        invoices = list(escrow.invoices.all())
+        if not invoices:
+            continue
+        currency = invoices[0].currency or 'TZS'
+        bucket = buckets.setdefault(currency, {
+            'currency': currency,
+            'awarded_amount': Decimal('0.00'),
+            'hypax_commission': Decimal('0.00'),
+            'agent_commission': Decimal('0.00'),
+            'transporter_payout': Decimal('0.00'),
+            'deposited_amount': Decimal('0.00'),
+        })
+        count += 1
+        bucket['deposited_amount'] += escrow.deposited_amount or Decimal('0.00')
+        for inv in invoices:
+            commission = _escrow_invoice_commission(inv)
+            bucket['awarded_amount'] += commission['awarded_total']
+            bucket['hypax_commission'] += commission['hypax_commission']
+            bucket['agent_commission'] += commission['agent_commission_amount']
+            bucket['transporter_payout'] += commission['invoice_total']
+    currencies = []
+    for currency, b in buckets.items():
+        hypax = b['hypax_commission'].quantize(Decimal('0.01'))
+        agent = b['agent_commission'].quantize(Decimal('0.01'))
+        payout = b['transporter_payout'].quantize(Decimal('0.01'))
+        deposited = b['deposited_amount'].quantize(Decimal('0.01'))
+        currencies.append({
+            'currency': currency,
+            'awarded_amount': str(b['awarded_amount'].quantize(Decimal('0.01'))),
+            'hypax_commission': str(hypax),
+            'agent_commission': str(agent),
+            'transporter_payout': str(payout),
+            'deposited_amount': str(deposited),
+            'balance': str((deposited - hypax - agent - payout).quantize(Decimal('0.01'))),
+        })
+    return {'count': count, 'currencies': currencies}
+
+
 def _company_for_order(order):
     if order.customer:
         company = Company.objects.filter(name=order.customer).first()
@@ -2458,10 +2517,20 @@ def api_admin_escrow(request):
         )
         .filter(_total_invoices__gt=0, _pending_invoices=0)
         .select_related('tender', 'user', 'payment_terms')
-        .prefetch_related('invoices__order__tender', 'invoices__transporter', 'transporters')
+        .prefetch_related(
+            'invoices__order__tender',
+            'invoices__order__lines',
+            'invoices__transporter__agents__profile',
+            'transporters',
+        )
         .order_by('-created_at')
     )
-    return JsonResponse({'ok': True, 'escrow_accounts': [_escrow_dict(a) for a in accounts]})
+    listed = list(accounts)
+    return JsonResponse({
+        'ok': True,
+        'escrow_accounts': [_escrow_dict(a) for a in listed],
+        'summary': _escrow_summary(listed),
+    })
 
 
 @login_required

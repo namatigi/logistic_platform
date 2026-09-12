@@ -15,6 +15,42 @@
     {% verbatim %}
     <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
 
+    <div class="card" v-if="summary.currencies.length" style="margin-bottom:24px;">
+      <div style="font-size:13px; color:var(--muted); margin-bottom:12px;">
+        <strong>Escrow summary</strong>
+        <span style="margin-left:8px;">{{ summary.count }} account(s) &middot; totals by currency</span>
+      </div>
+      <div v-for="c in summary.currencies" v-bind:key="c.currency" style="margin-bottom:8px;">
+        <div class="comm-breakdown">
+          <div style="font-size:13px; color:var(--muted); margin-bottom:8px;"><strong>{{ c.currency }} summary</strong></div>
+          <div class="breakdown-row">
+            <span>Awarded orders amount</span>
+            <span>{{ money(c.awarded_amount, c.currency) }}</span>
+          </div>
+          <div class="breakdown-row">
+            <span>Amount deposited</span>
+            <span>{{ money(c.deposited_amount, c.currency) }}</span>
+          </div>
+          <div class="breakdown-row">
+            <span>HYPAX commission</span>
+            <span>{{ money(c.hypax_commission, c.currency) }}</span>
+          </div>
+          <div class="breakdown-row">
+            <span>Agent commission</span>
+            <span>{{ money(c.agent_commission, c.currency) }}</span>
+          </div>
+          <div class="breakdown-row breakdown-total">
+            <span>Transporter payout (awarded &minus; HYPAX &minus; agent)</span>
+            <span>{{ money(c.transporter_payout, c.currency) }}</span>
+          </div>
+          <div class="breakdown-row">
+            <span>Balance (deposited &minus; HYPAX &minus; agent &minus; payout)</span>
+            <span>{{ money(c.balance, c.currency) }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <div class="table-wrap" v-if="accounts.length">
         <table>
@@ -90,7 +126,7 @@
 
     Vue.createApp({
       data: function () {
-        return { accounts: [], error: '', loaded: false };
+        return { accounts: [], error: '', loaded: false, summary: { count: 0, currencies: [] } };
       },
       created: function () { this.load(); },
       methods: {
@@ -107,6 +143,7 @@
             var res = await api.get(root.dataset.url);
             if (res && res.ok === false) { self.error = res.error || 'Failed to load escrow accounts.'; return; }
             self.accounts = (res && res.escrow_accounts) || [];
+            self.summary = (res && res.summary) || { count: 0, currencies: [] };
           } catch (e) {
             self.error = e.message;
           } finally {
