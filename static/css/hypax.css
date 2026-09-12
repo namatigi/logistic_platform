@@ -1582,6 +1582,27 @@ html[data-theme='dark'] .users-summary {
   box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.15);
 }
 
+.terms-builder-row .terms-percent-input {
+  flex: 0 0 80px;
+  min-width: 0;
+  text-align: center;
+}
+
+.payterm-item-split {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.payterm-percent {
+  flex: 0 0 auto;
+  min-width: 44px;
+  text-align: right;
+  font-weight: 700;
+  color: var(--brand);
+}
+
 .payterm-items {
   list-style: none;
   margin: 8px 0 0;

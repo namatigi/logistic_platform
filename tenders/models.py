@@ -159,6 +159,10 @@ class PaymentTermItem(models.Model):
         PaymentTerm, on_delete=models.CASCADE, related_name='items',
         help_text='Payment term this individual term belongs to.',
     )
+    percent = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text='Percentage value for this term detail (e.g. 50 for a 50% advance).',
+    )
     text = models.CharField(max_length=300, help_text='A single term detail, e.g. 50% advance on confirmation.')
     sort_order = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)

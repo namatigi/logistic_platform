@@ -5,7 +5,7 @@ import math
 import re
 import time
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 import requests as http
 from channels.layers import get_channel_layer
@@ -1972,7 +1972,7 @@ def _payment_term_dict(term):
         'description': term.description,
         'is_active': term.is_active,
         'items': [
-            {'id': item.pk, 'text': item.text}
+            {'id': item.pk, 'percent': item.percent, 'text': item.text}
             for item in term.items.order_by('sort_order', 'created_at')
         ],
         'created_at': term.created_at.isoformat() if term.created_at else None,
@@ -2187,18 +2187,33 @@ def api_payment_term_create(request):
     })
 
 
+def _parse_percent(raw):
+    """Parse a term-detail percentage (0-100). Returns None when absent or invalid."""
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        value = int(Decimal(str(raw).strip()))
+    except (TypeError, ValueError, InvalidOperation):
+        return None
+    if not 0 <= value <= 100:
+        return None
+    return value
+
+
 def _create_payment_term_items(term, raw_items):
     sort = 0
     if isinstance(raw_items, (list, tuple)):
         for raw in raw_items:
             text = ''
+            percent = None
             if isinstance(raw, dict):
                 text = str(raw.get('text') or '').strip()
+                percent = _parse_percent(raw.get('percent'))
             elif isinstance(raw, str):
                 text = raw.strip()
             if not text:
                 continue
-            term.items.create(text=text[:300], sort_order=sort)
+            term.items.create(text=text[:300], percent=percent, sort_order=sort)
             sort += 1
 
 
@@ -2214,11 +2229,15 @@ def api_payment_term_add_item(request, pk):
         return JsonResponse({'ok': False, 'error': 'Term detail text is required.'})
     last = term.items.order_by('-sort_order').first()
     sort = (last.sort_order + 1) if last else 0
-    item = term.items.create(text=text[:300], sort_order=sort)
+    item = term.items.create(
+        text=text[:300],
+        percent=_parse_percent(body.get('percent')),
+        sort_order=sort,
+    )
     return JsonResponse({
         'ok': True,
         'message': 'Term detail added.',
-        'item': {'id': item.pk, 'text': item.text},
+        'item': {'id': item.pk, 'percent': item.percent, 'text': item.text},
         'payment_term': _payment_term_dict(term),
     })
 
