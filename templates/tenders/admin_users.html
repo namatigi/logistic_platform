@@ -5,15 +5,17 @@
   <div class="page-header">
     <div>
       <h1 class="page-title">Users</h1>
-      <p class="page-subtitle">Accounts on the platform and who is online right now.</p>
+      <p class="page-subtitle">Accounts on the platform, who is online right now, and password management.</p>
     </div>
   </div>
 
   <div id="users-app"
        data-url="{% url 'tenders:api_admin_users' %}"
+       data-password-base="{% url 'tenders:api_admin_user_password' 0 %}"
        v-cloak>
     {% verbatim %}
     <div class="alert alert-error" v-if="error" style="margin-bottom:16px;">{{ error }}</div>
+    <div class="alert alert-success" v-if="notice" style="margin-bottom:16px;">{{ notice }}</div>
 
     <div class="stat-row" v-if="loaded">
       <div class="stat">
@@ -31,6 +33,7 @@
         <table>
           <thead>
             <tr>
+              <th style="width:32px;"></th>
               <th>User</th>
               <th>Role</th>
               <th>Phone</th>
@@ -39,20 +42,78 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="u in users" v-bind:key="u.id">
-              <td>
-                <strong>{{ u.full_name }}</strong>
-                <div style="color:var(--muted); font-size:13px;">{{ u.email }}</div>
-              </td>
-              <td><span class="badge badge-info">{{ u.role_label }}</span></td>
-              <td>{{ u.phone || '-' }}</td>
-              <td>{{ u.last_login ? fmtDate(u.last_login) : '-' }}</td>
-              <td>
-                <span class="badge" :class="u.is_online ? 'badge-success' : 'badge-muted'">
-                  {{ u.is_online ? 'Online' : (u.is_active ? 'Offline' : 'Disabled') }}
-                </span>
-              </td>
-            </tr>
+            <template v-for="u in users" v-bind:key="u.id">
+              <tr class="clickable-row" @click="toggle(u.id)">
+                <td>
+                  <span class="expand-chevron" v-bind:class="{ open: expanded === u.id }">&#9654;</span>
+                </td>
+                <td>
+                  <strong>{{ u.full_name }}</strong>
+                  <div style="color:var(--muted); font-size:13px;">{{ u.email }}</div>
+                </td>
+                <td><span class="badge badge-info">{{ u.role_label }}</span></td>
+                <td>{{ u.phone || '-' }}</td>
+                <td>{{ u.last_login ? fmtDate(u.last_login) : '-' }}</td>
+                <td>
+                  <span class="badge" :class="u.is_online ? 'badge-success' : 'badge-muted'">
+                    {{ u.is_online ? 'Online' : (u.is_active ? 'Offline' : 'Disabled') }}
+                  </span>
+                </td>
+              </tr>
+              <tr v-if="expanded === u.id" class="order-detail-row">
+                <td colspan="6" style="padding:0;">
+                  <div style="padding:16px; display:flex; flex-wrap:wrap; gap:28px;" @click.stop>
+                    <div style="display:flex; flex-direction:column; gap:8px; min-width:280px;">
+                      <div class="detail-label">Contact information</div>
+                      <div>
+                        <span class="detail-label">Email</span>
+                        <div><strong>{{ u.email }}</strong></div>
+                      </div>
+                      <div>
+                        <span class="detail-label">First name</span>
+                        <div><strong>{{ u.first_name || '-' }}</strong></div>
+                      </div>
+                      <div>
+                        <span class="detail-label">Last name</span>
+                        <div><strong>{{ u.last_name || '-' }}</strong></div>
+                      </div>
+                      <div>
+                        <span class="detail-label">Phone</span>
+                        <div><strong>{{ u.phone || '-' }}</strong></div>
+                      </div>
+                      <div>
+                        <span class="detail-label">Role</span>
+                        <div><span class="badge badge-info">{{ u.role_label }}</span></div>
+                      </div>
+                      <div>
+                        <span class="detail-label">Joined</span>
+                        <div>{{ fmtDate(u.date_joined) }}</div>
+                      </div>
+                    </div>
+
+                    <div style="flex:1; min-width:280px;">
+                      <div class="detail-label" style="margin-bottom:8px;">Change password</div>
+                      <div class="alert alert-error" v-if="pwErrors[u.id]" style="margin-bottom:8px;">
+                        <ul style="margin:0; padding-left:16px;">
+                          <li v-for="err in pwErrors[u.id]">{{ err }}</li>
+                        </ul>
+                      </div>
+                      <div style="display:flex; flex-direction:column; gap:8px; max-width:360px;">
+                        <input type="password" v-model="pw[u.id].new" placeholder="New password"
+                               :disabled="pwBusy === u.id" @keyup.enter="savePassword(u)">
+                        <input type="password" v-model="pw[u.id].confirm" placeholder="Confirm new password"
+                               :disabled="pwBusy === u.id" @keyup.enter="savePassword(u)">
+                        <button type="button" class="btn btn-primary"
+                                :disabled="pwBusy === u.id" @click="savePassword(u)">
+                          <span v-if="pwBusy === u.id">Saving...</span>
+                          <span v-else>Set new password</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            </template>
           </tbody>
         </table>
       </div>
@@ -74,7 +135,10 @@
 
     Vue.createApp({
       data: function () {
-        return { users: [], error: '', loaded: false, timer: null };
+        return {
+          users: [], error: '', notice: '', loaded: false, timer: null,
+          expanded: null, pw: {}, pwErrors: {}, pwBusy: null
+        };
       },
       computed: {
         onlineCount: function () {
@@ -100,6 +164,37 @@
             self.error = e.message;
           } finally {
             self.loaded = true;
+          }
+        },
+        toggle: function (id) {
+          this.expanded = this.expanded === id ? null : id;
+          if (this.expanded === id && !this.pw[id]) {
+            this.$set(this.pw, id, { new: '', confirm: '' });
+          }
+        },
+        savePassword: async function (u) {
+          var self = this;
+          self.error = '';
+          self.notice = '';
+          self.pwErrors = {};
+          var entry = self.pw[u.id] || {};
+          if (!entry.new) { self.$set(self.pwErrors, u.id, ['Enter a new password.']); return; }
+          if (entry.new !== entry.confirm) { self.$set(self.pwErrors, u.id, ['Passwords do not match.']); return; }
+          self.pwBusy = u.id;
+          try {
+            var base = root.dataset.passwordBase;
+            var url = base.replace('0', u.id);
+            var res = await HY.api.post(url, { password: entry.new });
+            if (res && res.ok === false) {
+              self.$set(self.pwErrors, u.id, res.errors || [res.error || 'Password could not be changed.']);
+              return;
+            }
+            self.notice = (res && res.message) || 'Password updated.';
+            self.$set(self.pw, u.id, { new: '', confirm: '' });
+          } catch (e) {
+            self.$set(self.pwErrors, u.id, [e.message]);
+          } finally {
+            self.pwBusy = null;
           }
         }
       }

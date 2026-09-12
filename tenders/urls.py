@@ -30,6 +30,7 @@ urlpatterns = [
     path('api/admin/escrow/', views.api_admin_escrow, name='api_admin_escrow'),
     path('users/', views.admin_users, name='admin_users'),
     path('api/admin/users/', views.api_admin_users, name='api_admin_users'),
+    path('api/admin/users/<int:user_id>/password/', views.api_admin_user_password, name='api_admin_user_password'),
     path('diagnostics/', views.admin_diagnostic, name='admin_diagnostic'),
     path('api/admin/diagnostics/', views.api_admin_diagnostic, name='api_admin_diagnostic'),
     path('configuration/odoo/', views.config_odoo, name='config_odoo'),

@@ -13,10 +13,11 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import transaction
 from django.db.models import Q, Sum, Count
 from django.core.cache import cache
-from django.core.exceptions import ObjectDoesNotExist
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
@@ -2298,6 +2299,35 @@ def api_admin_users(request):
         'online_count': sum(1 for user in users if user['is_online']),
         'total_count': len(users),
         'users': users,
+    })
+
+
+@login_required
+@_admin_required
+@require_POST
+def api_admin_user_password(request, user_id):
+    """Reset a platform user's password on behalf of an administrator."""
+    target = CustomUser.objects.filter(pk=user_id).first()
+    if target is None:
+        return JsonResponse({'ok': False, 'error': 'User not found.'}, status=404)
+    raw = request.POST.get('password')
+    if raw is None:
+        try:
+            raw = json.loads(request.body or b'{}').get('password')
+        except (ValueError, TypeError):
+            raw = None
+    if not raw:
+        return JsonResponse({'ok': False, 'error': 'A new password is required.'}, status=400)
+    try:
+        validate_password(raw, user=target)
+    except ValidationError as exc:
+        return JsonResponse({'ok': False, 'errors': list(exc.messages), 'error': exc.messages[0]}, status=400)
+    target.set_password(raw)
+    target.save(update_fields=['password'])
+    return JsonResponse({
+        'ok': True,
+        'message': f'Password for {target.email} updated.',
+        'user': _admin_user_dict(target, _online_user_ids(), request=request),
     })
 
 

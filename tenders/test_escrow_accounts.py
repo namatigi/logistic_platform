@@ -56,12 +56,43 @@ class EscrowAccountsTest(TestCase):
         self.assertEqual(users['admin@example.com']['role_label'], 'Administrator')
         self.assertTrue(users['admin@example.com']['is_online'])
         self.assertEqual(users['user@example.com']['role_label'], 'User')
+        self.assertIn('first_name', users['user@example.com'])
+        self.assertIn('last_name', users['user@example.com'])
+        self.assertIn('phone', users['user@example.com'])
 
     def test_admin_users_requires_admin(self):
         res = self.client.get(reverse('tenders:admin_users'))
         self.assertEqual(res.status_code, 302)
         self.client.login(email='user@example.com', password='pass1234')
         res = self.client.get(reverse('tenders:api_admin_users'))
+        self.assertEqual(res.status_code, 302)
+
+    def test_admin_change_password(self):
+        self.client.login(email='admin@example.com', password='pass1234')
+        url = reverse('tenders:api_admin_user_password', args=[self.user.pk])
+        res = self.client.post(url, {'password': 'Br4ndNew!Pass'}, content_type='application/json')
+        self.assertEqual(res.status_code, 200, res.content)
+        data = res.json()
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['user']['email'], 'user@example.com')
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('Br4ndNew!Pass'))
+
+    def test_admin_change_password_rejects_missing(self):
+        self.client.login(email='admin@example.com', password='pass1234')
+        url = reverse('tenders:api_admin_user_password', args=[self.user.pk])
+        res = self.client.post(url, {}, content_type='application/json')
+        self.assertEqual(res.status_code, 400)
+        self.assertFalse(res.json()['ok'])
+
+    def test_admin_change_password_unknown_user(self):
+        self.client.login(email='admin@example.com', password='pass1234')
+        res = self.client.post(reverse('tenders:api_admin_user_password', args=[99999]), {'password': 'x'})
+        self.assertEqual(res.status_code, 404)
+
+    def test_admin_change_password_requires_admin(self):
+        self.client.login(email='user@example.com', password='pass1234')
+        res = self.client.post(reverse('tenders:api_admin_user_password', args=[self.admin.pk]), {'password': 'x'})
         self.assertEqual(res.status_code, 302)
 
     def test_payment_term_not_owned(self):

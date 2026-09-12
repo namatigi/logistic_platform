@@ -609,6 +609,25 @@ html[data-theme='dark'] .user-menu-form button:hover {
   background: #f8fafc;
 }
 
+.clickable-row {
+  cursor: pointer;
+}
+
+.clickable-row:hover {
+  background-color: var(--hover, #f1f5f9);
+}
+
+.expand-chevron {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.expand-chevron.open {
+  transform: rotate(90deg);
+}
+
 .order-detail-summary {
   display: flex;
   flex-wrap: wrap;
