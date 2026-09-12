@@ -1972,3 +1972,37 @@ html[data-theme='dark'] .search-box input.search-input {
   color: var(--text);
   margin-top: 4px;
 }
+
+.comm-breakdown {
+  margin-top: 16px;
+  padding: 14px 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 0;
+  font-size: 13.5px;
+  color: var(--text);
+}
+
+.breakdown-row > span:first-child {
+  color: var(--muted);
+}
+
+.breakdown-total {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding-top: 8px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.breakdown-total > span:first-child {
+  color: var(--text);
+  font-weight: 600;
+}

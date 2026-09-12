@@ -2422,6 +2422,10 @@ def admin_escrow_detail(request, pk):
             'transporter_name': transporter_name or '-',
             'invoice_total': invoice_total,
             'awarded_total': awarded_total,
+            'unit_total': unit_total,
+            'commission_total': commission_total,
+            'vat_total': vat_total,
+            'hypax_vat': (vat_total - agent_vat).quantize(Decimal('0.01')),
             'deposited_amount': inv.deposited_amount or Decimal('0.00'),
             'status': inv.status,
             'status_label': inv.get_status_display(),
@@ -2429,6 +2433,8 @@ def admin_escrow_detail(request, pk):
             'hypax_commission': hypax_commission,
             'agent_name': agent_name,
             'agent_commission_rate': agent_commission_rate,
+            'agent_pool_share': agent_pool_share,
+            'agent_vat': agent_vat,
             'agent_commission_amount': agent_commission_amount,
         })
 
